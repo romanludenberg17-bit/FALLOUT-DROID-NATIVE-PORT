@@ -90,5 +90,10 @@ p1 = mix(10)                                   # 100 ms: plays 50 ms then finish
 v2 = guest_play()                              # UI click again on the same buffer
 p2 = mix(3)
 check('E2E: first Play is audible', v1 >= 1 and p1 > 0.2, f'voice+1={v1} peak={p1:.3f}')
+vl = [p for p in e.prints if p.startswith(b'[dsnd] vol')]
+check('E2E: post-Play volume/data log', len(vl) == 2, str(vl[:1]))
+va = [a for a in e.pargs if a[0].startswith(b'[dsnd] vol')]
+r, d = va[0][1], va[0][2]
+check('E2E: datapeak = real PCM peak, gains = 1.0, setvol 0', r[5] in (16383, 16384) and abs(d[0] - 1) < 1e-6 and abs(d[1] - 1) < 1e-6 and r[2] == 0, f'peak={r[5]} gains={d[0]:.3f}/{d[1]:.3f}')
 check('E2E: replay of finished one-shot is audible', v2 >= 1 and p2 > 0.2, f'voice+1={v2} peak={p2:.3f}')
 print('ALL PASS' if ok else 'SOME TESTS FAILED'); sys.exit(0 if ok else 1)

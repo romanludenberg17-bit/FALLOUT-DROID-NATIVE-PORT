@@ -17,6 +17,7 @@
 //   +0x20 u32 reclaims   finished one-shot voices reclaimed on full pool
 //   +0x24 u32 nplaylog   "[dsnd] play" lines printed
 //   +0x28 u32 nfaillog   "[dsnd] FAIL" lines printed
+//   +0x2c u32 nvollog    "[dsnd] vol" lines printed
 //   +0x40 u32 owner[256] guest IDirectSoundBuffer that owns voice i
 
     .text
@@ -543,6 +544,97 @@ trace_post:
 8:  ldp     x29, x30, [sp], #16
 9:  ret
 
+
+// ---------------------------------------------------------------------------
+// STUB 9: post-Play volume/data diagnostics.  Hooked at 0x5413d7c
+// (bl dsound_update_volume(obj) right after a new voice is created in Play).
+// Logs (first 128 times) the final voice gains, SetVolume/SetPan values,
+// buffer flags | 3D mode << 24, the peak |sample| of the buffer DATA at Play
+// time (0 => buffer is silent) and the global DistanceFactor / Rolloff.
+// ---------------------------------------------------------------------------
+    .globl stub_postplay
+stub_postplay:
+    stp     x29, x30, [sp, #-64]!
+    mov     x29, sp
+    stp     x19, x20, [sp, #16]
+    stp     x21, x22, [sp, #32]
+    stp     x23, x24, [sp, #48]
+    mov     w19, w0
+    bl      UPDATE_VOLUME
+    adrp    x21, STATE
+    add     x21, x21, :lo12:STATE
+    ldr     w8, [x21, #0x2c]
+    cmp     w8, #128
+    b.hs    .Lpp_ret
+    adrp    x20, GOT_GUESTMEM
+    ldr     x20, [x20, :lo12:GOT_GUESTMEM]
+    ldr     x20, [x20]                  // guest base
+    add     x22, x20, w19, uxtw         // host ptr to obj
+    ldr     w9, [x22, #0x24]
+    subs    w9, w9, #1
+    b.lt    .Lpp_ret
+    add     w8, w8, #1
+    str     w8, [x21, #0x2c]
+    mov     w23, w9                     // voice index
+    // peak of buffer data
+    ldr     w10, [x22, #0x10]           // data (guest)
+    ldr     w11, [x22, #0x0c]           // bytes
+    ldrh    w12, [x22, #0x3e]           // bits
+    add     x10, x20, w10, uxtw
+    mov     w24, #0
+    cmp     w12, #16
+    b.ne    3f
+    lsr     w11, w11, #1
+1:  cbz     w11, 5f
+    ldrsh   w13, [x10], #2
+    cmp     w13, #0
+    cneg    w13, w13, mi
+    cmp     w13, w24
+    csel    w24, w13, w24, gt
+    sub     w11, w11, #1
+    b       1b
+3:  cbz     w11, 5f
+    ldrb    w13, [x10], #1
+    subs    w13, w13, #128
+    cneg    w13, w13, mi
+    cmp     w13, w24
+    csel    w24, w13, w24, gt
+    sub     w11, w11, #1
+    b       3b
+5:  adrp    x8, VOICES
+    add     x8, x8, :lo12:VOICES
+    mov     x9, #0x58
+    madd    x8, x23, x9, x8
+    ldr     s0, [x8, #0x38]
+    fcvt    d0, s0
+    ldr     s1, [x8, #0x3c]
+    fcvt    d1, s1
+    adrp    x9, DS3D_DISTFACTOR
+    ldr     s2, [x9, :lo12:DS3D_DISTFACTOR]
+    fcvt    d2, s2
+    adrp    x9, DS3D_ROLLOFF
+    ldr     s3, [x9, :lo12:DS3D_ROLLOFF]
+    fcvt    d3, s3
+    adrp    x8, GOT_STDERR
+    ldr     x8, [x8, :lo12:GOT_STDERR]
+    ldr     x0, [x8]
+    adr     x1, str_ppvol
+    mov     w2, w19
+    mov     w3, w23
+    ldr     w4, [x22, #0x44]            // SetVolume (1/100 dB)
+    ldr     w5, [x22, #0x48]            // SetPan
+    ldr     w6, [x22, #0x18]            // DSBCAPS flags
+    ldr     w9, [x22, #0x64]            // 3D mode
+    orr     w6, w6, w9, lsl #24
+    mov     w7, w24                     // data peak
+    bl      fprintf
+.Lpp_ret:
+    ldp     x19, x20, [sp, #16]
+    ldp     x21, x22, [sp, #32]
+    ldp     x23, x24, [sp, #48]
+    ldp     x29, x30, [sp], #64
+    ret
+
 // ---------------------------------------------------------------------------
 // Constants & strings (inside the cave, reached with adr / ldr literal)
 // ---------------------------------------------------------------------------
@@ -561,6 +653,7 @@ str_vplay:        .asciz "[dsnd] play buf=%#x voice=%d ch=%d bits=%d hz=%d bytes
 str_vfail:        .asciz "[dsnd] FAIL voice for buf=%#x ch=%d bits=%d hz=%d bytes=%u\n"
 str_reclaim:      .asciz "[dsnd] voice pool full: reclaimed %d finished voices, retry -> %d\n"
 str_stats:        .asciz "[dsnd] stats: callbacks=%u creates=%u fails=%u reclaims=%u active=%d finished_held=%d peak=%.3f min_gain=%.3f\n"
+str_ppvol:        .asciz "[dsnd] vol buf=%#x voice=%d setvol=%d pan=%d flags=%#x datapeak=%d gainL=%.3f gainR=%.3f distf=%.4f rolloff=%.3f\n"
 str_aaudio_log:   .asciz "[audio] AAudio+lim %d Hz, burst %d, buffer %d\n"
     .globl fnvx_end
 fnvx_end:

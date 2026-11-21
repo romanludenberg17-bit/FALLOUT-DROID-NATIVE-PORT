@@ -51,7 +51,7 @@ class Emu:
         u.reg_write(UC_ARM64_REG_CPACR_EL1, 3 << 20)  # enable FP/SIMD
         u.mem_write(STR, b'/cache/fnv_pcm.fifo\0')
         self.fifo, self.epipe = fifo, epipe
-        self.writes, self.prints, self.calls, self.bad = [], [], [], []
+        self.writes, self.prints, self.calls, self.bad, self.pargs = [], [], [], [], []
         self.h_plt = u.hook_add(UC_HOOK_CODE, self.plt_hook, begin=0x54be0d0, end=0x54c0d80)
         u.hook_add(UC_HOOK_INTR, self.svc)
         if guard_bss:
@@ -79,7 +79,10 @@ class Emu:
             self.ret(STR if (self.fifo and s == b'FNV_PCM_FIFO') else 0)
         elif n == 'open': self.ret(7)
         elif n == 'fprintf':
-            self.prints.append(uc.mem_read(x[1], 64).split(b'\0')[0]); self.ret(0)
+            self.prints.append(uc.mem_read(x[1], 64).split(b'\0')[0])
+            regs = [uc.reg_read(UC_ARM64_REG_X0 + i) & 0xffffffff for i in range(2, 8)]
+            dregs = [struct.unpack('<d', struct.pack('<Q', uc.reg_read(UC_ARM64_REG_D0 + i)))[0] for i in range(4)]
+            self.pargs.append((self.prints[-1], regs, dregs)); self.ret(0)
         elif n == 'dlsym': self.ret(0)
         else:
             raise RuntimeError('unexpected PLT call ' + name)

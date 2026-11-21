@@ -17,8 +17,8 @@ import json, lzma, os, shutil, struct, subprocess, sys, tempfile, zipfile
 from pathlib import Path
 
 # ---------------------------------------------------------------- version ----
-VERSION_NAME = "1.3.2"
-VERSION_CODE = 28
+VERSION_NAME = "1.3.3"
+VERSION_CODE = 29
 
 BASE = Path(__file__).resolve().parent
 WORK = BASE / "FalloutNVNativeWork"
@@ -47,6 +47,9 @@ SYMS = {                        # external symbols for the stubs (PLT / GOT / co
     "AAudioStreamBuilder_setPerformanceMode": 0x54BF080,
     "DSOUND_BUFFER_RESET": 0x5414110,     # IDirectSoundBuffer status sync (frees finished voice)
     "voice_create": 0x54125B0,
+    "UPDATE_VOLUME": 0x5414258,           # dsound_update_volume(obj)
+    "DS3D_DISTFACTOR": 0x559A498,         # listener DistanceFactor (float)
+    "DS3D_ROLLOFF": 0x559A49C,            # listener RolloffFactor (float)
     "VOICES": 0x58C5F18,                  # 256 x 0x58 mixer voices
     "GOT_STDERR": 0x5593190,
     "GOT_GUESTMEM": 0x55931A8,            # -> host base of guest memory
@@ -152,6 +155,7 @@ def patch_libfnv():
         (0x5413CC8, 0xF94002A8, "stub_play"),      # ldr x8, [x21]
         (0x5414434, 0x1E2E1000, "stub_pan"),       # fmov s0, #1.0
         (0x5413D64, enc_bl(0x5413D64, SYMS["voice_create"]), "stub_vcreate"),
+        (0x5413D7C, enc_bl(0x5413D7C, SYMS["UPDATE_VOLUME"]), "stub_postplay"),
         (0x53E4A50, enc_cbnz_w(0x53E4A50, 0x53E4A74, 8), "trace_pre"),     # FNV_TRACE filter
         (0x53E4A60, enc_cbnz_w(0x53E4A60, 0x53E4AC8, 8), "trace_post"),
     ]

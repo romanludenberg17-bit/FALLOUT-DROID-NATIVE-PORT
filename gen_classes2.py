@@ -1056,18 +1056,20 @@ def build_classes2(out_path):
         m_ns_exportlog = (C_SETUP, "exportLog", "V", (C_CTX,), 0x0009, 7, 1, 3, *a.finish())
 
         # NativeSetup.applyDebugEnv()V  regs=3, ins=0, outs=3
-        # /sdcard/FalloutDroidNV/trace_hle exists -> FNV_TRACE=1 (HLE API trace,
-        # filtered natively to audio calls) + FNV_TRACE_FILES=1 (file opens).
+        # Diagnostic build (1.3.3): FNV_TRACE=1 (HLE API trace, filtered natively
+        # to audio calls) + FNV_TRACE_FILES=1 (file opens) are ON unless
+        # /sdcard/FalloutDroidNV/notrace exists.
         a = Asm(S, T, F, M)
         a.label("de0")
         a.is_((C_ENV, "getExternalStorageDirectory", C_FILE, ()), )
         a.mro(0)
         a.new(1, C_FILE)
-        a.cs(2, "FalloutDroidNV/trace_hle")
+        a.cs(2, "FalloutDroidNV/notrace")
         a.id_((C_FILE, "<init>", "V", (C_FILE, C_STR)), 1, 0, 2)
         a.iv((C_FILE, "exists", "Z", ()), 1)
         a.mr(0)
-        a.if_eqz(0, "de_ret")
+        a.if_nez(0, "de_ret")
+        # TODO(release): diagnostic builds trace by default; make opt-in again
         a.cs(0, "FNV_TRACE")
         a.cs(1, "1")
         a.c4(2, 1)
