@@ -3,6 +3,27 @@
 Новый порт на базе открытого движка, отдельно от обёртки `libfnv.so` (Fallout Droid NV Native 1.3.x).
 Работа идёт итерациями, каждая заканчивается записью в этот файл.
 
+## Цель (уточнено 2026-11-21)
+Fallout Droid без Proton/Wine/FEX: одно Android-приложение, которое **нативно** запускает
+Fallout: New Vegas и Fallout 3, с дизайном Fallout Droid v1.1.85.
+
+### Что берём из Fallout Droid v1.1.85 (`com.rommy.falloutdroid`)
+- Pip-Boy лаунчер: `assets/ui/index.html` (385 КБ HTML/CSS/JS, WebView), шрифты
+  (FalloutGothic, Monofonto), `art/`, `loading/`, `pipboy_icons/`, `audio/` (ui_click,
+  city_of_ruin), трейлеры, `screenkeys/` и `controls/` (раскладки сенсорного управления).
+- Мост `falloutpicker://...` (play_, verify_fnv, folder_, setpath_, quality_*, res_*, mods_,
+  touch_cfg_, gamepad_editor, share_logs и др.) — переписываем на Kotlin/Java как
+  `@JavascriptInterface`, без hand-made DEX.
+- Не берём: linuxfs (Arch RootFS), FEX, Proton, DXVK, Turnip, PulseAudio, vkbridge, wayland,
+  Termux — всё это заменяет нативный движок.
+
+### Движок и Fallout 3
+- NVForever требует `FalloutNV.esm` (`crates/fnv-install`): Fallout 3 сейчас идёт только
+  через TTW (обе игры + установщик TTW). Самостоятельный запуск `Fallout3.esm` — отдельная
+  доработка движка (различия записей ESM 0.94/1.34, игровые правила FO3).
+- OpenNV: FO3 — «bounded Vault 101 opening work», кампания не полная.
+- Вывод: FNV — первым; FO3 — сначала через TTW-режим, затем самостоятельный профиль FO3.
+
 ## Этап 1 — аудит окружения и выбор базы (2026-11-21)
 
 ### Окружение (облачный контейнер этой сессии)
