@@ -124,6 +124,23 @@ Fallout: New Vegas и Fallout 3, с дизайном Fallout Droid v1.1.85.
 - APK 107 МБ, подписи v1+v2+v3 ключом Fallout Droid (`apksigner verify` OK), `lintVitalRelease` OK.
 - На устройстве **не проверено**: в контейнере нет KVM/adb.
 
+### Сборка 2.0.0-alpha2 (versionCode 301) — «Играть» ничего не запускало
+Причина: `GameActivity` (games-activity 4.4.2) наследует `AppCompatActivity`, а у
+`NativeGameActivity` была тема на базе `Theme.Material` → `IllegalStateException`
+(«You need to use a Theme.AppCompat theme») в `onCreate`, процесс падал вместе с лаунчером.
+Исправления:
+- `FdGameTheme` → `Theme.AppCompat.NoActionBar` (полноэкранная, чёрный фон, вырез экрана).
+- Игра в отдельном процессе `:game`: падение движка не роняет лаунчер; после выхода процесс
+  завершается (состояние Bevy/OnceLock не переживает повторный запуск).
+- Движок: stdout/stderr → `nvforever.log` **и** logcat (тег `NVForever`), `RUST_BACKTRACE=1`,
+  `catch_unwind` вокруг `main`, итог в `nvforever.exit` (`running`/`ok`/`error`/`panic`);
+  ошибка командной строки больше не вызывает `exit()` процесса.
+- Лаунчер: после возврата из игры читает `nvforever.exit` и показывает «Игра закрылась»
+  с причиной и концом лога; «Поделиться логами» отдаёт `fd_report.txt` (устройство, итог,
+  командная строка, `nvforever.log`, журнал запуска движка `home_*/logs`, crash-отчёт).
+- `build_engine.sh`: исходники NVForever по умолчанию в `../../refs` (а не `$HOME/refs`),
+  клон фиксируется на `a3e5406`, неприменившийся патч — ошибка, а не тихий пропуск.
+
 ### Следующий шаг
 Проверка на vivo I2508: лаунчер → выбор папки FNV → «Играть» → лог движка
 (`Android/data/com.rommy.falloutdroid.nativeport/files/nvforever.log`, кнопка «Поделиться логами»).

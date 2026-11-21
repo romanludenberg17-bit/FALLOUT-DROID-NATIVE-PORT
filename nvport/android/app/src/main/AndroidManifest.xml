@@ -48,6 +48,7 @@
 
         <!-- The game: GameActivity + libnvforever.so (NVForever engine, android_main). -->
         <activity android:name=".engine.NativeGameActivity" android:exported="false"
+            android:process=":game"
             android:theme="@style/FdGameTheme"
             android:screenOrientation="sensorLandscape"
             android:launchMode="singleTask"

@@ -28,7 +28,15 @@ public class NativeGameActivity extends GameActivity {
     @Override
     protected void onCreate(Bundle state) {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        super.onCreate(state);
+        try {
+            super.onCreate(state);
+        } catch (Throwable t) {
+            // libnvforever.so did not load or GameActivity failed: tell the launcher and leave.
+            writeExit("java " + android.util.Log.getStackTraceString(t));
+            android.util.Log.e("NVForever", "GameActivity.onCreate failed", t);
+            finish();
+            return;
+        }
         hideSystemBars();
         overlay = new ScreenKeysOverlay(this);
         addContentView(overlay, new FrameLayout.LayoutParams(
@@ -60,7 +68,25 @@ public class NativeGameActivity extends GameActivity {
     @Override
     protected void onDestroy() {
         if (gamepad != null) gamepad.stop();
+        boolean ending = isFinishing();
         super.onDestroy();
+        // The engine keeps process-wide state (Bevy, OnceLocks): a later start needs a fresh
+        // process. This one is the game's own (manifest: android:process=":game").
+        if (ending) {
+            android.util.Log.i("NVForever", "game activity finished: ending the game process");
+            android.os.Process.killProcess(android.os.Process.myPid());
+        }
+    }
+
+    private void writeExit(String text) {
+        try {
+            java.io.File ext = getExternalFilesDir(null);
+            if (ext == null) return;
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(new java.io.File(ext, FalloutEngine.EXIT_FILE))) {
+                out.write(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     private void hideSystemBars() {

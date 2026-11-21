@@ -3,15 +3,21 @@
 # Usage: nvport/build_engine.sh [refs dir]   -> nvport/android/app/src/main/jniLibs/arm64-v8a/
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
-REFS=${1:-$HOME/refs}
+REFS=${1:-$(cd "$HERE/../.." && pwd)/refs}
+NVF_COMMIT=a3e5406
 NVF=$REFS/NVForever
 NDK=${ANDROID_NDK_HOME:-/opt/android-sdk/ndk/29.0.14206865}
 TC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin
 API=29
-[ -d "$NVF/.git" ] || git clone -q https://github.com/LootJunkieAzza/NVForever "$NVF"
-# apply our patches once (idempotent: skip if already applied)
+if [ ! -d "$NVF/.git" ]; then
+  git clone -q https://github.com/LootJunkieAzza/NVForever "$NVF"
+  git -C "$NVF" checkout -q "$NVF_COMMIT"
+fi
+# apply our patches once: applied now, already applied, or stop
 for p in "$HERE"/patches/nvforever/*.patch; do
-  if git -C "$NVF" apply --check "$p" 2>/dev/null; then git -C "$NVF" apply "$p"; echo "applied $(basename "$p")"; fi
+  if git -C "$NVF" apply --check "$p" 2>/dev/null; then git -C "$NVF" apply "$p"; echo "applied $(basename "$p")"
+  elif git -C "$NVF" apply --check -R "$p" 2>/dev/null; then echo "already applied $(basename "$p")"
+  else echo "error: $(basename "$p") does not apply to $NVF (expected commit $NVF_COMMIT)" >&2; exit 1; fi
 done
 rustup target add aarch64-linux-android >/dev/null
 cd "$NVF/engine"

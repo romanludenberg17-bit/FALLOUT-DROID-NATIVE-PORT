@@ -483,6 +483,38 @@ public final class MainActivity extends Activity {
         startActivity(Intent.createChooser(new Intent("android.intent.action.SEND").setType("text/plain").putExtra("android.intent.extra.SUBJECT", "Fallout Droid: отчёт о вылете").putExtra("android.intent.extra.TEXT", str), "Отправить отчёт"));
     }
 
+    /** After the game's activity ends: if the engine stopped with an error, say why (nvforever.exit + log). */
+    private void checkLastRun() {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                // The game's process may still be going down: give it a moment.
+                try {
+                    Thread.sleep(600);
+                } catch (InterruptedException ignored) {
+                }
+                final String why = FalloutEngine.failureSummary(MainActivity.this);
+                if (why == null) return;
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (isFinishing() || isDestroyed()) return;
+                        String text = why.length() > 3000 ? why.substring(0, 3000) + "..." : why;
+                        new AlertDialog.Builder(MainActivity.this).setTitle("Игра закрылась")
+                                .setMessage(text)
+                                .setPositiveButton("Поделиться логом", new DialogInterface.OnClickListener() {
+                                    @Override
+                                    public void onClick(DialogInterface d, int i) {
+                                        SettingsActivity.shareLastLogs(MainActivity.this);
+                                    }
+                                })
+                                .setNegativeButton("Закрыть", (DialogInterface.OnClickListener) null).show();
+                    }
+                });
+            }
+        }, "fd-lastrun").start();
+    }
+
     private String versionName() {
         try {
             return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
@@ -501,6 +533,7 @@ public final class MainActivity extends Activity {
         }
         if (!this.launching && this.prefs.getBoolean(Prefs.LAUNCH_PENDING, false)) {
             this.prefs.edit().putBoolean(Prefs.LAUNCH_PENDING, false).putBoolean(Prefs.AUTOSTART_BLOCKED, false).apply();
+            checkLastRun();
         }
         refresh();
         TextView textView = this.headerTitle;

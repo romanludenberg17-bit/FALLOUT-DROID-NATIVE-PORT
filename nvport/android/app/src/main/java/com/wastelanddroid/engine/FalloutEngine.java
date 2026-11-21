@@ -29,6 +29,11 @@ import java.util.List;
 public final class FalloutEngine {
     public static final String ARGS_FILE = "nvport_args.txt";
     public static final String LOG_FILE = "nvforever.log";
+    /** Written by android_main: running / ok / error ... / panic ... ; or by the activity: java ... */
+    public static final String EXIT_FILE = "nvforever.exit";
+    public static final String REPORT_FILE = "fd_report.txt";
+    /** The game's process (manifest: NativeGameActivity android:process). */
+    public static final String GAME_PROCESS_SUFFIX = ":game";
     /** Bumped when the bundled engine data (schemas) changes. */
     private static final int ENGINE_DATA_VERSION = 1;
 
@@ -150,6 +155,12 @@ public final class FalloutEngine {
         StringBuilder sb = new StringBuilder();
         for (String a : ok.getArgs()) sb.append(a).append('\n');
         writeText(new File(activity.getFilesDir(), ARGS_FILE), sb.toString());
+        File ext = activity.getExternalFilesDir(null);
+        if (ext != null) {
+            new File(ext, EXIT_FILE).delete();
+            writeText(new File(ext, "nvport_args.txt"), sb.toString());
+        }
+        Prefs.get(activity).edit().putString("last_scope", ok.getScope()).commit();
         Intent intent = new Intent(activity, NativeGameActivity.class);
         intent.putExtra("game", ok.getGame().id);
         activity.startActivity(intent);
@@ -235,10 +246,129 @@ public final class FalloutEngine {
         Prefs.get(context).edit().putString("touch_mode", mode).apply();
     }
 
+    /** One text file with everything about the last run (shared by "Поделиться логами"). */
     public static File lastSessionLogs(Context context) {
         File base = context.getExternalFilesDir(null);
-        File log = base == null ? null : new File(base, LOG_FILE);
-        return log != null && log.isFile() ? log : null;
+        if (base == null) return null;
+        File log = new File(base, LOG_FILE);
+        File exit = new File(base, EXIT_FILE);
+        if (!log.isFile() && !exit.isFile()) return null;
+        StringBuilder sb = new StringBuilder();
+        sb.append("Fallout Droid ").append(versionName(context)).append(" (").append(versionCode(context)).append(")\n");
+        sb.append("Device: ").append(android.os.Build.MANUFACTURER).append(' ').append(android.os.Build.MODEL)
+                .append(", ").append(android.os.Build.HARDWARE).append(", SoC ").append(android.os.Build.SOC_MODEL)
+                .append(", Android ").append(android.os.Build.VERSION.RELEASE).append(" (API ").append(android.os.Build.VERSION.SDK_INT).append(")\n");
+        sb.append("Exit: ").append(exitStatus(context)).append(gameProcessAlive(context) ? " (game process alive)" : "").append("\n");
+        section(sb, "command line", new File(base, "nvport_args.txt"), 16 * 1024);
+        section(sb, LOG_FILE, log, 512 * 1024);
+        String scope = Prefs.get(context).getString("last_scope", "fnv");
+        File logs = new File(homeDir(context, scope), "logs");
+        section(sb, "run log", newest(logs, "nvforever-", ".log"), 512 * 1024);
+        section(sb, "crash report", newest(logs, "crash-", ".txt"), 256 * 1024);
+        File report = new File(base, REPORT_FILE);
+        try {
+            writeText(report, sb.toString());
+        } catch (IOException e) {
+            return log.isFile() ? log : null;
+        }
+        return report;
+    }
+
+    /** What nvforever.exit says ("" when there is none). */
+    public static String exitStatus(Context context) {
+        File base = context.getExternalFilesDir(null);
+        File f = base == null ? null : new File(base, EXIT_FILE);
+        if (f == null || !f.isFile()) return "";
+        try {
+            return readText(f).trim();
+        } catch (IOException e) {
+            return "";
+        }
+    }
+
+    public static boolean gameProcessAlive(Context context) {
+        android.app.ActivityManager am = (android.app.ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        List<android.app.ActivityManager.RunningAppProcessInfo> list = am == null ? null : am.getRunningAppProcesses();
+        if (list == null) return false;
+        String name = context.getPackageName() + GAME_PROCESS_SUFFIX;
+        for (android.app.ActivityManager.RunningAppProcessInfo p : list) {
+            if (name.equals(p.processName)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Why the last run ended, for the launcher's dialog: null when it ended normally or is
+     * still going; else the reason and the end of the engine's log.
+     */
+    public static String failureSummary(Context context) {
+        String status = exitStatus(context);
+        boolean alive = gameProcessAlive(context);
+        String why;
+        if (status.equals("ok")) return null;
+        if (status.equals("running")) {
+            if (alive) return null;
+            why = "Движок аварийно завершился (сбой в нативном коде).";
+        } else if (status.isEmpty()) {
+            if (alive) return null;
+            why = "Движок не запустился: android_main не был вызван (libnvforever.so не загрузилась?).";
+        } else if (status.startsWith("panic")) {
+            why = "Ошибка движка: " + status.substring(5).trim();
+        } else if (status.startsWith("java")) {
+            why = "Ошибка запуска: " + status.substring(4).trim();
+        } else {
+            why = "Движок завершился с ошибкой (" + status + ").";
+        }
+        File base = context.getExternalFilesDir(null);
+        String tail = base == null ? "" : tail(new File(base, LOG_FILE), 40);
+        return tail.isEmpty() ? why : why + "\n\nКонец лога:\n" + tail;
+    }
+
+    private static void section(StringBuilder sb, String title, File f, int max) {
+        sb.append("\n===== ").append(title);
+        if (f == null || !f.isFile()) {
+            sb.append(": нет =====\n");
+            return;
+        }
+        sb.append(" (").append(f.getAbsolutePath()).append(") =====\n");
+        try {
+            String t = readText(f);
+            if (t.length() > max) t = "...\n" + t.substring(t.length() - max);
+            sb.append(t).append('\n');
+        } catch (IOException e) {
+            sb.append(e).append('\n');
+        }
+    }
+
+    private static File newest(File dir, String prefix, String suffix) {
+        File[] kids = dir.listFiles();
+        File best = null;
+        if (kids == null) return null;
+        for (File f : kids) {
+            String n = f.getName();
+            if (n.startsWith(prefix) && n.endsWith(suffix) && (best == null || f.lastModified() > best.lastModified())) best = f;
+        }
+        return best;
+    }
+
+    private static String tail(File f, int lines) {
+        if (!f.isFile()) return "";
+        try {
+            String[] all = readText(f).split("\\r?\\n");
+            StringBuilder sb = new StringBuilder();
+            for (int i = Math.max(0, all.length - lines); i < all.length; i++) sb.append(all[i]).append('\n');
+            return sb.toString().trim();
+        } catch (IOException e) {
+            return "";
+        }
+    }
+
+    private static String versionName(Context context) {
+        try {
+            return context.getPackageManager().getPackageInfo(context.getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "?";
+        }
     }
 
     public static Intent shareLogsIntent(Context context, File file) {

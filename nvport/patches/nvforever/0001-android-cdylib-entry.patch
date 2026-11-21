@@ -223,7 +223,7 @@ index 0000000..222aa92
 +    })
 +}
 diff --git a/engine/nvforever/src/main.rs b/engine/nvforever/src/main.rs
-index a6cf138..5cd1aa7 100644
+index a6cf138..b455711 100644
 --- a/engine/nvforever/src/main.rs
 +++ b/engine/nvforever/src/main.rs
 @@ -82,6 +82,8 @@ mod haze;
@@ -235,50 +235,148 @@ index a6cf138..5cd1aa7 100644
  mod dlss;
  mod dlss_download;
  mod nv_low_latency;
-@@ -1061,12 +1063,61 @@ fn parse_smoothing(value: &str) -> Result<nvf_play::smooth_terrain::Smoothing, S
+@@ -1061,12 +1063,159 @@ fn parse_smoothing(value: &str) -> Result<nvf_play::smooth_terrain::Smoothing, S
  #[global_allocator]
  static ALLOCATOR: crash::SaysWhenEmpty = crash::SaysWhenEmpty;
  
-+/// [nvport] Android entry: NativeActivity/GameActivity loads libnvforever.so and calls this.
++/// [nvport] Android entry: GameActivity loads libnvforever.so and calls this on its own thread.
 +/// The launcher writes the command line (one argument per line) to
-+/// `<internal data>/nvport_args.txt`; stderr (the engine's log) goes to
-+/// `<external data>/nvforever.log` so the launcher can show and share it.
++/// `<internal data>/nvport_args.txt`. stdout/stderr (the engine's console) are teed into
++/// `<external data>/nvforever.log` and logcat (tag `NVForever`). How the run ended goes to
++/// `<external data>/nvforever.exit` (`running`, `ok`, `error <code>`, `panic <message>`),
++/// which the launcher reads to show the player why the game closed.
 +#[cfg(target_os = "android")]
 +#[unsafe(no_mangle)]
 +fn android_main(android_app: bevy::android::android_activity::AndroidApp) {
-+    if let Some(ext) = android_app.external_data_path() {
-+        let _ = std::fs::create_dir_all(&ext);
-+        let log = ext.join("nvforever.log");
-+        if let Ok(f) = std::fs::File::create(&log) {
-+            use std::os::fd::IntoRawFd;
-+            let fd = f.into_raw_fd();
-+            // SAFETY: plain dup2 of a file we own onto stdout/stderr.
-+            unsafe {
-+                libc::dup2(fd, 1);
-+                libc::dup2(fd, 2);
-+            }
-+        }
++    let ext = android_app.external_data_path();
++    if let Some(ext) = &ext {
++        let _ = std::fs::create_dir_all(ext);
++        android_log::tee_console(&ext.join("nvforever.log"));
++        let _ = std::fs::write(ext.join("nvforever.exit"), "running\n");
 +    }
 +    let mut line = vec!["nvforever".to_string()];
-+    if let Some(dir) = android_app.internal_data_path() {
-+        if let Ok(text) = std::fs::read_to_string(dir.join("nvport_args.txt")) {
-+            for l in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
-+                // `env:KEY=VALUE` sets an environment variable (NVFOREVER_HOME,
-+                // NVF_PLAY_SCRIPT_FUNCTIONS, ...) before any engine thread starts.
-+                if let Some((k, v)) = l.strip_prefix("env:").and_then(|kv| kv.split_once('=')) {
-+                    // SAFETY: still single-threaded (before main()).
-+                    unsafe { std::env::set_var(k, v) };
-+                } else {
-+                    line.push(l.to_string());
++    match android_app.internal_data_path() {
++        Some(dir) => match std::fs::read_to_string(dir.join("nvport_args.txt")) {
++            Ok(text) => {
++                for l in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
++                    // `env:KEY=VALUE` sets an environment variable (NVFOREVER_HOME,
++                    // NVF_PLAY_SCRIPT_FUNCTIONS, ...) before any engine thread starts.
++                    if let Some((k, v)) = l.strip_prefix("env:").and_then(|kv| kv.split_once('=')) {
++                        // SAFETY: no engine thread runs yet.
++                        unsafe { std::env::set_var(k, v) };
++                    } else {
++                        line.push(l.to_string());
++                    }
 +                }
 +            }
-+        }
++            Err(e) => eprintln!("nvport: {}: {e}", dir.join("nvport_args.txt").display()),
++        },
++        None => eprintln!("nvport: no internal data path"),
++    }
++    if std::env::var_os("RUST_BACKTRACE").is_none() {
++        // SAFETY: as above.
++        unsafe { std::env::set_var("RUST_BACKTRACE", "1") };
 +    }
 +    eprintln!("nvport: android_main, args {line:?}");
 +    let _ = ANDROID_ARGS.set(line);
 +    let _ = bevy::android::ANDROID_APP.set(android_app);
-+    let code = main();
-+    eprintln!("nvport: engine exited: {code:?}");
++    let outcome = std::panic::catch_unwind(main);
++    let status = match &outcome {
++        Ok(code) if code.is_success() => "ok".to_string(),
++        Ok(code) => format!("error {code:?}"),
++        Err(p) => {
++            let msg = p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default();
++            format!("panic {msg}")
++        }
++    };
++    eprintln!("nvport: engine exited: {status}");
++    if let Some(ext) = &ext {
++        let _ = std::fs::write(ext.join("nvforever.exit"), format!("{status}\n"));
++    }
++    android_log::flush();
++}
++
++#[cfg(target_os = "android")]
++mod android_log {
++    //! [nvport] The engine's console on Android: a pipe on fds 1 and 2, read by a thread that
++    //! writes each line to the log file and to logcat.
++    use std::io::{BufRead, Write};
++    use std::sync::Mutex;
++
++    unsafe extern "C" {
++        fn __android_log_write(prio: i32, tag: *const std::ffi::c_char, text: *const std::ffi::c_char) -> i32;
++    }
++
++    static FILE: Mutex<Option<std::fs::File>> = Mutex::new(None);
++
++    pub fn logcat(line: &str) {
++        let text = std::ffi::CString::new(line.replace('\0', " ")).unwrap_or_default();
++        // SAFETY: two valid NUL-terminated strings; liblog is always linked on Android.
++        unsafe { __android_log_write(4, c"NVForever".as_ptr(), text.as_ptr()) };
++    }
++
++    pub fn tee_console(path: &std::path::Path) {
++        let Ok(file) = std::fs::File::create(path) else {
++            logcat(&format!("nvport: cannot create {}", path.display()));
++            return;
++        };
++        let mut fds = [0i32; 2];
++        // SAFETY: a plain pipe(2) into a local array.
++        if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
++            // No pipe: the file alone.
++            use std::os::fd::IntoRawFd;
++            let fd = file.into_raw_fd();
++            // SAFETY: dup2 of a descriptor we own onto stdout/stderr.
++            unsafe {
++                libc::dup2(fd, 1);
++                libc::dup2(fd, 2);
++            }
++            return;
++        }
++        if let Ok(mut f) = FILE.lock() {
++            *f = Some(file);
++        }
++        // SAFETY: dup2 of the pipe's write end onto stdout/stderr.
++        unsafe {
++            libc::dup2(fds[1], 1);
++            libc::dup2(fds[1], 2);
++            libc::close(fds[1]);
++        }
++        use std::os::fd::FromRawFd;
++        // SAFETY: the read end is ours alone from here on.
++        let reader = unsafe { std::fs::File::from_raw_fd(fds[0]) };
++        let _ = std::thread::Builder::new().name("nvport-console".into()).spawn(move || {
++            let mut r = std::io::BufReader::new(reader);
++            let mut buf = Vec::new();
++            loop {
++                buf.clear();
++                match r.read_until(b'\n', &mut buf) {
++                    Ok(0) | Err(_) => break,
++                    Ok(_) => {
++                        let line = String::from_utf8_lossy(&buf);
++                        let line = line.trim_end_matches(['\n', '\r']);
++                        logcat(line);
++                        if let Ok(mut f) = FILE.lock() {
++                            if let Some(f) = f.as_mut() {
++                                let _ = writeln!(f, "{line}");
++                            }
++                        }
++                    }
++                }
++            }
++        });
++    }
++
++    /// Lets the console thread write what is still in the pipe.
++    pub fn flush() {
++        let _ = std::io::stderr().flush();
++        std::thread::sleep(std::time::Duration::from_millis(200));
++        if let Ok(mut f) = FILE.lock() {
++            if let Some(f) = f.as_mut() {
++                let _ = f.sync_all();
++            }
++        }
++    }
 +}
 +
 +/// [nvport] The command line on Android (see android_main); elsewhere the process's own.
@@ -298,7 +396,24 @@ index a6cf138..5cd1aa7 100644
      if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(std::path::Path::to_path_buf)) {
          line = with_schemas_beside(line, &dir);
          let functions = dir.join("schemas").join("script").join("functions.json");
-@@ -2326,6 +2377,8 @@ fn main() -> AppExit {
+@@ -1075,7 +1224,15 @@ fn main() -> AppExit {
+             std::env::set_var("NVF_PLAY_SCRIPT_FUNCTIONS", &functions);
+         }
+     }
+-    let mut args = Args::parse_from(&line);
++    // [nvport] A bad command line says why instead of exiting the process (on Android the
++    // launcher shares it until the game's own process starts).
++    let mut args = match Args::try_parse_from(&line) {
++        Ok(a) => a,
++        Err(e) => {
++            eprintln!("error: command line: {e}");
++            return AppExit::error();
++        }
++    };
+     let _ = COMMAND_LINE.set(line);
+     // Taking over a load: tell the old run at once that this run takes part (#1903).
+     let handoff_marked = args.handoff.as_deref().map(handoff::mark_started);
+@@ -2326,6 +2483,8 @@ fn main() -> AppExit {
              s.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
          });
      }
