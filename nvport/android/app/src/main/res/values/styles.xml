@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="FdDialog" parent="@android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorBackground">@color/fd_bg2</item>
+        <item name="android:textColorPrimary">@color/fd_text</item>
+        <item name="android:textColor">@color/fd_text</item>
+        <item name="android:fontFamily">@font/fallout</item>
+        <item name="android:colorAccent">@color/fd_fg</item>
+    </style>
+    <style name="FdTheme" parent="@android:style/Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:colorBackground">@color/fd_bg</item>
+        <item name="android:windowBackground">@color/fd_bg</item>
+        <item name="android:alertDialogTheme">@style/FdDialog</item>
+        <item name="android:colorPrimary">@color/fd_fg</item>
+        <item name="android:colorAccent">@color/fd_fg</item>
+    </style>
+    <style name="FdSplashTheme" parent="@style/FdTheme">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+    <style name="FdGameTheme" parent="@android:style/Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+</resources>

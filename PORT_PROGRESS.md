@@ -69,3 +69,50 @@ Fallout: New Vegas и Fallout 3, с дизайном Fallout Droid v1.1.85.
 
 ### Следующий шаг (после согласования)
 Этап 2.1: установить SDK/NDK, добавить crate `nvf-android` (cdylib + `#[bevy_main]`, NativeActivity → позже GameActivity), собрать тестовый APK, который открывает окно, находит `FalloutNV.esm`/BSA в выбранной папке и пишет результат разбора в logcat.
+
+## Этап 2.1 — приложение Fallout Droid на нативном движке (2026-11-21)
+
+### Решения пользователя
+- Переносится всё из Fallout Droid v1.1.85, кроме экрана первоначальной загрузки ресурсов и
+  всего, что связано с Proton (RootFS, FEX, Wine/Proton, DXVK, Turnip, PulseAudio, vkbridge,
+  Wayland, Termux, DroidDeck-сессии).
+- FNV и FO3 запускаются **отдельно**, без TTW.
+- Управление переносится полностью: экранные кнопки, мышь, геймпад, клавиатура.
+
+### Собрано
+- `nvport/android/` — Gradle-проект (AGP 8.13.2, compileSdk 36, minSdk 29, arm64-v8a),
+  applicationId `com.rommy.falloutdroid.nativeport` (пока Proton-версия стоит рядом).
+  - Java-код `com.wastelanddroid.*` из `classes4/6/7/8.dex` 1.1.85 (jadx), очищен от
+    артефактов декомпиляции (`this.f$0`, константы чужих библиотек, `throws` в override,
+    `final`-счётчики) и от Proton: удалены `ProtonPrefix`, `Registry`, `RuntimeManager`,
+    `ContainerActivity`, `ExePatcher`, `IniTweaks`, мёртвый `ControlsOverlay`.
+  - `engine/FalloutEngine` — запуск NVForever: аргументы в `filesDir/nvport_args.txt`,
+    домашняя папка движка на игру (`home_fnv`, `home_fo3`), порядок плагинов из
+    `Data/plugins.txt` (пишет Pip-Boy менеджер модов), распаковка схем движка из APK.
+  - `engine/NativeGameActivity` — GameActivity + `libnvforever.so`, оверлей кнопок,
+    физическая мышь (захват указателя → обзор), клавиатура, геймпад.
+  - `input/*` — экранные кнопки в формате раскладок 1.x (`ScreenKeyStore` совместим с
+    `savelayout_` из HTML-редактора), стик на 8 секторов, крестовина, переключатели,
+    режимы мыши direct/trackpad/auto, редактор (`ControlsEditorActivity`).
+  - `runtime/InputBridge` — VK-коды твоего `GamepadInput` → evdev → движок.
+  - Ресурсы восстановлены из APK (иконки `ic_*`, `fallout.ttf`, тема `FdTheme`, mipmap).
+  - Ассеты: ui (Pip-Boy, без экрана загрузки рантайма), art, audio, fonts, loading,
+    pipboy_icons, controls, screenkeys, trailers, splash; `engine/schemas` (NVForever);
+    лицензия GPL-3.0 движка.
+- `nvport/patches/nvforever/0001-android-cdylib-entry.patch` — движок как `cdylib`:
+  `android_main` (аргументы из файла, `env:KEY=VALUE`, лог в `externalFilesDir/nvforever.log`),
+  OpenSSL vendored, модуль `android_input.rs` (JNI `NativeInput.key/mouseMove/cursorTo/scroll`
+  → стандартные Bevy-события ввода).
+- `nvport/build_engine.sh` — сборка `libnvforever.so` (NDK r29, API 29, GameActivity).
+- `nvport/build_apk.sh` — движок → Gradle release → zipalign → apksigner v1+v2+v3 ключом
+  Fallout Droid → проверка.
+
+### Известные ограничения
+- **Сохранения**: NVForever пишет свой формат `.nvfsave`, `.fos` оригинала не читаются.
+- **Fallout 3 отдельно**: NVForever требует `FalloutNV.esm` — профиль FO3 в движке ещё не
+  сделан (задача следующих этапов). Кнопка «Играть» FO3 передаёт `--world Wasteland`, но
+  движок пока завершится с ошибкой проверки установки.
+- NVSE/JIP/JohnnyGuitar/kNVSE как DLL не нужны: функции расширителей встроены в движок.
+- **Лицензия**: движок GPL-3.0-or-later → APK с ним распространяется на условиях GPL,
+  исходники патчей лежат в этом репозитории.
+- Проверки на устройстве ещё не было (adb отсюда недоступен).

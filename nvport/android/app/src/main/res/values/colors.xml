@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="fd_bg">#ff0b0e0c</color>
+    <color name="fd_bg2">#ff141a16</color>
+    <color name="fd_fg">#ffa0e296</color>
+    <color name="fd_text">#ffdee4dc</color>
+</resources>

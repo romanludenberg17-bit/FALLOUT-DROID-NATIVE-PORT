@@ -2,3 +2,10 @@
 output/
 __pycache__/
 FalloutNVNativeWork/lib/arm64-v8a/libfnv.so
+nvport/android/.signing_keys/
+nvport/android/local.properties
+nvport/android/.gradle/
+nvport/android/app/build/
+nvport/android/build/
+nvport/android/app/src/main/jniLibs/
+nvport/output/
