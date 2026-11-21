@@ -1,0 +1,12 @@
+{
+ "cave_end": "0x53fb966",
+ "str_aaudio_log": "0x53fb937",
+ "str_fifo_env": "0x53fb8e4",
+ "str_fifo_log": "0x53fb8f1",
+ "str_set_capacity": "0x53fb909",
+ "stub_audio": "0x53fb664",
+ "stub_builder": "0x53fb7f8",
+ "stub_dscaps": "0x53fb838",
+ "stub_pan": "0x53fb8b8",
+ "stub_play": "0x53fb898"
+}

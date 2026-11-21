@@ -1,29 +1,22 @@
 #!/usr/bin/env python3
 """
-Builds Fallout Droid NV Native v1.1.0-native (com.rommy.falloutdroid.nv):
-1. Keeps libfnv.so (OpenGL ES 3.2 + AAudio ARM64 native engine) 100% intact.
-2. Applies Fallout Droid visual identity (icon Ct.png, FalloutNVLoadingScreen.jpg,
-   composite Fallout Droid + FNV logo, FalloutGothicRegular.ttf Cyrillic font,
-   Pip-Boy Green theme across 56 linearly verified Dalvik constants).
-3. Adds REQUEST_IGNORE_BATTERY_OPTIMIZATIONS permission to AndroidManifest.xml and
-   routes launcher activity to com.rommy.fnvnative.FalloutDroidActivity.
-4. Builds classes2.dex containing:
-   - com.rommy.fnvnative.FalloutDroidActivity (extends TermActivity)
-   - com.rommy.fnvnative.NativeSetup (Pip-Boy First-Run Setup Wizard: Files + Battery + SAF Explorer,
-     SAF ACTION_OPEN_DOCUMENT_TREE folder picker everywhere, and [Audio]+[AudioMenu] INI fix)
-   - com.rommy.fnvnative.SetupClick (View.OnClickListener)
-5. Linearly verifies every Dalvik method in classes.dex and classes2.dex, signs v1+v2,
-   and packages into CRC32-verified Fallout Droid NV Native.zip.
-"""
-import os, sys, shutil, struct, hashlib, zlib, zipfile, subprocess
-from PIL import Image
+Pure-Python generator for classes2.dex of Fallout Droid NV Native
+(package com.rommy.falloutdroid.nv, classes com.rommy.fnvnative.*).
 
-SRC_APK = "/working_dir/c_cd9f79887a79513d/user_uploaded_files/ttl=63d/user_uploaded/Fallout-NV-0.4.0 (1).apk"
-WORK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "FalloutNVNativeWork")
-FD_WORK = "/working_dir/c_cd9f79887a79513d/FalloutDroidWork"
-OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
-OUT_APK = os.path.join(OUT_DIR, "Fallout Droid NV Native.apk")
-OUT_ZIP = os.path.join(OUT_DIR, "Fallout Droid NV Native.zip")
+classes.dex (original com.fnvport launcher/game shell, R8-obfuscated) is kept
+as-is; classes2.dex overrides it via FalloutDroidFactory (AppComponentFactory):
+  - FalloutDroidActivity     : launcher (extends TermActivity) + setup wizard
+  - NativeSetup / SetupClick / FolderClick : first-run setup, folder picker
+  - FalloutDroidGameActivity : game activity (extends com.fnvport.GameActivity)
+  - HdIconsView              : HD touch-control icons
+  - AudioTrackThread         : OPTIONAL PCM16 FIFO -> AudioTrack bridge
+                               (only when the marker file
+                                /sdcard/FalloutDroidNV/use_audiotrack exists;
+                                default audio path is native AAudio)
+
+Usage: python3 gen_classes2.py [out.dex]
+"""
+import os, sys, struct, hashlib, zlib
 
 # ---------- Helper: LEB128 & MUTF-8 ----------
 def uleb128(v):
@@ -125,8 +118,15 @@ class Asm:
     def ret_v(self): self.emit(0x0e)
     def ret(self, v): self.emit(0x0f | (v << 8))
     def ret_o(self, v): self.emit(0x11 | (v << 8))
-    def c4(self, v, val): self.emit(0x12 | ((v & 0xf) << 8) | ((val & 0xf) << 12))
-    def c16(self, v, val): self.emit(0x13 | (v << 8), val & 0xffff)
+    def c4(self, v, val):
+        # const/4 holds a signed 4-bit literal: -8..7 only (v1.2.15 silently
+        # truncated 10 -> -6 and 12 -> -4, which broke the AudioTrack thread).
+        assert -8 <= val <= 7, f"const/4 literal out of range: {val}"
+        assert 0 <= v <= 15
+        self.emit(0x12 | ((v & 0xf) << 8) | ((val & 0xf) << 12))
+    def c16(self, v, val):
+        assert -32768 <= val <= 32767, f"const/16 literal out of range: {val}"
+        self.emit(0x13 | (v << 8), val & 0xffff)
     def c32(self, v, val): self.emit(0x14 | (v << 8), val & 0xffff, (val >> 16) & 0xffff)
     def cs(self, v, s): self.emit(0x1a | (v << 8), self.S(s))
     def check_cast(self, v, t): self.emit(0x1f | (v << 8), self.T(t))
@@ -1088,16 +1088,16 @@ def build_classes2(out_path):
         a.cs(1, "\n--- Prefs [AudioMenu] BEFORE ---\n")
         a.iv((C_SB, "append", C_SB, (C_STR,)), 9, 1)
         a.iv((C_SB, "append", C_SB, (C_STR,)), 9, 6)
-        # Replace muted volume values with 1.0000 via String.replaceAll
-        a.cs(1, "(?m)^fAudioMasterVolume=.*$")
+        # Unmute ONLY volumes that are exactly 0 (v1.3.0: user volume settings are kept)
+        a.cs(1, "(?m)^fAudioMasterVolume=[0.]*\\s*$")
         a.cs(2, "fAudioMasterVolume=1.0000")
         a.iv((C_STR, "replaceAll", C_STR, (C_STR, C_STR)), 4, 1, 2)
         a.mro(4)
-        a.cs(1, "(?m)^fVal([0-5])=.*$")
+        a.cs(1, "(?m)^fVal([0-5])=[0.]*\\s*$")
         a.cs(2, "fVal$1=1.0000")
         a.iv((C_STR, "replaceAll", C_STR, (C_STR, C_STR)), 4, 1, 2)
         a.mro(4)
-        a.cs(1, "(?m)^bEnableAudio=.*$")
+        a.cs(1, "(?m)^bEnableAudio=0\\s*$")
         a.cs(2, "bEnableAudio=1")
         a.iv((C_STR, "replaceAll", C_STR, (C_STR, C_STR)), 4, 1, 2)
         a.mro(4)
@@ -1227,18 +1227,11 @@ def build_classes2(out_path):
         a.iv((C_SB, "append", C_SB, ("I",)), 2, 8)
         a.label("da_write")
         a.is_((C_SETUP, "fixAudioPrefs", "V", (C_FILE, C_SB)), 1, 2)
-        # Log to Logcat & write /storage/emulated/0/Download/fnv_audio_diag.txt
+        # Log to Logcat only (v1.3.0: no more fnv_audio_diag.txt in Download/)
         a.iv((C_SB, "toString", C_STR, ()), 2)
         a.mro(3)  # v3 = report string
         a.cs(4, "FNV_AUDIO")
         a.is_((C_LOG, "i", "I", (C_STR, C_STR)), 4, 3)
-        a.new(4, C_FOS)
-        a.cs(6, "/storage/emulated/0/Download/fnv_audio_diag.txt")
-        a.id_((C_FOS, "<init>", "V", (C_STR,)), 4, 6)
-        a.iv((C_STR, "getBytes", C_BA, ()), 3)
-        a.mro(6)
-        a.iv((C_FOS, "write", "V", (C_BA,)), 4, 6)
-        a.iv((C_FOS, "close", "V", ()), 4)
         # If Sound.bsa missing (v5 == 0), show Toast warning!
         a.if_nez(5, "da_ret")
         a.cs(3, "Внимание: Data/Fallout - Sound.bsa не найден!")
@@ -1322,10 +1315,19 @@ def build_classes2(out_path):
         # onCreate(Bundle)V  regs=6, ins=2, outs=3 -> v4=this, v5=bundle
         a = Asm(S, T, F, M)
         a.label("te0")
-        a.cs(0, "FNV_TRACE_FILES")
-        a.cs(1, "1")
-        a.c4(2, 1)
-        a.is_((C_OS, "setenv", "V", (C_STR, C_STR, "Z")), 0, 1, 2)
+        # FNV_TRACE_FILES debug tracing removed (v1.3.0): it logged every file
+        # access of the game and cost I/O + CPU on every device.
+        # Default audio path = native AAudio (float, limiter in libfnv.so).
+        # The PCM16 FIFO -> AudioTrack bridge is opt-in for problem devices:
+        #   create /sdcard/FalloutDroidNV/use_audiotrack
+        a.is_((C_ENV, "getExternalStorageDirectory", C_FILE, ()), )
+        a.mro(0)
+        a.new(1, C_FILE)
+        a.cs(2, "FalloutDroidNV/use_audiotrack")
+        a.id_((C_FILE, "<init>", "V", (C_FILE, C_STR)), 1, 0, 2)
+        a.iv((C_FILE, "exists", "Z", ()), 1)
+        a.mr(0)
+        a.if_eqz(0, "te1")
         a.iv((C_GACT, "getCacheDir", C_FILE, ()), 4)
         a.mro(0)
         a.new(1, C_FILE)
@@ -1341,7 +1343,7 @@ def build_classes2(out_path):
         a.is_((C_OS, "setenv", "V", (C_STR, C_STR, "Z")), 0, 1, 2)
         a.new(0, C_ATT)
         a.id_((C_ATT, "<init>", "V", (C_STR,)), 0, 1)
-        a.c4(2, 10)
+        a.c16(2, 10)      # Thread.MAX_PRIORITY
         a.iv((C_THR, "setPriority", "V", ("I",)), 0, 2)
         a.iv((C_THR, "start", "V", ()), 0)
         a.label("te1")
@@ -1649,7 +1651,7 @@ def build_classes2(out_path):
         a = Asm(S, T, F, M)
         a.label("tat0")
         a.c32(0, 48000)   # sampleRate
-        a.c4(1, 12)       # CHANNEL_OUT_STEREO = 12
+        a.c16(1, 12)      # CHANNEL_OUT_STEREO = 12
         a.c4(2, 2)        # ENCODING_PCM_16BIT = 2
         a.is_((C_ATR, "getMinBufferSize", "I", ("I", "I", "I")), 0, 1, 2)
         a.mr(3)           # v3 = minBuf
@@ -1663,7 +1665,7 @@ def build_classes2(out_path):
         a.new(0, C_ATR)
         a.c4(1, 3)        # STREAM_MUSIC
         a.c32(2, 48000)   # 48000 Hz
-        a.c4(3, 12)       # CHANNEL_OUT_STEREO
+        a.c16(3, 12)      # CHANNEL_OUT_STEREO
         a.c4(4, 2)        # ENCODING_PCM_16BIT
         a.c4(6, 1)        # MODE_STREAM
         a.emit(0x76 | (7 << 8), M((C_ATR, "<init>", "V", ("I", "I", "I", "I", "I", "I"))), 0)
@@ -1898,4 +1900,6 @@ def build_classes2(out_path):
     verify_dex(bytes(out), "classes2.dex")
 
 
-build_classes2(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'FalloutNVNativeWork', 'classes2.dex'))
+if __name__ == "__main__":
+    build_classes2(sys.argv[1] if len(sys.argv) > 1 else
+                   os.path.join(os.path.dirname(os.path.abspath(__file__)), "FalloutNVNativeWork", "classes2.dex"))

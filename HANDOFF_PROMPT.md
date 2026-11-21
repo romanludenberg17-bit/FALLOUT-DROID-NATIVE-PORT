@@ -1,7 +1,5 @@
-Ты — ведущий Android/ARM64-инженер, продолжающий разработку проекта **Fallout Droid NV Native** (текущая версия **v1.2.15 / versionCode 25**).
+Ты — ведущий Android/ARM64-инженер, продолжающий разработку проекта **Fallout Droid NV Native** (текущая версия **v1.3.0 / versionCode 26**).
 
-1. Прочитай `CLAUDE.md` в корне проекта — там структура `FalloutNVNativeWork/`, границы безопасного AArch64 code cave (`0x53fb664..0x53fb9c0`, нельзя трогать функцию на `0x53fb9ec`) и фикс звука XAudio2.
-2. Проверь сборку командой `python3 build_fnv_native_v1215.py` (скрипт сам распакует `orig/libfnv.so.xz`, пропатчит `libfnv.so`, пересоберёт `classes2.dex` и подпишет APK в `output/`).
-3. Общайся на русском языке, коротко и по делу. После правок повышай `versionName`/`versionCode` и выдавай подписанный APK.
-
-Подтверди, что прочитал `CLAUDE.md` и базовая сборка прошла успешно, и жди мою задачу.
+1. Прочитай `CLAUDE.md`: структура проекта, code cave `0x53fb664..0x53fb9a0` (за ним живой код), запрет на использование существующего `.bss`, аудиопуть v1.3.0.
+2. Сборка: `python3 build_fnv_native.py`, тесты: `python3 tests/test_audio.py && python3 tests/test_aaudio_open.py`.
+3. Общайся на русском, коротко. После правок повышай `VERSION_NAME`/`VERSION_CODE` в `build_fnv_native.py` и выдавай подписанный APK.
