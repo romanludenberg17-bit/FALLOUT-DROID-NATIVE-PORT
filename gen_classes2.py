@@ -1056,8 +1056,8 @@ def build_classes2(out_path):
         m_ns_exportlog = (C_SETUP, "exportLog", "V", (C_CTX,), 0x0009, 7, 1, 3, *a.finish())
 
         # NativeSetup.applyDebugEnv()V  regs=3, ins=0, outs=3
-        # /sdcard/FalloutDroidNV/trace_hle exists -> FNV_TRACE=1 (full HLE API
-        # trace into the game log; very slow, diagnostics only).
+        # /sdcard/FalloutDroidNV/trace_hle exists -> FNV_TRACE=1 (HLE API trace,
+        # filtered natively to audio calls) + FNV_TRACE_FILES=1 (file opens).
         a = Asm(S, T, F, M)
         a.label("de0")
         a.is_((C_ENV, "getExternalStorageDirectory", C_FILE, ()), )
@@ -1071,6 +1071,8 @@ def build_classes2(out_path):
         a.cs(0, "FNV_TRACE")
         a.cs(1, "1")
         a.c4(2, 1)
+        a.is_((C_OS, "setenv", "V", (C_STR, C_STR, "Z")), 0, 1, 2)
+        a.cs(0, "FNV_TRACE_FILES")
         a.is_((C_OS, "setenv", "V", (C_STR, C_STR, "Z")), 0, 1, 2)
         a.label("de_ret")
         a.label("de1")
@@ -1268,6 +1270,19 @@ def build_classes2(out_path):
         a.iv((C_FILE, "length", "J", ()), 4)
         a.emit(0x0b | (6 << 8))
         a.iv((C_SB, "append", C_SB, ("J",)), 2, 6, 7)
+        # Data/Music: number of entries (music is loose mp3 files)
+        a.new(4, C_FILE)
+        a.cs(3, "Data/Music")
+        a.id_((C_FILE, "<init>", "V", (C_FILE, C_STR)), 4, 1, 3)
+        a.cs(3, "\nData/Music entries=")
+        a.iv((C_SB, "append", C_SB, (C_STR,)), 2, 3)
+        a.iv((C_FILE, "list", "[Ljava/lang/String;", ()), 4)
+        a.mro(6)
+        a.c4(7, -1)
+        a.if_eqz(6, "da_nomusic")
+        a.arr_len(7, 6)
+        a.label("da_nomusic")
+        a.iv((C_SB, "append", C_SB, ("I",)), 2, 7)
         # Check FalloutNV.exe size
         a.new(4, C_FILE)
         a.cs(3, "FalloutNV.exe")
@@ -1301,11 +1316,27 @@ def build_classes2(out_path):
         a.iv((C_SB, "append", C_SB, ("I",)), 2, 8)
         a.label("da_write")
         a.is_((C_SETUP, "fixAudioPrefs", "V", (C_FILE, C_SB)), 1, 2)
-        # Log to Logcat only (v1.3.0: no more fnv_audio_diag.txt in Download/)
+        # Log to Logcat + /sdcard/FalloutDroidNV/audio_diag.txt
         a.iv((C_SB, "toString", C_STR, ()), 2)
         a.mro(3)  # v3 = report string
         a.cs(4, "FNV_AUDIO")
         a.is_((C_LOG, "i", "I", (C_STR, C_STR)), 4, 3)
+        # v1.3.2: report also goes to /sdcard/FalloutDroidNV/audio_diag.txt
+        a.is_((C_ENV, "getExternalStorageDirectory", C_FILE, ()), )
+        a.mro(6)
+        a.new(4, C_FILE)
+        a.cs(7, "FalloutDroidNV")
+        a.id_((C_FILE, "<init>", "V", (C_FILE, C_STR)), 4, 6, 7)
+        a.iv((C_FILE, "mkdirs", "Z", ()), 4)
+        a.new(6, C_FILE)
+        a.cs(7, "audio_diag.txt")
+        a.id_((C_FILE, "<init>", "V", (C_FILE, C_STR)), 6, 4, 7)
+        a.new(4, C_FOS)
+        a.id_((C_FOS, "<init>", "V", (C_FILE,)), 4, 6)
+        a.iv((C_STR, "getBytes", C_BA, ()), 3)
+        a.mro(6)
+        a.iv((C_FOS, "write", "V", (C_BA,)), 4, 6)
+        a.iv((C_FOS, "close", "V", ()), 4)
         # If Sound.bsa missing (v5 == 0), show Toast warning!
         a.if_nez(5, "da_ret")
         a.cs(3, "Внимание: Data/Fallout - Sound.bsa не найден!")

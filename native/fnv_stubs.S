@@ -462,6 +462,87 @@ print_stats:
     ldp     x29, x30, [sp], #16
     ret
 
+
+// ---------------------------------------------------------------------------
+// STUB 7/8: audio-only HLE call trace.  FNV_TRACE=1 normally prints EVERY
+// import call (unusably slow); these gates print only calls whose import
+// entry (dll + function name, 0x80 bytes at x20) mentions
+// "ound" / "raph" / "edia" / "udio"  (DirectSound*, IGraphBuilder,
+// IMedia*, IBasicAudio, ...).
+//   0x53e4a50  cbnz w8, pre-print   ->  bl trace_pre
+//   0x53e4a60  cbnz w8, post-print  ->  bl trace_post
+// Context: x19 = guest CPU ctx, x20 = import entry, w8 = FNV_TRACE flag.
+// ---------------------------------------------------------------------------
+trace_match:                            // -> w0 = 1 if audio-related
+    movz    w12, #0x756f
+    movk    w12, #0x646e, lsl #16       // "ound"
+    movz    w13, #0x6172
+    movk    w13, #0x6870, lsl #16       // "raph"
+    movz    w14, #0x6465
+    movk    w14, #0x6169, lsl #16       // "edia"
+    movz    w15, #0x6475
+    movk    w15, #0x6f69, lsl #16       // "udio"
+    mov     x9, #0
+1:  ldr     w10, [x20, x9]
+    cmp     w10, w12
+    ccmp    w10, w13, #4, ne
+    ccmp    w10, w14, #4, ne
+    ccmp    w10, w15, #4, ne
+    b.eq    2f
+    add     x9, x9, #1
+    cmp     x9, #0x7c
+    b.lo    1b
+    mov     w0, #0
+    ret
+2:  mov     w0, #1
+    ret
+
+    .globl trace_pre
+trace_pre:
+    cbz     w8, 9f
+    stp     x29, x30, [sp, #-16]!
+    mov     x29, sp
+    bl      trace_match
+    cbz     w0, 8f
+    adrp    x8, GOT_STDERR
+    ldr     x8, [x8, :lo12:GOT_STDERR]
+    ldr     x0, [x8]
+    adrp    x10, GUEST_BASE
+    ldr     x10, [x10, :lo12:GUEST_BASE]
+    ldr     w9, [x19, #0x10]            // guest esp
+    add     w11, w9, #4
+    ldr     w4, [x10, w11, uxtw]
+    add     w11, w9, #8
+    ldr     w5, [x10, w11, uxtw]
+    add     w11, w9, #12
+    ldr     w6, [x10, w11, uxtw]
+    add     w11, w9, #16
+    ldr     w7, [x10, w11, uxtw]
+    mov     x2, x20
+    add     x3, x20, #0x40
+    adrp    x1, FMT_IMP
+    add     x1, x1, :lo12:FMT_IMP
+    bl      fprintf
+8:  ldp     x29, x30, [sp], #16
+9:  ret
+
+    .globl trace_post
+trace_post:
+    cbz     w8, 9f
+    stp     x29, x30, [sp, #-16]!
+    mov     x29, sp
+    bl      trace_match
+    cbz     w0, 8f
+    adrp    x8, GOT_STDERR
+    ldr     x8, [x8, :lo12:GOT_STDERR]
+    ldr     x0, [x8]
+    ldr     w2, [x19]
+    adrp    x1, FMT_IMP_RET
+    add     x1, x1, :lo12:FMT_IMP_RET
+    bl      fprintf
+8:  ldp     x29, x30, [sp], #16
+9:  ret
+
 // ---------------------------------------------------------------------------
 // Constants & strings (inside the cave, reached with adr / ldr literal)
 // ---------------------------------------------------------------------------
