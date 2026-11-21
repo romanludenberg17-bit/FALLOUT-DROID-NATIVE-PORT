@@ -38,7 +38,7 @@ class Emu:
     def __init__(self, so, fifo=False, epipe=False, guard_bss=True):
         self.so = so
         u = self.u = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
-        u.mem_map(0, 0x58e0000)
+        u.mem_map(0, 0x5900000)
         # PT_LOADs
         phoff, = struct.unpack_from('<Q', so, 0x20)
         phn, = struct.unpack_from('<H', so, 0x38)

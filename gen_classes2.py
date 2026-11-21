@@ -1008,6 +1008,79 @@ def build_classes2(out_path):
         a.ret_v()
         m_ns_show = (C_SETUP, "checkAndShowSetup", "V", (C_TERM,), 0x0009, 11, 1, 5, *a.finish())
 
+
+        # NativeSetup.exportLog(Context)V  regs=7, ins=1, outs=3 -> v6=ctx
+        # Copies <externalFilesDir>/last_run.log (game log, not reachable on
+        # Android 11+ without adb) to /sdcard/FalloutDroidNV/last_run.log.
+        C_PATH = "Ljava/nio/file/Path;"
+        C_COPT_A = "[Ljava/nio/file/CopyOption;"
+        C_SCO = "Ljava/nio/file/StandardCopyOption;"
+        a = Asm(S, T, F, M)
+        a.label("el0")
+        a.c4(0, 0)
+        a.iv((C_CTX, "getExternalFilesDir", C_FILE, (C_STR,)), 6, 0)
+        a.mro(0)
+        a.if_eqz(0, "el_ret")
+        a.new(1, C_FILE)
+        a.cs(2, "last_run.log")
+        a.id_((C_FILE, "<init>", "V", (C_FILE, C_STR)), 1, 0, 2)
+        a.iv((C_FILE, "exists", "Z", ()), 1)
+        a.mr(2)
+        a.if_eqz(2, "el_ret")
+        a.is_((C_ENV, "getExternalStorageDirectory", C_FILE, ()), )
+        a.mro(0)
+        a.new(3, C_FILE)
+        a.cs(2, "FalloutDroidNV")
+        a.id_((C_FILE, "<init>", "V", (C_FILE, C_STR)), 3, 0, 2)
+        a.iv((C_FILE, "mkdirs", "Z", ()), 3)
+        a.new(4, C_FILE)
+        a.cs(2, "last_run.log")
+        a.id_((C_FILE, "<init>", "V", (C_FILE, C_STR)), 4, 3, 2)
+        a.iv((C_FILE, "toPath", C_PATH, ()), 1)
+        a.mro(1)
+        a.iv((C_FILE, "toPath", C_PATH, ()), 4)
+        a.mro(4)
+        a.c4(2, 1)
+        a.new_arr(5, 2, C_COPT_A)
+        a.sget_o(2, (C_SCO, "REPLACE_EXISTING", C_SCO))
+        a.c4(0, 0)
+        a.aput_o(2, 5, 0)
+        a.is_(("Ljava/nio/file/Files;", "copy", C_PATH, (C_PATH, C_PATH, C_COPT_A)), 1, 4, 5)
+        a.label("el_ret")
+        a.label("el1")
+        a.ret_v()
+        a.label("hel0")
+        a.mex(0)
+        a.ret_v()
+        a.try_catch("el0", "el1", "hel0")
+        m_ns_exportlog = (C_SETUP, "exportLog", "V", (C_CTX,), 0x0009, 7, 1, 3, *a.finish())
+
+        # NativeSetup.applyDebugEnv()V  regs=3, ins=0, outs=3
+        # /sdcard/FalloutDroidNV/trace_hle exists -> FNV_TRACE=1 (full HLE API
+        # trace into the game log; very slow, diagnostics only).
+        a = Asm(S, T, F, M)
+        a.label("de0")
+        a.is_((C_ENV, "getExternalStorageDirectory", C_FILE, ()), )
+        a.mro(0)
+        a.new(1, C_FILE)
+        a.cs(2, "FalloutDroidNV/trace_hle")
+        a.id_((C_FILE, "<init>", "V", (C_FILE, C_STR)), 1, 0, 2)
+        a.iv((C_FILE, "exists", "Z", ()), 1)
+        a.mr(0)
+        a.if_eqz(0, "de_ret")
+        a.cs(0, "FNV_TRACE")
+        a.cs(1, "1")
+        a.c4(2, 1)
+        a.is_((C_OS, "setenv", "V", (C_STR, C_STR, "Z")), 0, 1, 2)
+        a.label("de_ret")
+        a.label("de1")
+        a.ret_v()
+        a.label("hde0")
+        a.mex(0)
+        a.ret_v()
+        a.try_catch("de0", "de1", "hde0")
+        m_ns_debugenv = (C_SETUP, "applyDebugEnv", "V", (), 0x0009, 3, 0, 3, *a.finish())
+
         # ---- Class 3: FalloutDroidActivity (extends TermActivity) ----
         # <init>()V  regs=1, ins=1, outs=1
         a = Asm(S, T, F, M)
@@ -1020,6 +1093,7 @@ def build_classes2(out_path):
         a.isup((C_TERM, "onResume", "V", ()), 1)
         a.label("tr0")
         a.is_((C_SETUP, "ensureAudioIni", "V", (C_TERM,)), 1)
+        a.is_((C_SETUP, "exportLog", "V", (C_CTX,)), 1)
         a.is_((C_SETUP, "checkAndShowSetup", "V", (C_TERM,)), 1)
         a.label("tr1")
         a.ret_v()
@@ -1275,7 +1349,7 @@ def build_classes2(out_path):
         a.ret_v()
         m_act_r = (C_ACT, "r", "V", (), 0x0001, 1, 1, 1, *a.finish())
 
-        for m in [m_clk_init, m_clk_click, m_ns_diag, m_ns_dismiss, m_ns_bat, m_ns_pick, m_ns_res, m_ns_resact, m_ns_audio, m_ns_btn, m_ns_show,
+        for m in [m_ns_exportlog, m_ns_debugenv, m_clk_init, m_clk_click, m_ns_diag, m_ns_dismiss, m_ns_bat, m_ns_pick, m_ns_res, m_ns_resact, m_ns_audio, m_ns_btn, m_ns_show,
                   m_act_init, m_act_res, m_act_resact, m_act_l, m_act_j, m_act_r]:
             M(m[:4])
 
@@ -1314,6 +1388,7 @@ def build_classes2(out_path):
 
         # onCreate(Bundle)V  regs=6, ins=2, outs=3 -> v4=this, v5=bundle
         a = Asm(S, T, F, M)
+        a.is_((C_SETUP, "applyDebugEnv", "V", ()), )
         a.label("te0")
         # FNV_TRACE_FILES debug tracing removed (v1.3.0): it logged every file
         # access of the game and cost I/O + CPU on every device.
@@ -1714,7 +1789,7 @@ def build_classes2(out_path):
         return [
             (C_ACT, 0x0001, C_TERM, [], [], [], [m_act_init], [m_act_j, m_act_l, m_act_resact, m_act_res, m_act_r]),
             (C_SETUP, 0x0001, C_OBJ, [], [(F_DISMISSED, 0x0009), (F_DLG, 0x0009), (F_BDLG, 0x0009)], [],
-             [m_ns_show, m_ns_diag, m_ns_dismiss, m_ns_audio, m_ns_resact, m_ns_btn, m_ns_pick, m_ns_bat, m_ns_res, m_ns_selfld, m_ns_fbtn, m_ns_browse, m_ns_fixprefs], []),
+             [m_ns_show, m_ns_diag, m_ns_dismiss, m_ns_audio, m_ns_resact, m_ns_btn, m_ns_pick, m_ns_bat, m_ns_res, m_ns_selfld, m_ns_fbtn, m_ns_browse, m_ns_fixprefs, m_ns_exportlog, m_ns_debugenv], []),
             (C_CLICK, 0x0001, C_OBJ, [C_OCL], [], [(F_CLK_A, 0x0001), (F_CLK_B, 0x0001)], [m_clk_init], [m_clk_click]),
             (C_FACT, 0x0001, C_CCF, [], [], [], [m_fac_init], [m_fac_inst]),
             (C_GACT, 0x0001, C_OGACT, [], [], [], [m_ga_init], [m_ga_create]),

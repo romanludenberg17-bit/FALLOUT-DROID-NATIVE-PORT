@@ -1,12 +1,17 @@
 {
- "cave_end": "0x53fb966",
- "str_aaudio_log": "0x53fb937",
- "str_fifo_env": "0x53fb8e4",
- "str_fifo_log": "0x53fb8f1",
- "str_set_capacity": "0x53fb909",
- "stub_audio": "0x53fb664",
- "stub_builder": "0x53fb7f8",
- "stub_dscaps": "0x53fb838",
- "stub_pan": "0x53fb8b8",
- "stub_play": "0x53fb898"
+ "fnvx_end": "0x58e0717",
+ "str_aaudio_log": "0x58e06e8",
+ "str_fifo_env": "0x58e056c",
+ "str_fifo_log": "0x58e0579",
+ "str_reclaim": "0x58e0636",
+ "str_set_capacity": "0x58e0591",
+ "str_stats": "0x58e0679",
+ "str_vfail": "0x58e05fa",
+ "str_vplay": "0x58e05bf",
+ "stub_audio": "0x58e0000",
+ "stub_builder": "0x58e01c4",
+ "stub_dscaps": "0x58e0204",
+ "stub_pan": "0x58e0284",
+ "stub_play": "0x58e0264",
+ "stub_vcreate": "0x58e0298"
 }

@@ -17,8 +17,8 @@ import json, lzma, os, shutil, struct, subprocess, sys, tempfile, zipfile
 from pathlib import Path
 
 # ---------------------------------------------------------------- version ----
-VERSION_NAME = "1.3.0"
-VERSION_CODE = 26
+VERSION_NAME = "1.3.1"
+VERSION_CODE = 27
 
 BASE = Path(__file__).resolve().parent
 WORK = BASE / "FalloutNVNativeWork"
@@ -29,22 +29,27 @@ OUT_ZIP = OUT_DIR / "Fallout Droid NV Native.zip"
 KEYS = BASE / ".signing_keys"
 
 # --------------------------------------------------------- libfnv layout ----
-CAVE_START = 0x53FB664          # dead FNV_INPUT_SCRIPT handler (entry NOP'ed)
-CAVE_END = 0x53FB9A0            # 0x53fb9a0..0x53fb9c8 is LIVE (stack_chk_fail + QUIT_AFTER exit)
-LIVE_GUARD = (0x53FB9A0, 0x53FBA74)   # must stay byte-identical to the original
+# All our native code lives in a NEW R+X PT_LOAD segment appended to the file
+# (the unused PT_NOTE program header is converted). The old code cave
+# 0x53fb664..0x53fb9a0 is no longer touched (0x53fb9a0.. is live code anyway).
+FNVX_VADDR = 0x58E0000          # > end of .bss (0x58d40c0 + BSS_EXTRA), 16 KiB aligned
+SEG_ALIGN = 0x4000              # 16 KiB page compatible
 
-# The audio stub keeps its state in a small extension of .bss (the last
-# PT_LOAD); 0x58d40a0..0x58d40c0 used by v1.2.15 belongs to live globals
-# (MT19937 init flags, cached CTR_EL0 for __clear_cache, LSE-atomics flag).
-BSS_EXTRA = 0x40
+# RW state for the stubs: extension of .bss (the last PT_LOAD). The original
+# .bss ends at 0x58d40c0; 0x58d40a0..0x58d40c0 are live globals (MT19937 init
+# flags, cached CTR_EL0 for __clear_cache, LSE-atomics flag) - never touch.
+BSS_EXTRA = 0x480
 STATE_ADDR = 0x58D40C0          # == original end of .bss
 
-SYMS = {                        # external symbols for the stubs (PLT / GOT / code)
+SYMS = {                        # external symbols for the stubs (PLT / GOT / code / data)
     "getenv": 0x54BE1E0, "open": 0x54BE720, "fprintf": 0x54BE2B0,
     "memset": 0x54BE3A0, "dlsym": 0x54BEA60,
     "AAudioStreamBuilder_setPerformanceMode": 0x54BF080,
-    "DSOUND_BUFFER_RESET": 0x5414110,
+    "DSOUND_BUFFER_RESET": 0x5414110,     # IDirectSoundBuffer status sync (frees finished voice)
+    "voice_create": 0x54125B0,
+    "VOICES": 0x58C5F18,                  # 256 x 0x58 mixer voices
     "GOT_STDERR": 0x5593190,
+    "GOT_GUESTMEM": 0x55931A8,            # -> host base of guest memory
     "STATE": STATE_ADDR,
 }
 
@@ -70,7 +75,7 @@ def build_classes2():
 
 # ============================================================ 2. libfnv ======
 def assemble_stubs():
-    """Assemble native/fnv_stubs.S at CAVE_START. Returns (blob, symbols).
+    """Assemble native/fnv_stubs.S at FNVX_VADDR. Returns (blob, symbols).
     Uses llvm-mc + ld.lld when available and refreshes the committed
     prebuilt (native/fnv_stubs.bin + .json); otherwise uses the prebuilt."""
     src = NATIVE / "fnv_stubs.S"
@@ -80,7 +85,7 @@ def assemble_stubs():
         with tempfile.TemporaryDirectory() as td:
             obj, elf, binf = (os.path.join(td, n) for n in ("s.o", "s.elf", "s.bin"))
             subprocess.run([mc, "-triple=aarch64", "-mattr=+v8.2a", "-filetype=obj", str(src), "-o", obj], check=True)
-            subprocess.run([lld, "-o", elf, obj, f"--section-start=.text={CAVE_START:#x}", "-e", "stub_audio"]
+            subprocess.run([lld, "-o", elf, obj, f"--section-start=.text={FNVX_VADDR:#x}", "-e", "stub_audio"]
                            + [f"--defsym={k}={v:#x}" for k, v in SYMS.items()], check=True)
             subprocess.run([objcopy, "-O", "binary", "-j", ".text", elf, binf], check=True)
             blob = Path(binf).read_bytes()
@@ -88,7 +93,7 @@ def assemble_stubs():
         syms = {}
         for line in out.splitlines():
             a, t, n = line.split()
-            if t in "Tt" and (n.startswith("stub_") or n.startswith("str_") or n == "cave_end"):
+            if t in "Tt" and (n.startswith("stub_") or n.startswith("str_") or n == "fnvx_end"):
                 syms[n] = int(a, 16)
         pre_bin.write_bytes(blob)
         pre_sym.write_text(json.dumps({k: hex(v) for k, v in sorted(syms.items())}, indent=1) + "\n")
@@ -98,6 +103,29 @@ def assemble_stubs():
         syms = {k: int(v, 16) for k, v in json.loads(pre_sym.read_text()).items()}
         how = "prebuilt native/fnv_stubs.bin (no LLVM toolchain found)"
     return blob, syms, how
+
+
+def add_exec_segment(so, vaddr, blob):
+    """Append blob as a new R+X PT_LOAD by converting the PT_NOTE phdr.
+    Returns the list of changed header byte ranges."""
+    e_phoff, = struct.unpack_from("<Q", so, 0x20)
+    e_phentsize, e_phnum = struct.unpack_from("<HH", so, 0x36)
+    phs = [e_phoff + i * e_phentsize for i in range(e_phnum)]
+    types = [struct.unpack_from("<I", so, p)[0] for p in phs]
+    notes = [p for p, t in zip(phs, types) if t == 4]
+    assert len(notes) == 1, "expected exactly one PT_NOTE"
+    loads = [p for p, t in zip(phs, types) if t == 1]
+    last = loads[-1]
+    lv, = struct.unpack_from("<Q", so, last + 0x10)
+    lm, = struct.unpack_from("<Q", so, last + 0x28)
+    assert vaddr >= lv + lm and vaddr % SEG_ALIGN == 0
+    assert phs.index(notes[0]) > phs.index(last), "new PT_LOAD must come after the others"
+    off = (len(so) + SEG_ALIGN - 1) // SEG_ALIGN * SEG_ALIGN
+    so.extend(b"\0" * (off - len(so)))
+    so.extend(blob)
+    # p_type, p_flags(R|X), p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_align
+    struct.pack_into("<IIQQQQQQ", so, notes[0], 1, 5, off, vaddr, vaddr, len(blob), len(blob), SEG_ALIGN)
+    return [(notes[0], notes[0] + e_phentsize)], off
 
 
 def patch_libfnv():
@@ -110,11 +138,7 @@ def patch_libfnv():
         allowed.append((off, off + 4))
 
     blob, sym, how = assemble_stubs()
-    end = CAVE_START + len(blob)
-    assert sym["cave_end"] == end, "stub blob/symbol mismatch"
-    assert end <= CAVE_END, f"code cave overflow: {end:#x} > {CAVE_END:#x}"
-    so[CAVE_START:end] = blob
-    allowed.append((CAVE_START, end))
+    assert sym["fnvx_end"] == FNVX_VADDR + len(blob), "stub blob/symbol mismatch"
 
     # --- hook sites (each original instruction verified before patching) ---
     hooks = [  # (site, expected original word, stub)
@@ -123,6 +147,7 @@ def patch_libfnv():
         (0x54134D0, enc_bl(0x54134D0, SYMS["memset"]), "stub_dscaps"),
         (0x5413CC8, 0xF94002A8, "stub_play"),      # ldr x8, [x21]
         (0x5414434, 0x1E2E1000, "stub_pan"),       # fmov s0, #1.0
+        (0x5413D64, enc_bl(0x5413D64, SYMS["voice_create"]), "stub_vcreate"),
     ]
     for site, want, name in hooks:
         assert rd32(orig, site) == want, f"unexpected original insn at {site:#x}"
@@ -148,13 +173,10 @@ def patch_libfnv():
     put32(0x5412C48, enc_adrp(0x5412C48, sym["str_aaudio_log"], 1))
     put32(0x5412C4C, enc_add_imm(1, 1, sym["str_aaudio_log"] & 0xFFF))
 
-    # DirectSound3D listener IID fix (from v1.2.x)
-    put32(0x5413664, 0x529F508A)
-    put32(0x5413674, 0x72A4F34A)
-
-    # FNV_INPUT_SCRIPT handler entry -> NOP (its body is our code cave)
-    assert rd32(orig, 0x53FB218) == 0xB5002260
-    put32(0x53FB218, NOP)
+    # DirectSound3D listener/buffer IID fix (from v1.2.x): 0x279f9a84 -> 0x279afa84
+    assert rd32(orig, 0x5413664) == enc_movz_w(10, 0x9A84) and rd32(orig, 0x5413674) == 0x72A4F3EA
+    put32(0x5413664, enc_movz_w(10, 0xFA84))
+    put32(0x5413674, 0x72A4F34A)                         # movk w10, #0x279a, lsl #16
 
     # --- grow the last PT_LOAD (.bss) by BSS_EXTRA for the stub state ---
     e_phoff, = struct.unpack_from("<Q", so, 0x20)
@@ -165,6 +187,7 @@ def patch_libfnv():
     p_vaddr, = struct.unpack_from("<Q", so, ph + 0x10)
     p_memsz, = struct.unpack_from("<Q", so, ph + 0x28)
     assert p_vaddr + p_memsz == STATE_ADDR, "unexpected .bss end"
+    assert STATE_ADDR + BSS_EXTRA <= FNVX_VADDR
     struct.pack_into("<Q", so, ph + 0x28, p_memsz + BSS_EXTRA)
     allowed.append((ph + 0x28, ph + 0x30))
     e_shoff, = struct.unpack_from("<Q", so, 0x28)
@@ -180,24 +203,28 @@ def patch_libfnv():
             struct.pack_into("<Q", so, sh + 0x20, size + BSS_EXTRA)
             allowed.append((sh + 0x20, sh + 0x28))
 
-    # --- verification ---
-    assert so[LIVE_GUARD[0]:LIVE_GUARD[1]] == orig[LIVE_GUARD[0]:LIVE_GUARD[1]], "live code after cave touched!"
-    assert len(so) == len(orig)
-    bad, n = [], len(so)
-    mv_a, mv_b = memoryview(so), memoryview(orig)
+    # --- new executable segment with all our code ---
+    hdr_ranges, seg_off = add_exec_segment(so, FNVX_VADDR, blob)
+    allowed += hdr_ranges
+
+    # --- verification: every changed byte of the original image is whitelisted ---
+    n = len(orig)
+    bad = []
     step = 1 << 16
+    mv_a, mv_b = memoryview(so)[:n], memoryview(orig)
     for blk in range(0, n, step):
         if mv_a[blk:blk + step] != mv_b[blk:blk + step]:
             for j in range(blk, min(blk + step, n)):
                 if so[j] != orig[j] and not any(a <= j < b for a, b in allowed):
                     bad.append(j)
     assert not bad, f"unexpected libfnv.so changes at {[hex(x) for x in bad[:8]]}"
+    assert so[0x53FB000:0x53FC000] == orig[0x53FB000:0x53FC000], "old code cave must stay original"
 
     out = WORK / "lib/arm64-v8a/libfnv.so"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(so)
-    print(f"[2/4] libfnv.so patched ({how}); cave {CAVE_START:#x}..{end:#x} "
-          f"({end - CAVE_START}/{CAVE_END - CAVE_START} B), .bss +{BSS_EXTRA:#x} @ {STATE_ADDR:#x}")
+    print(f"[2/4] libfnv.so patched ({how}); .fnvx R+X segment {FNVX_VADDR:#x} "
+          f"({len(blob)} B @ file {seg_off:#x}), .bss +{BSS_EXTRA:#x} @ {STATE_ADDR:#x}")
     return so
 
 

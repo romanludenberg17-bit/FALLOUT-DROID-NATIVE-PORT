@@ -1,9 +1,23 @@
-// Fallout Droid NV Native — AArch64 patch stubs for libfnv.so
-// Linked at CAVE_START (0x53fb664). Hard limit: CAVE_END (0x53fb9a0) —
-// 0x53fb9a0..0x53fb9c8 is LIVE code (__stack_chk_fail + FNV_QUIT_AFTER exit),
-// 0x53fb9ec is a live function. build_fnv_native.py asserts both.
+// Fallout Droid NV Native — AArch64 patch code for libfnv.so
+// Linked at FNVX_VADDR (0x58e0000): a NEW R+X PT_LOAD segment appended to
+// libfnv.so by build_fnv_native.py (the unused PT_NOTE program header is
+// converted). Since v1.3.1 the old code cave 0x53fb664.. is NOT used any more.
 //
 // External symbols are provided by the linker (--defsym), see build script.
+// RW state lives in the .bss extension at STATE (see layout below).
+//
+// STATE layout:
+//   +0x00 f32 att        limiter attenuation (1 - gain)
+//   +0x04 i32 fifo       0 = untried, >0 = fd, -1 = off
+//   +0x08 f32 peak       max |mix| (after master gain) since last stats line
+//   +0x0c f32 attmax     max attenuation since last stats line
+//   +0x10 u32 callbacks  AAudio data callbacks
+//   +0x14 u32 creates    voices created (DirectSound Play)
+//   +0x18 u32 fails      voice creation failures
+//   +0x20 u32 reclaims   finished one-shot voices reclaimed on full pool
+//   +0x24 u32 nplaylog   "[dsnd] play" lines printed
+//   +0x28 u32 nfaillog   "[dsnd] FAIL" lines printed
+//   +0x40 u32 owner[256] guest IDirectSoundBuffer that owns voice i
 
     .text
     .p2align 2
@@ -25,10 +39,6 @@
 // Output goes back to AAudio as float (default), or — if FNV_PCM_FIFO is set
 // and the Java AudioTrack reader is connected — as PCM16 into the FIFO
 // (AAudio buffer is then zeroed).  EPIPE on the FIFO falls back to AAudio.
-//
-// State lives in an extension of .bss (LOAD[2].p_memsz grown by the build):
-//   [STATE+0] float  att  (1 - limiter gain), 0 at start
-//   [STATE+4] int32  fifo: 0 = not tried / reader not ready, >0 = fd, -1 = off
 // ---------------------------------------------------------------------------
     .globl stub_audio
 stub_audio:
@@ -62,6 +72,9 @@ stub_audio:
     bl      fprintf
 
 .Lfifo_known:
+    ldr     w8, [x21, #0x10]
+    add     w8, w8, #1
+    str     w8, [x21, #0x10]            // callbacks++
     cmp     w20, #1
     b.lt    .Ldone
     cmp     w22, #0
@@ -79,6 +92,9 @@ stub_audio:
     ldr     s22, [x21]                  // att
     fmov    s0, #1.0
     fsub    s22, s0, s22                // g = 1 - att
+    ldr     s25, [x21, #8]              // peak (stats)
+    ldr     s26, [x21, #12]
+    fsub    s26, s0, s26                // gmin (stats)
     mov     x10, x19                    // float read ptr
     mov     x12, x19                    // pcm16 write ptr (always behind reads)
     mov     w11, w20
@@ -90,6 +106,7 @@ stub_audio:
     fmul    v0.2s, v0.2s, v16.s[0]      // master gain
     fabs    v2.2s, v0.2s
     fmaxnmp s2, v2.2s                   // stereo-linked peak
+    fmaxnm  s25, s25, s2
     fmul    s3, s2, s22
     fcmp    s3, s17
     b.le    .Lrelease
@@ -98,6 +115,7 @@ stub_audio:
 .Lrelease:
     fmadd   s22, s22, s18, s19          // g = g*rel + (1-rel)  -> 1.0
 .Lapply:
+    fminnm  s26, s26, s22
     fmul    v0.2s, v0.2s, v22.s[0]
     fminnm  v0.2s, v0.2s, v20.2s
     fmaxnm  v0.2s, v0.2s, v21.2s
@@ -116,6 +134,10 @@ stub_audio:
     fmov    s0, #1.0
     fsub    s0, s0, s22
     str     s0, [x21]                   // save att
+    str     s25, [x21, #8]
+    fmov    s0, #1.0
+    fsub    s0, s0, s26
+    str     s0, [x21, #12]
     cbz     w15, .Ldone
 
     // Block SIGPIPE on this (audio) thread so a dead reader yields EPIPE
@@ -237,6 +259,209 @@ stub_pan:
     fminnm  s5, s5, s0
     ret
 
+
+// ---------------------------------------------------------------------------
+// STUB 6: DirectSound voice creation wrapper.  Hooked at 0x5413d64
+// (bl voice_create inside IDirectSoundBuffer8::Play).  Same args as
+// voice_create(obj, data, bytes, channels, bits, rate, startpos, loop).
+//  - records the owning buffer of every voice (owner[])
+//  - if creation fails with a valid PCM format (pool of 256 voices full),
+//    reclaims finished non-looping voices through the game's own status-sync
+//    path (DSOUND_BUFFER_RESET(obj), the same as GetStatus) and retries
+//  - logs voice creations / failures / stats to the game log (stderr)
+// ---------------------------------------------------------------------------
+    .globl stub_vcreate
+stub_vcreate:
+    stp     x29, x30, [sp, #-112]!
+    mov     x29, sp
+    stp     x19, x20, [sp, #16]
+    stp     x21, x22, [sp, #32]
+    stp     x23, x24, [sp, #48]
+    stp     x25, x26, [sp, #64]
+    stp     x27, x28, [sp, #80]
+    mov     w19, w0                     // obj (guest address)
+    mov     x20, x1                     // data (host)
+    mov     w21, w2                     // bytes
+    mov     w22, w3                     // channels
+    mov     w23, w4                     // bits
+    mov     w24, w5                     // rate
+    mov     w25, w6                     // start position
+    mov     w26, w7                     // loop
+    bl      voice_create
+    mov     w27, w0
+    adrp    x28, STATE
+    add     x28, x28, :lo12:STATE
+    tbz     w27, #31, .Lv_ok
+
+    ldr     w8, [x28, #0x18]
+    add     w8, w8, #1
+    str     w8, [x28, #0x18]            // fails++
+    sub     w8, w22, #1
+    cmp     w8, #1
+    b.hi    .Lv_failed                  // channels not 1..2: format reject
+    cmp     w23, #8
+    ccmp    w23, #16, #4, ne
+    b.ne    .Lv_failed                  // bits not 8/16: format reject
+
+    str     wzr, [sp, #96]              // reclaimed = 0
+    mov     x27, #0
+.Lr_loop:
+    adrp    x8, VOICES
+    add     x8, x8, :lo12:VOICES
+    mov     x9, #0x58
+    madd    x8, x27, x9, x8
+    ldr     w9, [x8]
+    cmp     w9, #1
+    b.ne    .Lr_next                    // not a buffer voice
+    ldr     w9, [x8, #0x24]
+    cbz     w9, .Lr_next                // still playing
+    ldr     w9, [x8, #0x20]
+    cbnz    w9, .Lr_next                // looping
+    add     x9, x28, #0x40
+    ldr     w0, [x9, x27, lsl #2]
+    cbz     w0, .Lr_next                // unknown owner
+    adrp    x9, GOT_GUESTMEM
+    ldr     x9, [x9, :lo12:GOT_GUESTMEM]
+    ldr     x9, [x9]
+    add     w10, w0, #0x24
+    ldr     w10, [x9, w10, uxtw]
+    add     w11, w27, #1
+    cmp     w10, w11
+    b.ne    .Lr_next                    // owner no longer references this voice
+    bl      DSOUND_BUFFER_RESET         // sync status: frees the finished voice
+    ldr     w8, [sp, #96]
+    add     w8, w8, #1
+    str     w8, [sp, #96]
+.Lr_next:
+    add     x27, x27, #1
+    cmp     x27, #256
+    b.lo    .Lr_loop
+
+    ldr     w8, [sp, #96]
+    mov     w27, #-1
+    cbz     w8, .Lv_failed
+    ldr     w9, [x28, #0x20]
+    add     w9, w9, w8
+    str     w9, [x28, #0x20]            // reclaims += n
+    mov     w0, w19
+    mov     x1, x20
+    mov     w2, w21
+    mov     w3, w22
+    mov     w4, w23
+    mov     w5, w24
+    mov     w6, w25
+    mov     w7, w26
+    bl      voice_create                // retry
+    mov     w27, w0
+    adrp    x8, GOT_STDERR
+    ldr     x8, [x8, :lo12:GOT_STDERR]
+    ldr     x0, [x8]
+    adr     x1, str_reclaim
+    ldr     w2, [sp, #96]
+    mov     w3, w27
+    bl      fprintf
+    tbz     w27, #31, .Lv_ok
+
+.Lv_failed:
+    ldr     w8, [x28, #0x28]
+    cmp     w8, #32
+    b.hs    .Lv_ret
+    add     w8, w8, #1
+    str     w8, [x28, #0x28]
+    adrp    x8, GOT_STDERR
+    ldr     x8, [x8, :lo12:GOT_STDERR]
+    ldr     x0, [x8]
+    adr     x1, str_vfail
+    mov     w2, w19
+    mov     w3, w22
+    mov     w4, w23
+    mov     w5, w24
+    mov     w6, w21
+    bl      fprintf
+    bl      print_stats
+    b       .Lv_ret
+
+.Lv_ok:
+    add     x8, x28, #0x40
+    str     w19, [x8, w27, uxtw #2]     // owner[v] = obj
+    ldr     w8, [x28, #0x14]
+    add     w8, w8, #1
+    str     w8, [x28, #0x14]            // creates++
+    ldr     w9, [x28, #0x24]
+    cmp     w9, #64
+    b.hs    .Lv_stats
+    add     w9, w9, #1
+    str     w9, [x28, #0x24]
+    adrp    x8, GOT_STDERR
+    ldr     x8, [x8, :lo12:GOT_STDERR]
+    ldr     x0, [x8]
+    adr     x1, str_vplay
+    mov     w2, w19
+    mov     w3, w27
+    mov     w4, w22
+    mov     w5, w23
+    mov     w6, w24
+    mov     w7, w21
+    bl      fprintf
+.Lv_stats:
+    ldr     w8, [x28, #0x14]
+    tst     w8, #0xff
+    b.ne    .Lv_ret
+    bl      print_stats                 // every 256 voice creations
+.Lv_ret:
+    mov     w0, w27
+    ldp     x19, x20, [sp, #16]
+    ldp     x21, x22, [sp, #32]
+    ldp     x23, x24, [sp, #48]
+    ldp     x25, x26, [sp, #64]
+    ldp     x27, x28, [sp, #80]
+    ldp     x29, x30, [sp], #112
+    ret
+
+// print_stats(): one "[dsnd] stats" line, resets peak / attmax.
+print_stats:
+    stp     x29, x30, [sp, #-16]!
+    mov     x29, sp
+    adrp    x8, VOICES
+    add     x8, x8, :lo12:VOICES
+    mov     w9, #0                      // active voices
+    mov     w10, #0                     // finished-but-held voices
+    mov     w11, #256
+1:  ldr     w12, [x8]
+    cbz     w12, 2f
+    add     w9, w9, #1
+    cmp     w12, #1
+    b.ne    2f
+    ldr     w12, [x8, #0x24]
+    cbz     w12, 2f
+    add     w10, w10, #1
+2:  add     x8, x8, #0x58
+    subs    w11, w11, #1
+    b.ne    1b
+    adrp    x11, STATE
+    add     x11, x11, :lo12:STATE
+    ldr     w2, [x11, #0x10]
+    ldr     w3, [x11, #0x14]
+    ldr     w4, [x11, #0x18]
+    ldr     w5, [x11, #0x20]
+    mov     w6, w9
+    mov     w7, w10
+    ldr     s0, [x11, #8]
+    fcvt    d0, s0
+    ldr     s1, [x11, #12]
+    fmov    s2, #1.0
+    fsub    s1, s2, s1
+    fcvt    d1, s1
+    str     wzr, [x11, #8]
+    str     wzr, [x11, #12]
+    adrp    x8, GOT_STDERR
+    ldr     x8, [x8, :lo12:GOT_STDERR]
+    ldr     x0, [x8]
+    adr     x1, str_stats
+    bl      fprintf
+    ldp     x29, x30, [sp], #16
+    ret
+
 // ---------------------------------------------------------------------------
 // Constants & strings (inside the cave, reached with adr / ldr literal)
 // ---------------------------------------------------------------------------
@@ -251,6 +476,10 @@ str_fifo_env:     .asciz "FNV_PCM_FIFO"
 str_fifo_log:     .asciz "[audio] PCM FIFO fd=%d\n"
 str_set_capacity: .asciz "AAudioStreamBuilder_setBufferCapacityInFrames"
     .globl str_aaudio_log
+str_vplay:        .asciz "[dsnd] play buf=%#x voice=%d ch=%d bits=%d hz=%d bytes=%u\n"
+str_vfail:        .asciz "[dsnd] FAIL voice for buf=%#x ch=%d bits=%d hz=%d bytes=%u\n"
+str_reclaim:      .asciz "[dsnd] voice pool full: reclaimed %d finished voices, retry -> %d\n"
+str_stats:        .asciz "[dsnd] stats: callbacks=%u creates=%u fails=%u reclaims=%u active=%d finished_held=%d peak=%.3f min_gain=%.3f\n"
 str_aaudio_log:   .asciz "[audio] AAudio+lim %d Hz, burst %d, buffer %d\n"
-    .globl cave_end
-cave_end:
+    .globl fnvx_end
+fnvx_end:
