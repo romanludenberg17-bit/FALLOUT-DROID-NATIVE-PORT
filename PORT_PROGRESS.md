@@ -116,3 +116,15 @@ Fallout: New Vegas и Fallout 3, с дизайном Fallout Droid v1.1.85.
 - **Лицензия**: движок GPL-3.0-or-later → APK с ним распространяется на условиях GPL,
   исходники патчей лежат в этом репозитории.
 - Проверки на устройстве ещё не было (adb отсюда недоступен).
+
+### Сборка 2.0.0-alpha1 (versionCode 300)
+- `libnvforever.so` (GameActivity, release, strip-all): 164 МБ; экспортирует `GameActivity_onCreate`,
+  `android_main`, `Java_com_wastelanddroid_engine_NativeInput_{key,mouseMove,cursorTo,scroll}`;
+  зависимости только системные (`libaaudio`, `libandroid`, `liblog`, `libc`, `libm`, `libdl`).
+- APK 107 МБ, подписи v1+v2+v3 ключом Fallout Droid (`apksigner verify` OK), `lintVitalRelease` OK.
+- На устройстве **не проверено**: в контейнере нет KVM/adb.
+
+### Следующий шаг
+Проверка на vivo I2508: лаунчер → выбор папки FNV → «Играть» → лог движка
+(`Android/data/com.rommy.falloutdroid.nativeport/files/nvforever.log`, кнопка «Поделиться логами»).
+Затем: мобильный профиль рендера, графические настройки → аргументы движка, профиль Fallout 3.
