@@ -1,0 +1,4 @@
+.signing_keys/
+output/
+__pycache__/
+FalloutNVNativeWork/lib/arm64-v8a/libfnv.so
