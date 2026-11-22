@@ -325,6 +325,20 @@ public final class FalloutEngine {
             // As in the original: aiming holds the gun low with the crosshair (the engine's
             // "true iron sights" moves it to the eye and away from the usual framing).
             set.put("true-iron-sights", "0");
+            // Phones: the desktop effects stay off, whatever the engine's own settings page
+            // kept (its INI wins over the command line): ambient occlusion (GTAO), the fine
+            // and cloud/terrain shadows, light shafts, water effects, the mesh/terrain blend
+            // (a 1536² rgba16f atlas), anti-tiling, hazes; sun shadow maps at 2048, not 4096.
+            boolean highClass = quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH;
+            set.put("ambient-occlusion", "Off");
+            set.put("shadow-resolution", "2048");
+            for (String k : new String[]{"fine-shadows", "sharpen", "light-shafts", "water-effects", "mesh-terrain-blend",
+                    "terrain-height-blend", "terrain-anti-tiling", "cloud-shadows", "terrain-shadows", "heat-haze", "desert-haze"}) {
+                set.put(k, "0");
+            }
+            set.put("bloom", g.bloom ? "1" : "0");
+            set.put("anisotropic", g.anisotropy >= 8 ? "1" : "0");
+            set.put("water-reflections", g.waterReflections && highClass ? "1" : "0");
             return set;
         }
 

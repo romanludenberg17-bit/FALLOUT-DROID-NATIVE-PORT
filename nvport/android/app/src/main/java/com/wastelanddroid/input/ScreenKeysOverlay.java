@@ -123,7 +123,9 @@ public class ScreenKeysOverlay extends View {
         if (fight && (has(k, 272) || has(k, 273) || has(k, 19) || has(k, 47))) return false;
         if (!weapon && (has(k, 272) || has(k, 273))) return false;
         if (sneak && has(k, 29)) return false;
-        if (move && (has(k, 17) || has(k, 30) || has(k, 31) || has(k, 32) || has(k, 57))) return false;
+        // A scene the story holds the player in (movement taken: the opening at Doc
+        // Mitchell's, the vault's birthday): only the activate / talk key stays.
+        if (move) return has(k, 18);
         if (pip && has(k, 15)) return false;
         return true;
     }

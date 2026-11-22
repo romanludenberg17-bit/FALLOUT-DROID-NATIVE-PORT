@@ -25,6 +25,8 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
     private ScreenKeysOverlay overlay;
     private CrtOverlay crt;
     private QuickPanel panel;
+    private LoadingOverlay loading;
+    private long engineUpAt;
     private boolean fo3;
     private GamepadInput gamepad;
 
@@ -59,6 +61,10 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
         overlay.bringToFront();
         panel = new QuickPanel(this, this);
         addContentView(panel, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        // Over everything until the engine draws its first frames.
+        loading = new LoadingOverlay(this, fo3);
+        addContentView(loading, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         if (android.os.Build.VERSION.SDK_INT >= 33) {
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
@@ -175,6 +181,12 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
             if (restart && !restarting) {
                 restartGame();
                 return;
+            }
+            // The engine draws once it reports a screen: the loading picture goes a moment
+            // later, so its first frames are behind it.
+            if (loading != null && !loading.finishing() && state != 0) {
+                if (engineUpAt == 0) engineUpAt = android.os.SystemClock.uptimeMillis();
+                else if (android.os.SystemClock.uptimeMillis() - engineUpAt > 700) loading.finish();
             }
             if (overlay != null) {
                 overlay.setUiState(state);
