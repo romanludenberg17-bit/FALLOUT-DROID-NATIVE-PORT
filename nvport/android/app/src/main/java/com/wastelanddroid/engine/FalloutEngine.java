@@ -171,9 +171,11 @@ public final class FalloutEngine {
             ap.edit().putBoolean("flagship_v1", true).commit();
             new java.io.File(homeDir(context, game.id), "texture_quality.txt").delete();
         }
-        boolean auto = flagshipFirst || ap.getBoolean("gfx_auto", false) || !ap.getBoolean("gfx_auto_v26", false);
+        // v27: the class values once more for everyone (a low class without FXAA and with
+        // sharpening, cloud shadows on a strong chip, the hidden shadow rows reset).
+        boolean auto = flagshipFirst || ap.getBoolean("gfx_auto", false) || !ap.getBoolean("gfx_auto_v27", false);
         if (auto) {
-            SharedPreferences.Editor ed = ap.edit().putBoolean("gfx_auto", false).putBoolean("gfx_auto_v25", true).putBoolean("gfx_auto_v26", true).putBoolean("gfx_custom", false).remove(GPU_SAFE);
+            SharedPreferences.Editor ed = ap.edit().putBoolean("gfx_auto", false).putBoolean("gfx_auto_v25", true).putBoolean("gfx_auto_v26", true).putBoolean("gfx_auto_v27", true).putBoolean("gfx_custom", false).remove(GPU_SAFE);
             for (String k : new String[]{"terrain", "shafts", "ao", "clouds", "haze", "water"}) ed.putBoolean("fx_" + k, false);
             ed.commit();
         }
@@ -450,7 +452,10 @@ public final class FalloutEngine {
             // otherwise shimmer: cheap on tile-based mobile GPUs, resolved in tile memory.
             // The picture rows the player sets in the game's own settings page: the launcher
             // gives a first value only ("?"), except in the GPU safe mode.
-            set.put("anti-aliasing", flagship ? "?4x" : safe > 0 ? "FXAA" : quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? "?2x" : "?FXAA");
+            // A low class draws at 480p: FXAA's blur over so few pixels made the picture
+            // "soap" (players' reports); it gets none, and the sharpening below instead.
+            boolean low = quality == com.wastelanddroid.game.DeviceProfile.Quality.LOW;
+            set.put("anti-aliasing", flagship ? "?4x" : safe > 0 ? "FXAA" : quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? "?2x" : low ? "?Off" : "?FXAA");
             // No upscaler on a phone: FSR 3.1's compute passes at full precision (the
             // Adreno driver reports no 16-bit floats) are heavier than the pixels they save.
             set.put("upscaler", "Off");
@@ -487,10 +492,13 @@ public final class FalloutEngine {
             // and cloud/terrain shadows, light shafts, water effects, the mesh/terrain blend
             // (a 1536² rgba16f atlas), anti-tiling, hazes; sun shadow maps at 2048, not 4096.
             boolean highClass = quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH;
-            set.put("shadow-resolution", flagship ? "4096" : "2048");
-            for (String k : new String[]{"fine-shadows", "sharpen", "mesh-terrain-blend", "terrain-shadows"}) {
+            set.put("shadow-resolution", "2048");
+            for (String k : new String[]{"fine-shadows", "mesh-terrain-blend", "terrain-shadows"}) {
                 set.put(k, "0");
             }
+            // Contrast-adaptive sharpening (one cheap pass): it takes the blur off a phone's
+            // reduced resolution, so it is on below the high class, a first value only.
+            set.put("sharpen", quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? "?0" : strong ? "?1" : "1");
             // The launcher's "Эффекты" switches (off by default, each costs frames; all off in
             // the GPU safe mode): the engine's own counterparts of the effect mods (Vegas
             // Shaders, Vanilla Plus Terrain), whose DLLs cannot run here.
@@ -499,7 +507,9 @@ public final class FalloutEngine {
             set.put("terrain-anti-tiling", fx && fxTerrain ? "1" : "0");
             set.put("light-shafts", fx && fxShafts ? "1" : "0");
             set.put("ambient-occlusion", fx && fxAo ? "Performance" : "Off");
-            set.put("cloud-shadows", fx && fxClouds ? "1" : "0");
+            // Cloud shadows: on by default on a strong chip (its settings page has the row),
+            // off on the others unless the launcher's switch is on.
+            set.put("cloud-shadows", strong ? (fx ? "?1" : "?0") : fx && fxClouds ? "1" : "0");
             set.put("heat-haze", fx && fxHaze ? "1" : "0");
             set.put("desert-haze", fx && fxHaze ? "1" : "0");
             set.put("water-effects", fx && fxWater ? "1" : "0");
@@ -515,8 +525,10 @@ public final class FalloutEngine {
             // A strong chip (strongGraphics): the rows its settings page shows again are the
             // player's; the launcher's values are first values only there.
             if (strong) {
-                for (String k : new String[]{"shadow-resolution", "fine-shadows", "sharpen", "mesh-terrain-blend", "terrain-shadows",
-                        "terrain-height-blend", "terrain-anti-tiling", "light-shafts", "ambient-occlusion", "cloud-shadows",
+                // (Shadow resolution, fine, terrain and cloud shadows stay the launcher's:
+                // 4096² maps and those passes broke the picture on an 8 Gen 5, alpha35.)
+                for (String k : new String[]{"sharpen", "mesh-terrain-blend",
+                        "terrain-height-blend", "terrain-anti-tiling", "light-shafts", "ambient-occlusion",
                         "heat-haze", "desert-haze", "water-effects", "water-reflections", "water-mirror", "smooth-terrain",
                         "anti-aliasing", "sun-shadows", "grass"}) {
                     String v = set.get(k);

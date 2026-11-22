@@ -145,8 +145,14 @@ public final class LoadingOverlay extends View {
         if (fadeFrom >= 0) {
             alpha = 1f - (now - fadeFrom) / 500f;
             if (alpha <= 0f) {
-                setVisibility(GONE);
-                if (getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) getParent()).removeView(this);
+                // Removed after this draw, never inside it: a child removed while its parent
+                // draws crashed the activity ("ContentFrameLayout contains null child").
+                if (getVisibility() != GONE) {
+                    setVisibility(GONE);
+                    post(() -> {
+                        if (getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) getParent()).removeView(this);
+                    });
+                }
                 return;
             }
         }

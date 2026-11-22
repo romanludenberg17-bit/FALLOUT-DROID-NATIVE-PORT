@@ -1364,10 +1364,10 @@ index bbdb0c0..0c6c5d1 100644
  libloading = "0.8.9"
 diff --git a/engine/nvforever/src/android_input.rs b/engine/nvforever/src/android_input.rs
 new file mode 100644
-index 0000000..c2feb33
+index 0000000..f726282
 --- /dev/null
 +++ b/engine/nvforever/src/android_input.rs
-@@ -0,0 +1,609 @@
+@@ -0,0 +1,612 @@
 +//! [nvport] Input from the Android launcher (Fallout Droid): on-screen keys, touch look,
 +//! gamepads mapped to PC keys and physical keyboards/mice arrive through JNI
 +//! (`com.wastelanddroid.engine.NativeInput`) and are written as Bevy's own input messages,
@@ -1673,6 +1673,9 @@ index 0000000..c2feb33
 +const STRONG_PHONE_HIDDEN: &[&str] = &[
 +    "upscaler", "upscaler-quality", "dlss-model", "fsr-library", "frame-generation", "frame-generation-frames",
 +    "latency-reduction", "display-sync", "physics-rate",
++    // Too heavy or broken on a phone's GPU even at the top (alpha35: 4096² maps, terrain
++    // and cloud shadows gave yellow stripes and a lost device).
++    "shadow-resolution", "terrain-shadows", "fine-shadows",
 +];
 +
 +/// [nvport] The texture quality row: the mip levels the textures lose (High 0, Medium 1,
@@ -3127,10 +3130,10 @@ index bf97e78..4b28395 100644
              crate::sky::initial_fog(),
              bevy::core_pipeline::prepass::DepthPrepass,
 diff --git a/engine/nvforever/src/shadow_rate.rs b/engine/nvforever/src/shadow_rate.rs
-index d428306..363f2ce 100644
+index d428306..e1bcc59 100644
 --- a/engine/nvforever/src/shadow_rate.rs
 +++ b/engine/nvforever/src/shadow_rate.rs
-@@ -319,7 +319,13 @@ pub(crate) fn hold_cascades(
+@@ -319,7 +319,17 @@ pub(crate) fn hold_cascades(
      if let Some(share) = share.as_mut().filter(|s| s.0.is_some()) {
          share.0 = None;
      }
@@ -3139,8 +3142,12 @@ index d428306..363f2ce 100644
 +    // moved at a phone's uneven frame rate), the farther ones every other and fourth frame.
 +    // Every cascade every frame: a held far cascade still shimmered (owner report, alpha23).
 +    const PHONE_SCHEDULE: [(u32, u32); 3] = [(1, 0), (1, 0), (1, 0)];
-+    let schedule: &[(u32, u32)] = if on.0 && cfg!(target_os = "android") {
-+        &PHONE_SCHEDULE
++    // [nvport] On a phone no cascade is ever held, whatever the shadow quality: Quality's
++    // staggered schedule held cascades and remade the held 4096² array (4 and 5 layers by
++    // turns) every few frames: yellow stripes over the screen, then a lost GPU (owner's
++    // report, alpha35).
++    let schedule: &[(u32, u32)] = if cfg!(target_os = "android") {
++        if on.0 { &PHONE_SCHEDULE } else { &[] }
 +    } else if on.0 {
          &PERFORMANCE_SCHEDULE
      } else if staggered() {
@@ -3334,6 +3341,38 @@ index 1bc62a8..81a905e 100644
              AmbientLight { color: AMBIENT_COLOR, brightness: AMBIENT * unit, ..default() },
              Transform::IDENTITY,
              layer.clone(),
+diff --git a/engine/nvforever/src/world.rs b/engine/nvforever/src/world.rs
+index b970315..a46cbb5 100644
+--- a/engine/nvforever/src/world.rs
++++ b/engine/nvforever/src/world.rs
+@@ -819,7 +819,15 @@ pub fn take_cell_work(
+ ) {
+     let free = !streamer.settled || loading.is_some_and(|l| l.unseen_frames());
+     models.take_fetched(time.elapsed_secs_f64(), (!free).then_some(TAKE_IN_BUDGET));
+-    let limit = (!free).then(upload_bytes_per_frame);
++    // [nvport] A phone always has a limit: behind the loading screen too, everything the
++    // start's cells needed went to the GPU in one frame, and the Adreno driver took the
++    // long submission for a hang (a lost device 2-3 s after each load at the same places,
++    // owner's reports). Loading keeps a larger share a frame.
++    let limit = if cfg!(target_os = "android") {
++        Some(if free { 64 << 20 } else { 16 << 20 })
++    } else {
++        (!free).then(upload_bytes_per_frame)
++    };
+     if let Some(mut b) = bytes.filter(|b| b.max_bytes != limit) {
+         b.max_bytes = limit;
+     }
+@@ -829,7 +837,9 @@ pub fn take_cell_work(
+ /// is marked changed again ([`respecialize_late_meshes`]): about 2 s at 60 frames a
+ /// second [engineering choice: the limit holds back at most a few frames' worth of
+ /// assets, and each mark costs the entity one more pipeline lookup].
+-const LATE_MESH_FRAMES: [u32; 7] = [2, 4, 8, 16, 32, 64, 128];
++/// [nvport] Longer on a phone: a big town's meshes (Megaton on Mali, with every texture
++/// encoded to ETC2 first) waited past 128 frames, and those walls were never drawn.
++const LATE_MESH_FRAMES: [u32; 17] = [2, 4, 8, 16, 32, 64, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048, 3072, 4096];
+ 
+ /// Entities given a mesh while the upload limit was on, with the frame they got it.
+ #[derive(Resource, Default)]
 diff --git a/engine/vendor/bevy_post_process/src/auto_exposure/mod.rs b/engine/vendor/bevy_post_process/src/auto_exposure/mod.rs
 index 7566f48..c5c142e 100644
 --- a/engine/vendor/bevy_post_process/src/auto_exposure/mod.rs
