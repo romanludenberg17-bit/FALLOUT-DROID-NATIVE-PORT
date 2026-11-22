@@ -9,6 +9,8 @@ name = "Русский"
 # [nvport] The phone build's settings page (engine/nvforever/src/android_input.rs).
 "Too heavy for a phone: 2x, FXAA or SMAA" = "Слишком тяжело для телефона: 2x, FXAA или SMAA"
 "Not available on a phone" = "Недоступно на телефоне"
+"Force Lock" = "Взломать силой"
+"Average" = "Средне"
 "Shimmers at a phone's frame rate: Fast or Smooth" = "Мерцает при частоте кадров телефона: Fast или Smooth"
 "Note:" = "Запись:"
 "Items added:" = "Добавлено предметов:"

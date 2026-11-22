@@ -443,6 +443,32 @@ index 8d81a9d..dbd9c13 100644
      let line = first_line(face, s);
      let w = line.width * scale;
      let x = match align {
+diff --git a/engine/nvf-play/src/lockpick.rs b/engine/nvf-play/src/lockpick.rs
+index 211d51d..f65dce6 100644
+--- a/engine/nvf-play/src/lockpick.rs
++++ b/engine/nvf-play/src/lockpick.rs
+@@ -235,7 +235,7 @@ pub struct Session {
+ impl Session {
+     pub fn force_label(&self) -> String {
+         // [observed: "Force Lock [15%]", the owner's screenshots as noted 2026-10-11]
+-        format!("Force Lock [{:.0}%]", self.game.force_chance())
++        format!("{} [{:.0}%]", fnv_util::words::tr("Force Lock"), self.game.force_chance())
+     }
+ 
+     /// How much of the menu is drawn: 1, down to 0 as it leaves.
+diff --git a/engine/nvf-play/src/lockpick/screen.rs b/engine/nvf-play/src/lockpick/screen.rs
+index 3112d64..7be9d51 100644
+--- a/engine/nvf-play/src/lockpick/screen.rs
++++ b/engine/nvf-play/src/lockpick/screen.rs
+@@ -329,7 +329,7 @@ fn spawn(commands: &mut Commands, c: &mut Ctx, s: &Session, view: Option<&LockVi
+                 // The rows' titles are the file's game settings (`Words`, from the game
+                 // strings table) [documented: lockpick_menu.xml].
+                 let words = &s.words;
+-                let rows = [(&words.skill, format!("{:.0}", s.game.skill)), (&words.picks, s.game.pins.to_string()), (&words.level, s.game.level.name().to_string())];
++                let rows = [(&words.skill, format!("{:.0}", s.game.skill)), (&words.picks, s.game.pins.to_string()), (&words.level, fnv_util::words::tr_str(s.game.level.name()).to_string())];
+                 for ((title, value), y) in rows.iter().zip(ROWS_Y) {
+                     c.text(b, title, ROW_X, y, false, bright);
+                     c.text(b, value, VALUE_X, y, true, bright);
 diff --git a/engine/nvf-play/src/music.rs b/engine/nvf-play/src/music.rs
 index 70bfca9..d0b27f7 100644
 --- a/engine/nvf-play/src/music.rs
@@ -908,10 +934,10 @@ index bbdb0c0..ab27c2a 100644
  libloading = "0.8.9"
 diff --git a/engine/nvforever/src/android_input.rs b/engine/nvforever/src/android_input.rs
 new file mode 100644
-index 0000000..229cb89
+index 0000000..a279e2a
 --- /dev/null
 +++ b/engine/nvforever/src/android_input.rs
-@@ -0,0 +1,446 @@
+@@ -0,0 +1,450 @@
 +//! [nvport] Input from the Android launcher (Fallout Droid): on-screen keys, touch look,
 +//! gamepads mapped to PC keys and physical keyboards/mice arrive through JNI
 +//! (`com.wastelanddroid.engine.NativeInput`) and are written as Bevy's own input messages,
@@ -1289,10 +1315,14 @@ index 0000000..229cb89
 +    held: Option<Res<nvf_play::dialogue::WorldHeld>>,
 +    look: Option<Res<nvf_play::dialogue::FreeLook>>,
 +    locks: Option<Res<nvf_play::control::ControlLocks>>,
++    lockpick: Option<Res<nvf_play::lockpick::LockpickScreen>>,
 +) {
 +    let Ok((window, cursor)) = windows.single() else { return };
 +    let state = if main_menu.is_some_and(|m| m.open) {
 +        6
++    } else if lockpick.is_some_and(|l| l.0.is_some()) {
++        // Picking a lock: the touch layer turns the screwdriver from the left of the screen.
++        11
 +    } else if creator.is_some_and(|c| c.is_open()) || chargen.is_some_and(|c| c.progress().is_some()) || levelup.is_some_and(|l| l.progress().is_some()) {
 +        7
 +    } else if paused.is_some_and(|p| p.0) {
@@ -2110,16 +2140,18 @@ index 22ad677..df42c57 100644
                  warn!(
                      "Could not set cursor grab mode for window {}: {}",
 diff --git a/lang/ru.toml b/lang/ru.toml
-index 69dc72c..77f11a6 100644
+index 69dc72c..22423c4 100644
 --- a/lang/ru.toml
 +++ b/lang/ru.toml
-@@ -6,6 +6,14 @@
+@@ -6,6 +6,16 @@
  name = "Русский"
  
  [words]
 +# [nvport] The phone build's settings page (engine/nvforever/src/android_input.rs).
 +"Too heavy for a phone: 2x, FXAA or SMAA" = "Слишком тяжело для телефона: 2x, FXAA или SMAA"
 +"Not available on a phone" = "Недоступно на телефоне"
++"Force Lock" = "Взломать силой"
++"Average" = "Средне"
 +"Shimmers at a phone's frame rate: Fast or Smooth" = "Мерцает при частоте кадров телефона: Fast или Smooth"
 +"Note:" = "Запись:"
 +"Items added:" = "Добавлено предметов:"
@@ -2128,7 +2160,7 @@ index 69dc72c..77f11a6 100644
  # [design, #2200; engine/nvf-play/src/pause.rs] NVForever's device selection.
  "Automatic Input Switching" = "Автоматическая смена устройства ввода"
  "On: a controller button, stick or trigger selects Controller; a key or mouse click selects Keyboard and Mouse (mouse motion does not). Off: choose Input Device yourself." = "Вкл.: кнопка, стик или курок геймпада выбирает геймпад; клавиша или щелчок мыши — клавиатуру и мышь (движение мыши — нет). Выкл.: выбирайте устройство сами."
-@@ -18,7 +26,7 @@ name = "Русский"
+@@ -18,7 +28,7 @@ name = "Русский"
  "Close In on the Speaker" = "Приближение к говорящему"
  "On: in a conversation the view closes in on the speaker, the background out of focus; the mouse moves only the cursor. Off: you can look around." = "Вкл.: в разговоре взгляд приближается к говорящему, фон размыт; мышь двигает только курсор. Выкл.: можно осматриваться."
  "Goodbye hint" = "Подсказка «Goodbye»"
@@ -2137,7 +2169,7 @@ index 69dc72c..77f11a6 100644
  "Aim assist" = "Помощь в прицеливании"
  "Controller only. On: the right stick turns slower over a nearby hostile, and aiming down the sights pulls the view onto one near the crosshair." = "Только для геймпада. Вкл.: правый стик поворачивает медленнее над ближним врагом, а прицеливание наводит взгляд на врага рядом с перекрестием."
  "Controller" = "Геймпад"
-@@ -31,20 +39,20 @@ name = "Русский"
+@@ -31,20 +41,20 @@ name = "Русский"
  "Kill camera" = "Камера убийства"
  "When a VATS shot kills its last mark, a camera shows the kill. Last enemy: only when no other enemy still fights you. Every kill: always. Off: never." = "Когда выстрел в VATS убивает последнюю цель, камера показывает убийство. Последний враг: только когда с вами больше никто не сражается. Каждое убийство: всегда. Выкл.: никогда."
  "V.A.T.S. style" = "Стиль V.A.T.S."
@@ -2163,7 +2195,7 @@ index 69dc72c..77f11a6 100644
  "Interface" = "Интерфейс"
  "Reverb" = "Реверберация"
  "World sounds echo as the place you are in does (a cave, a hall, a small room). Off: they do not." = "Звуки мира отражаются так, как в месте, где вы находитесь (пещера, зал, маленькая комната). Выкл.: без отражений."
-@@ -62,11 +70,11 @@ name = "Русский"
+@@ -62,11 +72,11 @@ name = "Русский"
  "Effects" = "Эффекты"
  "Every other sound: weapons, impacts, menus, doors and the sounds of places." = "Все прочие звуки: оружие, удары, меню, двери и звуки мест."
  "Radio" = "Радио"
@@ -2178,7 +2210,7 @@ index 69dc72c..77f11a6 100644
  "Audio" = "Звук"
  "Tweaks" = "Твики"
  "Game" = "Общие"
-@@ -79,9 +87,9 @@ name = "Русский"
+@@ -79,9 +89,9 @@ name = "Русский"
  "Keyboard search" = "Поиск с клавиатуры"
  "No settings here." = "Здесь нет настроек."
  "No results." = "Ничего не найдено."
@@ -2190,7 +2222,7 @@ index 69dc72c..77f11a6 100644
  "Button style" = "Вид кнопок"
  "The names and pictures of the controller's buttons in prompts and hints. Auto: a PlayStation's when the controller says it is one, else an Xbox's." = "Названия и значки кнопок геймпада в подсказках. Авто: как у PlayStation, когда геймпад сообщает, что он такой, иначе как у Xbox."
  "Light and noise gauges while sneaking" = "Шкалы света и шума в скрытности"
-@@ -100,13 +108,13 @@ name = "Русский"
+@@ -100,13 +110,13 @@ name = "Русский"
  "Hardcore mode" = "Режим хардкор"
  "On: you need water, food and sleep, stimpaks heal over time, ammo has weight, crippled limbs need a doctor's bag or a doctor. Off: none of that." = "Вкл.: нужны вода, еда и сон, стимуляторы лечат постепенно, патроны имеют вес, покалеченным конечностям нужна докторская сумка или доктор. Выкл.: ничего этого нет."
  "HUD red" = "HUD: красный"
@@ -2207,7 +2239,7 @@ index 69dc72c..77f11a6 100644
  "HUD scale" = "Масштаб HUD"
  "Size of the in-game HUD, independent of menu scale. Takes effect at the next start." = "Размер HUD в игре, не зависящий от масштаба меню. Вступает в силу при следующем запуске."
  "Menu scale" = "Масштаб меню"
-@@ -128,58 +136,58 @@ name = "Русский"
+@@ -128,58 +138,58 @@ name = "Русский"
  "Monitor" = "Монитор"
  "The display the game opens on in full screen (the first display until you pick one)." = "Экран, на котором игра открывается в полноэкранном режиме (первый экран, пока вы не выберете другой)."
  "Body in first person" = "Тело от первого лица"
@@ -2279,7 +2311,7 @@ index 69dc72c..77f11a6 100644
  "DLSS model" = "Модель DLSS"
  "Which DLSS model rebuilds the picture (NVIDIA calls them presets). Default, recommended: NVIDIA picks per mode. Only while DLSS draws." = "Какая модель DLSS восстанавливает картинку (NVIDIA называет их пресетами). По умолчанию, рекомендуется: NVIDIA выбирает по режиму. Только пока рисует DLSS."
  "Default" = "По умолчанию"
-@@ -206,42 +214,42 @@ name = "Русский"
+@@ -206,42 +216,42 @@ name = "Русский"
  "How far from you items lying in the world are drawn, as a part of the farthest the loaded cells reach." = "Как далеко от вас рисуются предметы, лежащие в мире, как доля самой большой дальности загруженных ячеек."
  "Shadow distance" = "Дальность теней"
  "Grass distance" = "Дальность травы"
@@ -2333,7 +2365,7 @@ index 69dc72c..77f11a6 100644
  "Off (upscaling active)" = "Выкл. (работает масштабирование)"
  "DLSS (restart)" = "DLSS (перезапуск)"
  "Needs an upscaler" = "Нужно масштабирование"
-@@ -249,7 +257,7 @@ name = "Русский"
+@@ -249,7 +259,7 @@ name = "Русский"
  "DLSS needs Windows" = "DLSS работает только в Windows"
  "DLSS needs the Vulkan renderer" = "Для DLSS нужна отрисовка через Vulkan"
  "DLSS files missing: choose Download DLSS… in this list, or put them in the dlss folder beside nvforever.exe, then restart" = "Нет файлов DLSS: выберите «Скачать DLSS…» в этом списке или положите их в папку dlss рядом с nvforever.exe и перезапустите"
@@ -2342,7 +2374,7 @@ index 69dc72c..77f11a6 100644
  "A file in the dlss folder is not from the tested NVIDIA release (Streamline 2.14.16)" = "Файл в папке dlss не из проверенного выпуска NVIDIA (Streamline 2.14.16)"
  "DLSS did not start (the log says why)" = "DLSS не запустился (причина в журнале)"
  "A graphics card the game may use cannot run DLSS" = "Видеокарта, которую может выбрать игра, не поддерживает DLSS"
-@@ -267,7 +275,7 @@ name = "Русский"
+@@ -267,7 +277,7 @@ name = "Русский"
  "Needs vsync off" = "Нужна выключенная вертикальная синхронизация"
  "Needs DLSS frame generation" = "Нужна генерация кадров DLSS"
  "Frames made between the real ones: smoother motion, input a little later. FSR 3.1 needs FSR upscaling; DLSS an RTX 40 or newer. Not in the original." = "Кадры между настоящими: движение плавнее, отклик чуть позже. FSR 3.1 нужно масштабирование FSR, DLSS — RTX 40 или новее. Нет в оригинале."
@@ -2351,7 +2383,7 @@ index 69dc72c..77f11a6 100644
  "{choice} at a limit of {limit}: {real} real frames a second, which can feel choppy. Fewer generated frames, or a limit up to the display's refresh rate, give more." = "{choice} при пределе {limit}: {real} настоящих кадров в секунду, это может выглядеть рывками. Меньше сгенерированных кадров или предел до частоты экрана дадут больше."
  "Controls" = "Управление"
  "HUD colour" = "Цвет HUD"
-@@ -296,7 +304,7 @@ name = "Русский"
+@@ -296,7 +306,7 @@ name = "Русский"
  "Back" = "Назад"
  "Defaults" = "По умолчанию"
  "Warning" = "Внимание"
@@ -2360,7 +2392,7 @@ index 69dc72c..77f11a6 100644
  "Are you sure you want to quit?" = "Вы действительно хотите выйти?"
  "Main Menu" = "Главное меню"
  "Exit Game" = "Выйти из игры"
-@@ -318,7 +326,7 @@ name = "Русский"
+@@ -318,7 +328,7 @@ name = "Русский"
  "Cross" = "Крест"
  "Arrows" = "Стрелки"
  "Amber" = "Янтарный"
@@ -2369,7 +2401,7 @@ index 69dc72c..77f11a6 100644
  "Blue" = "Синий"
  "White" = "Белый"
  "Custom" = "Свой"
-@@ -345,7 +353,7 @@ name = "Русский"
+@@ -345,7 +355,7 @@ name = "Русский"
  "Downloading DLSS… {percent}%" = "Загрузка DLSS… {percent}%"
  "Upscaling by NVIDIA Corporation, through NVIDIA Streamline" = "Масштабирование: NVIDIA Corporation, через NVIDIA Streamline"
  "Download DLSS" = "Скачать DLSS"
@@ -2378,7 +2410,7 @@ index 69dc72c..77f11a6 100644
  "NVIDIA's RTX SDKs licence for nvngx_dlss.dll and nvngx_dlssg.dll" = "Лицензия NVIDIA RTX SDK для nvngx_dlss.dll и nvngx_dlssg.dll"
  "Lines {first} to {last} of {total}. PgUp, PgDn, the arrow keys or the mouse wheel scroll." = "Строки {first}-{last} из {total}. Прокрутка: PgUp, PgDn, стрелки или колесо мыши."
  "I accept starts the download; the game goes on meanwhile." = "«Принимаю» начинает загрузку; игра тем временем продолжается."
-@@ -358,11 +366,11 @@ name = "Русский"
+@@ -358,11 +368,11 @@ name = "Русский"
  "Checking the files..." = "Проверка файлов..."
  "Putting the files in the dlss folder..." = "Файлы кладутся в папку dlss..."
  "{fetched} MB of {total} MB" = "{fetched} МБ из {total} МБ"
@@ -2392,7 +2424,7 @@ index 69dc72c..77f11a6 100644
  "Installed in {folder}." = "Установлено в {folder}."
  "Close" = "Закрыть"
  "DLSS was not downloaded" = "DLSS не скачан"
-@@ -370,7 +378,7 @@ name = "Русский"
+@@ -370,7 +380,7 @@ name = "Русский"
  "GitHub answered with an error (HTTP {status})." = "GitHub ответил ошибкой (HTTP {status})."
  "What GitHub sent was not NVIDIA's expected archive; nothing was kept." = "GitHub прислал не тот архив NVIDIA, что ожидался; ничего не сохранено."
  "{name} did not match the tested release; nothing was kept." = "{name} не совпал с проверенным выпуском; ничего не сохранено."
@@ -2401,7 +2433,7 @@ index 69dc72c..77f11a6 100644
  "The dlss folder already holds {name}, which was left as it is: remove it, or copy the files by hand." = "В папке dlss уже есть {name}, он оставлен как есть: удалите его или скопируйте файлы вручную."
  "The files could not be written to the dlss folder." = "Не удалось записать файлы в папку dlss."
  "The download stopped on an internal error; the log says more." = "Загрузка остановилась из-за внутренней ошибки; подробности в журнале."
-@@ -406,7 +414,7 @@ name = "Русский"
+@@ -406,7 +416,7 @@ name = "Русский"
  # [design, the menu overhaul (docs/design/settings-page.md); engine/nvf-play/src/settings_layout.rs,
  # pause.rs] The settings page's categories, the Tweaks tab's groups and categories, the page's
  # own words and the Menu font row (owner 2026-11-16: the page read in English and as ? in Russian).
@@ -2410,7 +2442,7 @@ index 69dc72c..77f11a6 100644
  "Frame Rate" = "Частота кадров"
  "Upscaling and Anti-Aliasing" = "Масштабирование и сглаживание"
  "Frame Generation and Latency" = "Генерация кадров и задержка"
-@@ -431,22 +439,22 @@ name = "Русский"
+@@ -431,22 +441,22 @@ name = "Русский"
  "World Interaction" = "Взаимодействие с миром"
  "Quick Loot" = "Быстрый лут"
  "Enabled" = "Включено"
@@ -2438,7 +2470,7 @@ index 69dc72c..77f11a6 100644
  "Search (a body or container)" = "Обыскать"
  "Empty" = "Пусто"
  "ITEM" = "ПРЕДМЕТ"
-@@ -457,7 +465,7 @@ name = "Русский"
+@@ -457,7 +467,7 @@ name = "Русский"
  "Report a Bug" = "Сообщить об ошибке"
  "Previous Category" = "Предыдущая категория"
  "Next Category" = "Следующая категория"
@@ -2447,7 +2479,7 @@ index 69dc72c..77f11a6 100644
  "Which group of tweaks the list shows: Enter or a click opens the groups, Left and Right step. The search finds every tweak." = "Какую группу твиков показывает список: Enter или щелчок открывает группы, Влево и Вправо листают. Поиск находит любой твик."
  "Category" = "Категория"
  "Press a key..." = "Нажмите клавишу..."
-@@ -470,9 +478,9 @@ name = "Русский"
+@@ -470,9 +480,9 @@ name = "Русский"
  "Vertical Sensitivity" = "Вертикальная чувствительность"
  "Aim Sensitivity" = "Чувствительность при прицеливании"
  "Menu font" = "Шрифт меню"
@@ -2459,7 +2491,7 @@ index 69dc72c..77f11a6 100644
  "Quality of Life" = "Удобство"
  "Menus" = "Меню"
  "Cheats" = "Читы"
-@@ -530,23 +538,200 @@ name = "Русский"
+@@ -530,23 +540,200 @@ name = "Русский"
  # [design, #2014, #2317, #2662, #2688, #2149, #2169, #2403] Rows main registers without a Russian line.
  "On: when choices appear the view returns to the speaker (with the close-up off). Needs \"Turn to Each Other\"." = "Вкл.: когда появляются варианты ответа, вид возвращается к собеседнику (при выключенном приближении). Нужен «Поворот друг к другу в диалоге»."
  "Grass fires" = "Пожары в траве"

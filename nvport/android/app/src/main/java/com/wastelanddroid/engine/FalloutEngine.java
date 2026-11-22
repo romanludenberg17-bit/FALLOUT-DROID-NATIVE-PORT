@@ -164,9 +164,9 @@ public final class FalloutEngine {
         // version): the effects off and the picture rows set from the class, over the
         // player's earlier choices.
         SharedPreferences ap = Prefs.get(context);
-        boolean auto = ap.getBoolean("gfx_auto", false) || !ap.getBoolean("gfx_auto_v25", false);
+        boolean auto = ap.getBoolean("gfx_auto", false) || !ap.getBoolean("gfx_auto_v26", false);
         if (auto) {
-            SharedPreferences.Editor ed = ap.edit().putBoolean("gfx_auto", false).putBoolean("gfx_auto_v25", true).putBoolean("gfx_custom", false).remove(GPU_SAFE);
+            SharedPreferences.Editor ed = ap.edit().putBoolean("gfx_auto", false).putBoolean("gfx_auto_v25", true).putBoolean("gfx_auto_v26", true).putBoolean("gfx_custom", false).remove(GPU_SAFE);
             for (String k : new String[]{"terrain", "shafts", "ao", "clouds", "haze", "water"}) ed.putBoolean("fx_" + k, false);
             ed.commit();
         }
@@ -311,7 +311,9 @@ public final class FalloutEngine {
             // graphics settings (a custom setup), never from a preset.
             p.custom = Prefs.get(context).getBoolean("gfx_custom", false);
             p.fpsCounter = Prefs.get(context).getBoolean("fps_counter", true);
-            if (!p.custom) p.g.shadows = 0;
+            // Sun shadows: on (Performance) for a high class (their shimmer is fixed: every
+            // cascade drawn every frame, no temporal filter), off below it.
+            if (!p.custom) p.g.shadows = p.quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? 2 : 0;
             if (p.quality == com.wastelanddroid.game.DeviceProfile.Quality.LOW) {
                 if (!p.custom) p.g.grassDensity = 0;
                 p.mipSkip = Math.max(p.mipSkip, 2);

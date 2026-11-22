@@ -67,7 +67,12 @@ public class ScreenKeysOverlay extends View {
 
     // ---- smart hiding and menu gestures, by what the engine shows (NativeInput.uiState)
     public static final int UI_PLAY = 1, UI_MENU = 2, UI_FILM = 3, UI_PIPBOY = 4, UI_TALK = 5,
-            UI_MAIN_MENU = 6, UI_CHARGEN = 7, UI_PAUSE = 8, UI_MESSAGE = 9, UI_PIPBOY_MAP = 10;
+            UI_MAIN_MENU = 6, UI_CHARGEN = 7, UI_PAUSE = 8, UI_MESSAGE = 9, UI_PIPBOY_MAP = 10, UI_LOCKPICK = 11;
+    /** Lockpicking: the left part of the screen turns the screwdriver while held (W). */
+    private static final float LOCK_TURN_SHARE = 0.38f;
+    private static final int TURN_CODE = 17;
+    private int turnId = -1;
+    private final Paint lockText = new Paint(Paint.ANTI_ALIAS_FLAG);
     private boolean smartHide = true;
     /** The engine's screen (0 not known yet). */
     private int uiState;
@@ -97,6 +102,8 @@ public class ScreenKeysOverlay extends View {
                 return has(k, 1);
             case UI_FILM:
                 return false; // a scripted scene or a film: nothing to press
+            case UI_LOCKPICK:
+                return has(k, 1) || has(k, 18); // Esc / E to leave; the screen does the rest
             case UI_MENU:
                 for (int c : OTHER_MENU_CODES) if (has(k, c)) return true;
                 return false;
@@ -144,6 +151,10 @@ public class ScreenKeysOverlay extends View {
             armed.clear();
             endGesture();
             lookId = -1;
+            if (turnId != -1) {
+                NativeInput.key(TURN_CODE, false);
+                turnId = -1;
+            }
         }
         uiState = state;
         menuMode = menu;
@@ -185,6 +196,13 @@ public class ScreenKeysOverlay extends View {
     }
 
     private void menuDown(int id, float x, float y, long t) {
+        if (uiState == UI_LOCKPICK && turnId == -1 && x < getWidth() * LOCK_TURN_SHARE) {
+            turnId = id;
+            NativeInput.key(TURN_CODE, true);
+            if (haptics) performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            invalidate();
+            return;
+        }
         if (lookId == -1) {
             lookId = id;
             lastX = downX = x;
@@ -210,6 +228,7 @@ public class ScreenKeysOverlay extends View {
     }
 
     private void menuMove(int id, float x, float y, long t) {
+        if (id == turnId) return;
         if (id == pinchId) {
             pinchX = x;
             pinchY = y;
@@ -262,6 +281,12 @@ public class ScreenKeysOverlay extends View {
     }
 
     private void menuUp(int id, float x, float y, long t) {
+        if (id == turnId) {
+            turnId = -1;
+            NativeInput.key(TURN_CODE, false);
+            invalidate();
+            return;
+        }
         if (id == pinchId) {
             pinchId = -1;
             return;
@@ -375,6 +400,20 @@ public class ScreenKeysOverlay extends View {
     @Override
     protected void onDraw(Canvas canvas) {
         int w = getWidth(), h = getHeight();
+        if (uiState == UI_LOCKPICK && !editing) {
+            boolean on = turnId != -1;
+            body.setColor(Color.argb(on ? 70 : 28, Color.red(tint), Color.green(tint), Color.blue(tint)));
+            canvas.drawRect(0, 0, w * LOCK_TURN_SHARE, h, body);
+            ring.setColor(Color.argb(on ? 230 : 140, Color.red(tint), Color.green(tint), Color.blue(tint)));
+            ring.setStrokeWidth(dp(1.5f));
+            canvas.drawLine(w * LOCK_TURN_SHARE, 0, w * LOCK_TURN_SHARE, h, ring);
+            lockText.setColor(Color.argb(220, Color.red(tint), Color.green(tint), Color.blue(tint)));
+            lockText.setTextSize(dp(18));
+            lockText.setTextAlign(Paint.Align.CENTER);
+            canvas.drawText(on ? "ПОВОРОТ…" : "ДЕРЖАТЬ — ПОВЕРНУТЬ ОТВЁРТКУ", w * LOCK_TURN_SHARE / 2f, h * 0.5f, lockText);
+            lockText.setTextSize(dp(13));
+            canvas.drawText("Справа — шпилька", w * (1f + LOCK_TURN_SHARE) / 2f, h * 0.92f, lockText);
+        }
         for (int i = 0; i < keys.size(); i++) {
             ScreenKey k = keys.get(i);
             if (hiddenNow(k)) continue;
