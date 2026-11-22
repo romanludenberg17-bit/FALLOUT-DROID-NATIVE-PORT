@@ -606,10 +606,10 @@ index bbdb0c0..ab27c2a 100644
  libloading = "0.8.9"
 diff --git a/engine/nvforever/src/android_input.rs b/engine/nvforever/src/android_input.rs
 new file mode 100644
-index 0000000..4ba0308
+index 0000000..dca57c1
 --- /dev/null
 +++ b/engine/nvforever/src/android_input.rs
-@@ -0,0 +1,278 @@
+@@ -0,0 +1,348 @@
 +//! [nvport] Input from the Android launcher (Fallout Droid): on-screen keys, touch look,
 +//! gamepads mapped to PC keys and physical keyboards/mice arrive through JNI
 +//! (`com.wastelanddroid.engine.NativeInput`) and are written as Bevy's own input messages,
@@ -742,6 +742,76 @@ index 0000000..4ba0308
 +    }
 +}
 +
++/// What the player may do now, for the keys (`NativeInput.playFlags`): bit 0 a weapon is
++/// drawn, bit 1 fighting is locked by scripts, bit 2 sneaking, bit 3 movement, bit 4 the
++/// Pip-Boy, bit 5 the view (POV).
++static PLAY_FLAGS: AtomicI32 = AtomicI32::new(0);
++
++/// `NativeInput.playFlags()`: see [`PLAY_FLAGS`].
++#[unsafe(no_mangle)]
++pub extern "C" fn Java_com_wastelanddroid_engine_NativeInput_playFlags(_e: JEnv, _c: JClass) -> i32 {
++    PLAY_FLAGS.load(Ordering::Relaxed)
++}
++
++fn publish_play_flags(weapon: Option<Res<nvf_play::combat::WeaponAnim>>, locks: Option<Res<nvf_play::control::ControlLocks>>) {
++    let mut f = 0;
++    if weapon.is_some_and(|w| w.ready) {
++        f |= 1;
++    }
++    if let Some(l) = locks {
++        if l.fighting {
++            f |= 2;
++        }
++        if l.sneaking {
++            f |= 4;
++        }
++        if l.movement {
++            f |= 8;
++        }
++        if l.pipboy {
++            f |= 16;
++        }
++        if l.pov {
++            f |= 32;
++        }
++    }
++    PLAY_FLAGS.store(f, Ordering::Relaxed);
++}
++
++/// [nvport] While the character creator is open, the other actors are hidden: the player is
++/// made where the opening stands (Fallout 3: the birth, with the father in front of the
++/// view and the mother behind), and only the player's look is being chosen. Each gets
++/// its own visibility back when the creator closes.
++fn creator_hides_actors(
++    creator: Option<Res<nvf_play::creator::CreatorMenu>>,
++    mut actors: Query<(Entity, &crate::limbs::ActorRig, &mut Visibility)>,
++    mut hidden: Local<Option<Vec<(Entity, Visibility)>>>,
++) {
++    let open = creator.is_some_and(|c| c.is_open());
++    match (open, hidden.is_some()) {
++        (true, false) => {
++            let mut kept = Vec::new();
++            for (e, rig, mut v) in &mut actors {
++                if rig.reference == 0x14 {
++                    continue;
++                }
++                kept.push((e, *v));
++                *v = Visibility::Hidden;
++            }
++            info!("android: character creator: {} actors hidden", kept.len());
++            *hidden = Some(kept);
++        }
++        (false, true) => {
++            for (e, v) in hidden.take().unwrap_or_default() {
++                if let Ok((_, _, mut cur)) = actors.get_mut(e) {
++                    *cur = v;
++                }
++            }
++        }
++        _ => {}
++    }
++}
++
 +/// `NativeInput.uiState()`: see [`UI_STATE`].
 +#[unsafe(no_mangle)]
 +pub extern "C" fn Java_com_wastelanddroid_engine_NativeInput_uiState(_e: JEnv, _c: JClass) -> i32 {
@@ -752,7 +822,7 @@ index 0000000..4ba0308
 +
 +impl Plugin for AndroidInputPlugin {
 +    fn build(&self, app: &mut App) {
-+        app.add_systems(PreUpdate, drain.before(InputSystems)).add_systems(Last, publish_ui_state).add_systems(PreUpdate, apply_frame_cap);
++        app.add_systems(PreUpdate, drain.before(InputSystems)).add_systems(Last, (publish_ui_state, publish_play_flags)).add_systems(PostUpdate, creator_hides_actors).add_systems(PreUpdate, apply_frame_cap);
 +    }
 +}
 +

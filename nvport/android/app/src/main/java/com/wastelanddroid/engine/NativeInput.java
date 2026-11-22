@@ -22,6 +22,9 @@ public final class NativeInput {
      */
     public static native int uiState();
 
+    /** Bit 0 a weapon is drawn; bits 1..5 fighting, sneaking, movement, Pip-Boy, POV locked by scripts. */
+    public static native int playFlags();
+
     /** The engine's frame-rate cap, live (0: none): the in-game panel's FPS limit. */
     public static native void setFrameCap(int fps);
 

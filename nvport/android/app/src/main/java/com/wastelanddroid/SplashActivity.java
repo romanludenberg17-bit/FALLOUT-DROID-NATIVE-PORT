@@ -91,7 +91,9 @@ public final class SplashActivity extends Activity {
         GameDef gameDefById;
         String strGameDir;
         if (Prefs.get(this).getBoolean(Prefs.LAUNCH_PENDING, false)) {
-            Prefs.get(this).edit().putBoolean(Prefs.LAUNCH_PENDING, false).putBoolean(Prefs.AUTOSTART_BLOCKED, true).putBoolean(Prefs.CRASH_NOTICE, true).apply();
+            // The app was closed while a game ran (swiped away, ended by the system): not a
+            // crash. A real engine error is shown by the launcher from nvforever.exit.
+            Prefs.get(this).edit().putBoolean(Prefs.LAUNCH_PENDING, false).putBoolean(Prefs.CRASH_NOTICE, false).apply();
             return null;
         }
         if (Prefs.get(this).getBoolean("autostart", false) && !Prefs.get(this).getBoolean(Prefs.AUTOSTART_BLOCKED, false) && (string = Prefs.get(this).getString(Prefs.LAST_GAME, null)) != null && (strGameDir = (gameDefById = GameDef.byId(string)).gameDir(this)) != null && GameFiles.validate(gameDefById, new File(strGameDir)).ok() && FalloutEngine.ready(this) && Prefs.get(this).getBoolean(MainActivity.ONBOARDED, false)) {

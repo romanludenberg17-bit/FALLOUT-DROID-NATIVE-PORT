@@ -132,6 +132,13 @@ public final class FalloutEngine {
         args.add("env:NVFOREVER_HOME=" + homeDir(context, game.id).getAbsolutePath());
         args.add("env:NVF_PLAY_SCRIPT_FUNCTIONS=" + new File(schemas, "script/functions.json").getAbsolutePath());
         args.add("env:NVPORT_GAME=" + game.id);
+        // The log: warnings, errors and what the story does; the per-frame render lines
+        // (glow, exposure, interior fog, file reads, the winit cursor) stay out — each
+        // line goes to two files and logcat.
+        args.add("env:RUST_LOG=info,wgpu=error,naga=warn,bevy_winit=warn,bevy_render=warn,"
+                + "nvforever::post=warn,nvforever::eye_adapt=warn,nvforever::sky=warn,nvforever::imagespace=warn,"
+                + "nvforever::pipeline_disk_cache=warn,nvf_play::file_bytes=warn,nvf_play::music=warn,"
+                + "nvf_play::tiles=warn,nvf_play::pause=warn,nvf_play::settings=warn,nvf_assets=warn");
         args.add("--data");
         args.add(data.getAbsolutePath());
         args.add("--esm-schema");
@@ -260,26 +267,28 @@ public final class FalloutEngine {
             // 5 x 5 cells only when asked for (view distance 9+): 3 x 3 keeps phones in budget.
             add(a, "--radius", vd >= 9 ? 2 : 1);
             if (low) {
-                // A low class (Mali-G57 and the like): no generated distant terrain, fixed
-                // 60 Hz physics, the game's own LOD only and not far.
+                // A low class (Mali-G57 and the like): no generated distant terrain, the
+                // game's own LOD only and not far.
                 a.add("--no-lodgen");
-                add(a, "--physics-hz", 60);
                 vd = Math.min(vd, 3);
             }
             add(a, "--lod-distance", 10000 + vd * 6000);
             add(a, "--lod-near-distance", 5000 + vd * 2500);
             add(a, "--tree-distance", low ? 0 : vd * 2500);
             add(a, "--lodgen-radius", vd >= 9 ? 3 : vd >= 6 ? 2 : 1);
-            add(a, "--lodgen-res", g.textureQuality == 0 && high ? 512 : 256);
+            add(a, "--lodgen-res", 256);
             add(a, "--lodgen-step", high ? 4 : 8);
             add(a, "--cell-fade", 0.5f);
-            add(a, "--msaa", high ? 4 : quality == com.wastelanddroid.game.DeviceProfile.Quality.MEDIUM ? 2 : 1);
+            add(a, "--msaa", high ? 2 : 1);
+            // The game's own logic at 60 Hz on every phone (the default follows the frame
+            // rate up to 160: CPU time the GPU-bound frame does not have).
+            add(a, "--physics-hz", 60);
             add(a, "--fov", g.fov);
             // The music under the voices and effects, as the original's defaults mix it.
             add(a, "--music-volume", 0.45f);
             if (g.grassDensity > 0) {
-                add(a, "--grass-distance", 1000 + g.grassDensity * 1000);
-                add(a, "--grass-density", Math.min(1f, 0.25f + g.grassDensity * 0.2f));
+                add(a, "--grass-distance", Math.min(3500, 1000 + g.grassDensity * 800));
+                add(a, "--grass-density", Math.min(0.7f, 0.2f + g.grassDensity * 0.15f));
             }
             if (g.shadows > 0) {
                 a.add(g.shadows >= 3 ? "--sun-shadows=quality" : "--sun-shadows=performance");
@@ -306,8 +315,7 @@ public final class FalloutEngine {
             set.put("frame-cap", frameCap <= 0 ? "Off" : String.valueOf(frameCap));
             // Multisampling also smooths alpha-tested cut-outs (grates, plants, fences), which
             // otherwise shimmer: cheap on tile-based mobile GPUs, resolved in tile memory.
-            set.put("anti-aliasing", quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? "4x"
-                    : quality == com.wastelanddroid.game.DeviceProfile.Quality.MEDIUM ? "2x" : "FXAA");
+            set.put("anti-aliasing", quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? "2x" : "FXAA");
             set.put("sun-shadows", g.shadows <= 0 ? "Off" : g.shadows >= 3 ? "Quality" : "Performance");
             set.put("grass", g.grassDensity > 0 ? "1" : "0");
             set.put("distant-lod", "1");
@@ -429,8 +437,8 @@ public final class FalloutEngine {
             }
         }
         com.wastelanddroid.game.DeviceProfile.Quality q = quality(context);
-        int base = q == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? 900
-                : q == com.wastelanddroid.game.DeviceProfile.Quality.MEDIUM ? 720 : 480;
+        int base = q == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? 810
+                : q == com.wastelanddroid.game.DeviceProfile.Quality.MEDIUM ? 660 : 480;
         int scale = Math.max(50, Math.min(100, prefs.getInt(Prefs.RES_SCALE, 100)));
         return Math.max(360, base * scale / 100);
     }

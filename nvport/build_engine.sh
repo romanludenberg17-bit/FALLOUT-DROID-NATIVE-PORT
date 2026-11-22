@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Build NVForever as libnvforever.so for arm64-v8a (Android 10+, API 29).
+# Code for armv8.2 cores (Cortex-A76 tuning: LSE atomics, dotprod, fp16; every phone from
+# Helio G99 / Snapdragon 7xx and up) with thin LTO across the engine's crates.
 # Usage: nvport/build_engine.sh [refs dir]   -> nvport/android/app/src/main/jniLibs/arm64-v8a/
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -26,6 +28,8 @@ env PATH="$TC:$PATH" ANDROID_NDK_HOME="$NDK" \
   CXX_aarch64_linux_android="$TC/aarch64-linux-android$API-clang++" \
   AR_aarch64_linux_android="$TC/llvm-ar" RANLIB_aarch64_linux_android="$TC/llvm-ranlib" \
   CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$TC/aarch64-linux-android$API-clang" \
+  CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS="-C target-cpu=cortex-a76" \
+  CARGO_PROFILE_RELEASE_LTO=thin \
   cargo build --release --target aarch64-linux-android -p nvforever --lib \
     --features bevy/android-game-activity
 OUT="$HERE/android/app/src/main/jniLibs/arm64-v8a"

@@ -226,7 +226,7 @@ public final class MainActivity extends Activity {
         if (!this.prefs.getBoolean(ONBOARDED, false)) {
         }
         final String strTakeUnseen = CrashLog.takeUnseen(this);
-        boolean z2 = this.prefs.getBoolean(Prefs.CRASH_NOTICE, false);
+        boolean z2 = false; // 1.x "ended early" notice: not for the native engine (see SplashActivity)
         this.prefs.edit().putBoolean(Prefs.CRASH_NOTICE, false).apply();
         if (strTakeUnseen != null) {
             runOnUiThread(new Runnable() { // from class: com.wastelanddroid.MainActivity$$ExternalSyntheticLambda3

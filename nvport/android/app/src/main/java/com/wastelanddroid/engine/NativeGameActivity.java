@@ -176,7 +176,13 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
                 restartGame();
                 return;
             }
-            if (overlay != null) overlay.setUiState(state);
+            if (overlay != null) {
+                overlay.setUiState(state);
+                try {
+                    overlay.setPlayFlags(NativeInput.playFlags());
+                } catch (UnsatisfiedLinkError ignored) {
+                }
+            }
             // Fallout 3's main menu is on a CRT, as in the original.
             if (crt != null) crt.setOn(fo3 && state == ScreenKeysOverlay.UI_MAIN_MENU);
             ui.postDelayed(this, 120);

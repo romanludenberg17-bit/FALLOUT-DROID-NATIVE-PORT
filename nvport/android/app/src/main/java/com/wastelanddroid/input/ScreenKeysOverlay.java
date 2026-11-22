@@ -101,8 +101,31 @@ public class ScreenKeysOverlay extends View {
                 for (int c : OTHER_MENU_CODES) if (has(k, c)) return true;
                 return false;
             default:
-                return true;
+                return playKeyShown(k);
         }
+    }
+
+    /** What the player may do (NativeInput.playFlags): bit 0 weapon drawn, 1 fighting
+     * locked, 2 sneaking locked, 3 movement locked, 4 Pip-Boy locked. */
+    private int playFlags;
+
+    public void setPlayFlags(int flags) {
+        if (flags == playFlags) return;
+        playFlags = flags;
+        invalidate();
+    }
+
+    /** While playing: keys for what the player cannot do now go (a holstered weapon's fire
+     * and aim; what the story's scripts locked: fighting, sneaking, moving, the Pip-Boy). */
+    private boolean playKeyShown(ScreenKey k) {
+        boolean weapon = (playFlags & 1) != 0, fight = (playFlags & 2) != 0, sneak = (playFlags & 4) != 0,
+                move = (playFlags & 8) != 0, pip = (playFlags & 16) != 0;
+        if (fight && (has(k, 272) || has(k, 273) || has(k, 19) || has(k, 47))) return false;
+        if (!weapon && (has(k, 272) || has(k, 273))) return false;
+        if (sneak && has(k, 29)) return false;
+        if (move && (has(k, 17) || has(k, 30) || has(k, 31) || has(k, 32) || has(k, 57))) return false;
+        if (pip && has(k, 15)) return false;
+        return true;
     }
 
     /** Hidden now (smart hiding, or a hidden key). */
@@ -482,6 +505,16 @@ public class ScreenKeysOverlay extends View {
             menuDown(id, x, y, t);
             return;
         }
+        if (k < 0 && lookId != -1 && pinchId == -1) {
+            // A second finger on the look area: pinch to zoom the view (the mouse wheel:
+            // third-person distance, first <-> third person), as on PC.
+            pinchId = id;
+            pinchX = x;
+            pinchY = y;
+            pinchBase = Math.max(1f, pinchDistance());
+            lookMoved = true;
+            return;
+        }
         if (k < 0) {
             if (lookId == -1) {
                 lookId = id;
@@ -522,6 +555,19 @@ public class ScreenKeysOverlay extends View {
             menuMove(id, x, y, t);
             return;
         }
+        if (!menuMode && id == pinchId) {
+            pinchX = x;
+            pinchY = y;
+            gamePinch();
+            return;
+        }
+        if (!menuMode && id == lookId && pinchId != -1) {
+            // Both fingers pinch: the view does not turn meanwhile.
+            lastX = x;
+            lastY = y;
+            gamePinch();
+            return;
+        }
         if (id == lookId) {
             float dx = x - lastX, dy = y - lastY;
             lastX = x;
@@ -551,9 +597,33 @@ public class ScreenKeysOverlay extends View {
         }
     }
 
+    private void gamePinch() {
+        float d = pinchDistance();
+        float ratio = d / pinchBase;
+        if (ratio > 1f + PINCH_STEP) {
+            NativeInput.scroll(1f); // fingers apart: closer
+            pinchBase = d;
+        } else if (ratio < 1f - PINCH_STEP) {
+            NativeInput.scroll(-1f); // together: further out
+            pinchBase = d;
+        }
+    }
+
     private void pointerUp(int id, float x, float y, long t) {
         if (menuMode && (id == lookId || id == pinchId)) {
             menuUp(id, x, y, t);
+            return;
+        }
+        if (!menuMode && id == pinchId) {
+            pinchId = -1;
+            return;
+        }
+        if (!menuMode && id == lookId && pinchId != -1) {
+            // The look finger lifted first: the other finger looks on, no tap.
+            lookId = pinchId;
+            pinchId = -1;
+            lastX = pinchX;
+            lastY = pinchY;
             return;
         }
         if (id == lookId) {
@@ -738,4 +808,5 @@ public class ScreenKeysOverlay extends View {
                 return true;
         }
     }
+
 }
