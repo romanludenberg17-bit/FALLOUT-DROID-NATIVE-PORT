@@ -22,6 +22,17 @@ for p in "$HERE"/patches/nvforever/*.patch; do
   elif git -C "$NVF" apply --check -R "$p" 2>/dev/null; then echo "already applied $(basename "$p")"
   else echo "error: $(basename "$p") does not apply to $NVF (expected commit $NVF_COMMIT)" >&2; exit 1; fi
 done
+# android-activity with the GameActivity glue that never blocks the Java main thread on the
+# engine's thread (a long frame made Android end the game as "not responding"): the crate
+# copied from cargo's registry into the engine's vendor folder, our patch on it.
+AA="$NVF/engine/vendor/android-activity"
+if [ ! -f "$AA/.nvport-patched" ]; then
+  (cd "$NVF/engine" && cargo fetch -q >/dev/null 2>&1 || true)
+  SRC=$(ls -d "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/android-activity-0.6.1 | head -1)
+  rm -rf "$AA" && cp -r "$SRC" "$AA" && rm -f "$AA/.cargo_vcs_info.json"
+  patch -s -d "$AA" -p1 < "$HERE/patches/android-activity-0.6.1-glue-no-wait.patch"
+  touch "$AA/.nvport-patched"
+fi
 rustup target add aarch64-linux-android >/dev/null
 cd "$NVF/engine"
 env PATH="$TC:$PATH" ANDROID_NDK_HOME="$NDK" \

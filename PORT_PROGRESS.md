@@ -484,6 +484,28 @@ Enter убрать; фон окна ожидания = экран ожидани
   схемах), менеджер модов в настройках обеих игр.
 - Кнопки страниц Пип-Боя (F1–F3) убраны: кнопки на самом Пип-Бое нажимаются.
 
+## 2.0.0-alpha17 (316)
+- **Причина «тихих» вылетов найдена** (запись Android в отчёте alpha16): процесс игры
+  убивается как **ANR** — «Input dispatching timed out (Application does not have a focused
+  window)», FNV и FO3. Обвязка GameActivity (android-activity 0.6.1, C-glue) держит главный
+  поток Java на каждом onStart/onResume/onPause/onStop (до 2 с каждый), на создании окна
+  (без ограничения) и на onSaveInstanceState (без ограничения), пока поток движка не
+  обработает команду, — а он обрабатывает их между кадрами, и кадр загрузки мира/сохранения
+  длится секунды. Окно не получает фокус → ANR через 5 с.
+- **Исправление**: android-activity копируется в `engine/vendor/android-activity`
+  (`build_engine.sh`, патч `patches/android-activity-0.6.1-glue-no-wait.patch`, `[patch.crates-io]`):
+  состояния активности не ждут, новое окно не ждёт, удаление окна и сохранение состояния —
+  не дольше 2 с.
+- Вылет FNV в Гудспрингсе (DeviceLost) по-прежнему с тенями солнца и MSAA 2x; защитный режим
+  не успел сработать — ему мешали ANR.
+- **Пип-Бой (обе игры): выбор/применение/выброс предметов и вкладки не работали.** Меню на
+  экране модели получают кнопки мыши только из потока `WindowEvent::MouseButtonInput`
+  (`nvf_play::pipboy::drive_pointer`), а сенсорный ввод (`android_input::drain`) писал лишь
+  `MouseButtonInput`; кнопки на руке читают `ButtonInput` и работали. Теперь каждый
+  введённый ввод (кнопки, клавиши, курсор, колесо) дублируется в `WindowEvent`, как у winit.
+- `bevy_winit`: на Android не пытается двигать указатель ОС (сотни ошибок «could not set
+  cursor position» в логе).
+
 ### Следующий шаг
 Проверка на vivo I2508: лаунчер → выбор папки FNV → «Играть» → лог движка
 (`Android/data/com.rommy.falloutdroid.nativeport/files/nvforever.log`, кнопка «Поделиться логами»).

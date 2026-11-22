@@ -1,0 +1,55 @@
+--- a/android-games-sdk/game-activity/prefab-src/modules/game-activity/src/game-activity/native_app_glue/android_native_app_glue.c
++++ b/android-games-sdk/game-activity/prefab-src/modules/game-activity/src/game-activity/native_app_glue/android_native_app_glue.c
+@@ -340,8 +340,20 @@
+     if (window != NULL) {
+         android_app_write_cmd(android_app, APP_CMD_INIT_WINDOW);
+     }
+-    while (android_app->window != android_app->pendingWindow) {
+-        pthread_cond_wait(&android_app->cond, &android_app->mutex);
++    // [nvport] The Java main thread must not wait on the game's thread: a frame of the
++    // engine can take seconds (loading a world or a save) and Android ends the app ("not
++    // responding") when its main thread blocks. A new window is taken up when the native
++    // thread gets to it; a removed one is waited for at most 2 s.
++    if (window == NULL) {
++        struct timespec timeout;
++        clock_gettime(CLOCK_REALTIME, &timeout);
++        timeout.tv_sec += NATIVE_APP_GLUE_CMD_WAIT_TIMEOUT_SECONDS;
++        while (android_app->window != android_app->pendingWindow) {
++            if (pthread_cond_timedwait(&android_app->cond, &android_app->mutex, &timeout) == ETIMEDOUT) {
++                LOGE("android_app_set_window timed out waiting for the window's removal");
++                break;
++            }
++        }
+     }
+     pthread_mutex_unlock(&android_app->mutex);
+ }
+@@ -362,7 +374,8 @@
+         timeout.tv_sec += NATIVE_APP_GLUE_CMD_WAIT_TIMEOUT_SECONDS;
+ 
+         int wait_result = 0;
+-        while (android_app->activityState != cmd) {
++        // [nvport] Start, resume, pause and stop are not waited for (see android_app_set_window).
++        while (0 && android_app->activityState != cmd) {
+             wait_result = pthread_cond_timedwait(&android_app->cond, &android_app->mutex, &timeout);
+             if (wait_result == ETIMEDOUT) {
+                 LOGE("android_app_set_activity_state timed out waiting for cmd %d", cmd);
+@@ -449,8 +462,17 @@
+ 
+     android_app->stateSaved = 0;
+     android_app_write_cmd(android_app, APP_CMD_SAVE_STATE);
+-    while (!android_app->stateSaved) {
+-        pthread_cond_wait(&android_app->cond, &android_app->mutex);
++    {
++        // [nvport] At most 2 s (see android_app_set_window).
++        struct timespec timeout;
++        clock_gettime(CLOCK_REALTIME, &timeout);
++        timeout.tv_sec += NATIVE_APP_GLUE_CMD_WAIT_TIMEOUT_SECONDS;
++        while (!android_app->stateSaved) {
++            if (pthread_cond_timedwait(&android_app->cond, &android_app->mutex, &timeout) == ETIMEDOUT) {
++                LOGE("onSaveInstanceState timed out waiting for the native thread");
++                break;
++            }
++        }
+     }
+ 
+     if (android_app->savedState != NULL) {

@@ -160,10 +160,19 @@ index c93f468..1df07af 100644
      for (i, s) in [b"DNAM", b"CNAM", b"ANAM", b"BNAM"].iter().enumerate() {
          w.cloud_textures[i] = f.string(s).filter(|s| !s.is_empty());
 diff --git a/engine/Cargo.lock b/engine/Cargo.lock
-index 5cdaf9e..0715284 100644
+index 5cdaf9e..fb3c3f6 100644
 --- a/engine/Cargo.lock
 +++ b/engine/Cargo.lock
-@@ -4762,6 +4762,7 @@ dependencies = [
+@@ -152,8 +152,6 @@ dependencies = [
+ [[package]]
+ name = "android-activity"
+ version = "0.6.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "0f2a1bb052857d5dd49572219344a7332b31b76405648eabac5bc68978251bcd"
+ dependencies = [
+  "android-properties",
+  "bitflags 2.13.2",
+@@ -4762,6 +4760,7 @@ dependencies = [
   "nvf-assets",
   "nvf-dlss-files",
   "nvf-play",
@@ -171,7 +180,7 @@ index 5cdaf9e..0715284 100644
   "png",
   "rfd",
   "serde_json",
-@@ -5199,6 +5200,15 @@ version = "0.2.2"
+@@ -5199,6 +5198,15 @@ version = "0.2.2"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "7e036b411754132fd6b74e94b74e9a13c5cf606fa93d1885c35860d3060820b1"
  
@@ -187,7 +196,7 @@ index 5cdaf9e..0715284 100644
  [[package]]
  name = "openssl-sys"
  version = "0.9.118"
-@@ -5207,6 +5217,7 @@ checksum = "19c413d6ec9ebaf5e1c829d355cb3e9f783778d700f135be0921d52fce3c60ae"
+@@ -5207,6 +5215,7 @@ checksum = "19c413d6ec9ebaf5e1c829d355cb3e9f783778d700f135be0921d52fce3c60ae"
  dependencies = [
   "cc",
   "libc",
@@ -195,6 +204,15 @@ index 5cdaf9e..0715284 100644
   "pkg-config",
   "vcpkg",
  ]
+diff --git a/engine/Cargo.toml b/engine/Cargo.toml
+index b79e856..213d2b4 100644
+--- a/engine/Cargo.toml
++++ b/engine/Cargo.toml
+@@ -80,3 +80,4 @@ bevy_render = { path = "vendor/bevy_render" }
+ bevy_shader = { path = "vendor/bevy_shader" }
+ wgpu-hal = { path = "vendor/wgpu-hal" }
+ naga = { path = "vendor/naga" }
++android-activity = { path = "vendor/android-activity" }
 diff --git a/engine/nvf-assets/src/texture.rs b/engine/nvf-assets/src/texture.rs
 index 4f6f70c..c60af4c 100644
 --- a/engine/nvf-assets/src/texture.rs
@@ -741,10 +759,10 @@ index bbdb0c0..ab27c2a 100644
  libloading = "0.8.9"
 diff --git a/engine/nvforever/src/android_input.rs b/engine/nvforever/src/android_input.rs
 new file mode 100644
-index 0000000..1b06365
+index 0000000..4467f27
 --- /dev/null
 +++ b/engine/nvforever/src/android_input.rs
-@@ -0,0 +1,370 @@
+@@ -0,0 +1,381 @@
 +//! [nvport] Input from the Android launcher (Fallout Droid): on-screen keys, touch look,
 +//! gamepads mapped to PC keys and physical keyboards/mice arrive through JNI
 +//! (`com.wastelanddroid.engine.NativeInput`) and are written as Bevy's own input messages,
@@ -990,6 +1008,9 @@ index 0000000..1b06365
 +    mut buttons: MessageWriter<MouseButtonInput>,
 +    mut motion: MessageWriter<MouseMotion>,
 +    mut wheel: MessageWriter<MouseWheel>,
++    // As winit does: every input also as a WindowEvent. The Pip-Boy's screen (its menus
++    // drawn on the model) reads the buttons from there only (nvf_play::pipboy::drive_pointer).
++    mut window_events: MessageWriter<bevy::window::WindowEvent>,
 +) {
 +    let events = match QUEUE.lock() {
 +        Ok(mut q) if !q.is_empty() => std::mem::take(&mut *q),
@@ -1001,16 +1022,20 @@ index 0000000..1b06365
 +            Ev::Key(code, down) => {
 +                let state = if down { ButtonState::Pressed } else { ButtonState::Released };
 +                if let Some(button) = mouse_button(code) {
-+                    buttons.write(MouseButtonInput { button, state, window });
++                    let b = MouseButtonInput { button, state, window };
++                    window_events.write(bevy::window::WindowEvent::MouseButtonInput(b.clone()));
++                    buttons.write(b);
 +                } else if let Some(key_code) = key_code(code) {
-+                    keys.write(KeyboardInput {
++                    let k = KeyboardInput {
 +                        key_code,
 +                        logical_key: Key::Unidentified(bevy::input::keyboard::NativeKey::Unidentified),
 +                        state,
 +                        text: None,
 +                        repeat: false,
 +                        window,
-+                    });
++                    };
++                    window_events.write(bevy::window::WindowEvent::KeyboardInput(k.clone()));
++                    keys.write(k);
 +                }
 +            }
 +            Ev::Motion(dx, dy) => {
@@ -1020,10 +1045,14 @@ index 0000000..1b06365
 +                let position = Vec2::new(x, y) / win.scale_factor();
 +                let delta = win.cursor_position().map(|p| position - p);
 +                win.set_physical_cursor_position(Some(bevy::math::DVec2::new(x as f64, y as f64)));
-+                cursor.write(CursorMoved { window, position, delta });
++                let c = CursorMoved { window, position, delta };
++                window_events.write(bevy::window::WindowEvent::CursorMoved(c.clone()));
++                cursor.write(c);
 +            }
 +            Ev::Scroll(lines) => {
-+                wheel.write(MouseWheel { unit: MouseScrollUnit::Line, x: 0.0, y: lines, window, phase: bevy::input::touch::TouchPhase::Moved });
++                let w = MouseWheel { unit: MouseScrollUnit::Line, x: 0.0, y: lines, window, phase: bevy::input::touch::TouchPhase::Moved };
++                window_events.write(bevy::window::WindowEvent::MouseWheel(w.clone()));
++                wheel.write(w);
 +            }
 +        }
 +    }
@@ -1674,10 +1703,20 @@ index 1bc62a8..81a905e 100644
              Transform::IDENTITY,
              layer.clone(),
 diff --git a/engine/vendor/bevy_winit/src/system.rs b/engine/vendor/bevy_winit/src/system.rs
-index 22ad677..cd70569 100644
+index 22ad677..df42c57 100644
 --- a/engine/vendor/bevy_winit/src/system.rs
 +++ b/engine/vendor/bevy_winit/src/system.rs
-@@ -619,8 +619,14 @@ pub(crate) fn changed_cursor_options(
+@@ -428,7 +428,8 @@ pub(crate) fn changed_windows(
+                 }
+             }
+ 
+-            if window.physical_cursor_position() != cache.physical_cursor_position()
++            // [nvport] Android has no pointer to move (the touch layer sets the position).
++            if !cfg!(target_os = "android") && window.physical_cursor_position() != cache.physical_cursor_position()
+                 && let Some(physical_position) = window.physical_cursor_position() {
+                     let position = PhysicalPosition::new(physical_position.x, physical_position.y);
+ 
+@@ -619,8 +620,14 @@ pub(crate) fn changed_cursor_options(
                  continue;
              };
              // Don't check the cache for the grab mode. It can change through external means, leaving the cache outdated.
