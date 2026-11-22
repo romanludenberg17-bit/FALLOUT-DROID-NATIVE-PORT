@@ -43,7 +43,7 @@ public final class FalloutEngine {
     /** The game's process (manifest: NativeGameActivity android:process). */
     public static final String GAME_PROCESS_SUFFIX = ":game";
     /** Bumped when the bundled engine data (schemas) changes. */
-    private static final int ENGINE_DATA_VERSION = 3; // 2: + lang (NVForever's own words)
+    private static final int ENGINE_DATA_VERSION = 4; // 2: + lang (NVForever's own words)
 
     private FalloutEngine() {}
 
@@ -165,6 +165,10 @@ public final class FalloutEngine {
         profile.addArgs(args);
         java.util.Map<String, java.util.Map<String, String>> ini = new java.util.LinkedHashMap<>();
         ini.put("Settings", profile.iniSettings());
+        // Multisampling 4x / 8x kept from an earlier choice: 2x (the phone's settings page no
+        // longer offers more).
+        String aa = iniValue(new File(homeDir(context, game.id), "NVForever.ini"), "anti-aliasing");
+        if (aa != null && (aa.equalsIgnoreCase("4x") || aa.equalsIgnoreCase("8x"))) ini.get("Settings").put("anti-aliasing", "2x");
         // NVForever's own words (menus, settings) in the phone's language: its translations
         // go into the home's lang folder, and the language is chosen once (the settings
         // page's choice is kept after that).
@@ -401,6 +405,12 @@ public final class FalloutEngine {
             set.put("bloom", g.bloom ? "?1" : "?0");
             set.put("anisotropic", g.anisotropy >= 8 ? "?1" : "?0");
             set.put("water-reflections", "0");
+            // The rest of the rows the phone's settings page hides (android_input.rs
+            // PHONE_HIDDEN), at their light values.
+            set.put("water-mirror", "0");
+            set.put("smooth-terrain", "Off");
+            set.put("frame-generation", "Off");
+            set.put("display-sync", null);
             return set;
         }
 
@@ -414,6 +424,21 @@ public final class FalloutEngine {
      * Sets `key=value` lines in the INI's sections (made where missing), keeping every other
      * line: the engine's own settings page writes the same file.
      */
+    /** A row's value in an INI's [Settings] section, or null. */
+    static String iniValue(File ini, String key) {
+        if (!ini.isFile()) return null;
+        try {
+            boolean in = false;
+            for (String line : readText(ini).split("\\r?\\n")) {
+                String t = line.trim();
+                if (t.startsWith("[")) in = t.equalsIgnoreCase("[Settings]");
+                else if (in && t.contains("=") && t.substring(0, t.indexOf('=')).trim().equalsIgnoreCase(key)) return t.substring(t.indexOf('=') + 1).trim();
+            }
+        } catch (IOException ignored) {
+        }
+        return null;
+    }
+
     static void mergeIni(File ini, java.util.Map<String, java.util.Map<String, String>> sections) throws IOException {
         String text = ini.isFile() ? readText(ini) : "; NVForever settings.\n";
         StringBuilder out = new StringBuilder();

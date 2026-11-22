@@ -759,10 +759,10 @@ index bbdb0c0..ab27c2a 100644
  libloading = "0.8.9"
 diff --git a/engine/nvforever/src/android_input.rs b/engine/nvforever/src/android_input.rs
 new file mode 100644
-index 0000000..4467f27
+index 0000000..07726e8
 --- /dev/null
 +++ b/engine/nvforever/src/android_input.rs
-@@ -0,0 +1,381 @@
+@@ -0,0 +1,412 @@
 +//! [nvport] Input from the Android launcher (Fallout Droid): on-screen keys, touch look,
 +//! gamepads mapped to PC keys and physical keyboards/mice arrive through JNI
 +//! (`com.wastelanddroid.engine.NativeInput`) and are written as Bevy's own input messages,
@@ -999,6 +999,37 @@ index 0000000..4467f27
 +    fn build(&self, app: &mut App) {
 +        app.add_systems(PreUpdate, drain.before(InputSystems)).add_systems(Last, (publish_ui_state, publish_play_flags)).add_systems(PostUpdate, creator_hides_actors).add_systems(PreUpdate, perf_overlay_out_of_menus).add_systems(Last, perf_overlay_out_of_menus).add_systems(PreUpdate, apply_frame_cap);
 +    }
++
++    /// Every plugin has registered its settings rows by now.
++    fn finish(&self, app: &mut App) {
++        phone_settings(app);
++    }
++}
++
++/// The settings page on a phone: the desktop renderer's heavy rows are not offered (hidden
++/// and locked: neither the player nor a quality preset changes them; the launcher keeps
++/// them off in the INI) — upscalers and frame generation, ambient occlusion, the fine,
++/// cloud and terrain shadows and their 4096 maps, the water mirror, reflections and
++/// effects, light shafts, hazes, the terrain blends and smoothing, sharpening, the quality
++/// presets (their Very High turns everything up), and the counter rows a phone cannot
++/// measure. Multisampling stops at 2x (4x and 8x quadruple the picture's memory).
++const PHONE_HIDDEN: &[&str] = &[
++    "upscaler", "upscaler-quality", "dlss-model", "fsr-library", "frame-generation", "frame-generation-frames",
++    "latency-reduction", "shadow-resolution", "ambient-occlusion", "fine-shadows", "cloud-shadows", "terrain-shadows",
++    "terrain-height-blend", "terrain-anti-tiling", "mesh-terrain-blend", "smooth-terrain", "light-shafts", "heat-haze",
++    "desert-haze", "water-reflections", "water-effects", "water-mirror", "sharpen", "quality", "display-sync",
++    "physics-rate", "fps-counter-cpu", "fps-counter-gpu", "fps-counter-vram", "fps-counter-upscaling",
++];
++
++fn phone_settings(app: &mut App) {
++    use nvf_play::settings::{set_choice_unavailable, set_disabled_status, set_shown_when};
++    for &key in PHONE_HIDDEN {
++        set_shown_when(app, key, key, |_| false);
++        set_disabled_status(app, key, |_| Some("Not available on a phone"));
++    }
++    set_choice_unavailable(app, "anti-aliasing", |_, name| {
++        matches!(name, "4x" | "8x").then(|| "Too heavy for a phone: 2x, FXAA or SMAA".to_string())
++    });
 +}
 +
 +fn drain(
@@ -1734,10 +1765,20 @@ index 22ad677..df42c57 100644
                  warn!(
                      "Could not set cursor grab mode for window {}: {}",
 diff --git a/lang/ru.toml b/lang/ru.toml
-index 69dc72c..fbbca32 100644
+index 69dc72c..5529ae1 100644
 --- a/lang/ru.toml
 +++ b/lang/ru.toml
-@@ -550,3 +550,180 @@ name = "Русский"
+@@ -6,6 +6,9 @@
+ name = "Русский"
+ 
+ [words]
++# [nvport] The phone build's settings page (engine/nvforever/src/android_input.rs).
++"Too heavy for a phone: 2x, FXAA or SMAA" = "Слишком тяжело для телефона: 2x, FXAA или SMAA"
++"Not available on a phone" = "Недоступно на телефоне"
+ # [design, #2200; engine/nvf-play/src/pause.rs] NVForever's device selection.
+ "Automatic Input Switching" = "Автоматическая смена устройства ввода"
+ "On: a controller button, stick or trigger selects Controller; a key or mouse click selects Keyboard and Mouse (mouse motion does not). Off: choose Input Device yourself." = "Вкл.: кнопка, стик или курок геймпада выбирает геймпад; клавиша или щелчок мыши — клавиатуру и мышь (движение мыши — нет). Выкл.: выбирайте устройство сами."
+@@ -550,3 +553,180 @@ name = "Русский"
  # [design; engine/nvforever/src/heat_haze.rs] The Heat haze row (a prototype).
  "Heat haze (experimental)" = "Марево (экспериментально)"
  "On: the far ground near the horizon shimmers slightly on hot, clear days, by the sun and the weather. A prototype. Not in the original." = "Вкл.: дальняя земля у горизонта слегка дрожит в жаркие ясные дни, в зависимости от солнца и погоды. Прототип. Нет в оригинале."

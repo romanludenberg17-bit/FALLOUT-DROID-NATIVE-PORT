@@ -6,6 +6,9 @@
 name = "Русский"
 
 [words]
+# [nvport] The phone build's settings page (engine/nvforever/src/android_input.rs).
+"Too heavy for a phone: 2x, FXAA or SMAA" = "Слишком тяжело для телефона: 2x, FXAA или SMAA"
+"Not available on a phone" = "Недоступно на телефоне"
 # [design, #2200; engine/nvf-play/src/pause.rs] NVForever's device selection.
 "Automatic Input Switching" = "Автоматическая смена устройства ввода"
 "On: a controller button, stick or trigger selects Controller; a key or mouse click selects Keyboard and Mouse (mouse motion does not). Off: choose Input Device yourself." = "Вкл.: кнопка, стик или курок геймпада выбирает геймпад; клавиша или щелчок мыши — клавиатуру и мышь (движение мыши — нет). Выкл.: выбирайте устройство сами."
