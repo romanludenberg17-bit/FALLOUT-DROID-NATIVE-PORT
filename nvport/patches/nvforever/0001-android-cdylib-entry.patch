@@ -1329,7 +1329,7 @@ index 2695b68..61f6f33 100644
          ("terrain-anti-tiling", "Graphics"),
          ("mesh-terrain-blend", "Graphics"),
 diff --git a/engine/nvforever/Cargo.toml b/engine/nvforever/Cargo.toml
-index bbdb0c0..c7e6d5b 100644
+index bbdb0c0..0c6c5d1 100644
 --- a/engine/nvforever/Cargo.toml
 +++ b/engine/nvforever/Cargo.toml
 @@ -6,6 +6,12 @@ edition.workspace = true
@@ -1357,7 +1357,7 @@ index bbdb0c0..c7e6d5b 100644
 +# [nvport] The engine's heap on Android: Scudo gives each size class a fixed region and one
 +# full class failed every allocation of its size, the GPU driver's C++ ones too (bad_alloc
 +# on an 8 GB phone with gigabytes free). Rust's allocations go to mimalloc instead.
-+mimalloc = { version = "0.1.52", default-features = false }
++mimalloc = { version = "0.1.52", default-features = false, features = ["local_dynamic_tls"] }
 +
  [target.'cfg(target_os = "linux")'.dependencies]
  # [design, #2249] Optional NVML at runtime; reuse engine/Cargo.lock's libloading.

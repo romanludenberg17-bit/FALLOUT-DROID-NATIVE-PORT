@@ -17,6 +17,9 @@ fi
 NDKBIN=$ANDROID_HOME/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64/bin
 "$NDKBIN/llvm-nm" -D --defined-only "$SO" | grep -q "GameActivity_onCreate" || { echo "engine is not a GameActivity build"; exit 1; }
 "$NDKBIN/llvm-nm" -D --defined-only "$SO" | grep -q "Java_com_wastelanddroid_engine_NativeInput_key" || { echo "engine lacks NativeInput JNI"; exit 1; }
+# A library with initial-exec TLS cannot be dlopen'ed on Android (alpha33: "TLS symbol ...
+# using IE access model", the game never started).
+if "$NDKBIN/llvm-readelf" -d "$SO" | grep -q STATIC_TLS; then echo "engine has STATIC_TLS (initial-exec TLS): not loadable"; exit 1; fi
 
 # Automatic report upload (ReportUploader.java): {"repo":"owner/name","token":"..."} kept
 # beside the signing keys, never in git; without it the APK uploads nothing.
