@@ -1,5 +1,6 @@
---- a/android-games-sdk/game-activity/prefab-src/modules/game-activity/src/game-activity/native_app_glue/android_native_app_glue.c
-+++ b/android-games-sdk/game-activity/prefab-src/modules/game-activity/src/game-activity/native_app_glue/android_native_app_glue.c
+diff -ruN -x .cargo_vcs_info.json -x .nvport-patched /tmp/claude-0/-home-user-FALLOUT-DROID-NATIVE-PORT/27794e0c-0afe-57a1-8b78-20f3b7451e53/scratchpad/aaorig/android-games-sdk/game-activity/prefab-src/modules/game-activity/src/game-activity/native_app_glue/android_native_app_glue.c /home/user/refs/NVForever/engine/vendor/android-activity/android-games-sdk/game-activity/prefab-src/modules/game-activity/src/game-activity/native_app_glue/android_native_app_glue.c
+--- a/android-games-sdk/game-activity/prefab-src/modules/game-activity/src/game-activity/native_app_glue/android_native_app_glue.c	2026-11-22 18:24:00.502217552 +0000
++++ b/android-games-sdk/game-activity/prefab-src/modules/game-activity/src/game-activity/native_app_glue/android_native_app_glue.c	2026-11-22 11:57:31.678567149 +0000
 @@ -340,8 +340,20 @@
      if (window != NULL) {
          android_app_write_cmd(android_app, APP_CMD_INIT_WINDOW);
@@ -53,3 +54,41 @@
      }
  
      if (android_app->savedState != NULL) {
+diff -ruN -x .cargo_vcs_info.json -x .nvport-patched /tmp/claude-0/-home-user-FALLOUT-DROID-NATIVE-PORT/27794e0c-0afe-57a1-8b78-20f3b7451e53/scratchpad/aaorig/src/game_activity/mod.rs /home/user/refs/NVForever/engine/vendor/android-activity/src/game_activity/mod.rs
+--- a/src/game_activity/mod.rs	2026-11-22 18:24:00.507770561 +0000
++++ b/src/game_activity/mod.rs	2026-11-22 18:23:46.660360420 +0000
+@@ -599,19 +599,26 @@
+                                         }
+                                         MainEvent::InitWindow { .. } => {
+                                             let win_ptr = (*(*source).app).window;
+-                                            // It's important that we use ::clone_from_ptr() here
+-                                            // because NativeWindow has a Drop implementation that
+-                                            // will unconditionally _release() the native window
+-                                            *self.native_window.write().unwrap() =
+-                                                Some(NativeWindow::clone_from_ptr(
+-                                                    NonNull::new(win_ptr).unwrap(),
+-                                                ));
++                                            // [nvport] The Java thread no longer waits for this
++                                            // command (glue patch): the window may already be gone
++                                            // again when it arrives, then it is no news.
++                                            if let Some(win) = NonNull::new(win_ptr) {
++                                                // It's important that we use ::clone_from_ptr() here
++                                                // because NativeWindow has a Drop implementation that
++                                                // will unconditionally _release() the native window
++                                                *self.native_window.write().unwrap() =
++                                                    Some(NativeWindow::clone_from_ptr(win));
++                                            }
+                                         }
+                                         _ => {}
+                                     }
+ 
++                                    let stale_init = matches!(cmd, MainEvent::InitWindow { .. })
++                                        && (*(*source).app).window.is_null();
+                                     trace!("Invoking callback for ID_MAIN command = {:?}", cmd);
+-                                    callback(PollEvent::Main(cmd));
++                                    if !stale_init {
++                                        callback(PollEvent::Main(cmd));
++                                    }
+ 
+                                     match cmd_i as ffi::NativeAppGlueAppCmd {
+                                         ffi::NativeAppGlueAppCmd_APP_CMD_TERM_WINDOW => {

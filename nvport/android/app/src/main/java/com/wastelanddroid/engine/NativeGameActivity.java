@@ -32,6 +32,20 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
 
     @Override
     protected void onCreate(Bundle state) {
+        // A Java crash in the game's process: its stack goes to java_crash.txt for the report.
+        final Thread.UncaughtExceptionHandler before = Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
+            try {
+                java.io.File ext = getExternalFilesDir(null);
+                if (ext != null) {
+                    try (java.io.FileOutputStream out = new java.io.FileOutputStream(new java.io.File(ext, "java_crash.txt"))) {
+                        out.write((new java.util.Date() + " thread " + t.getName() + "\n" + android.util.Log.getStackTraceString(e)).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+            if (before != null) before.uncaughtException(t, e);
+        });
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         // The window's background is the loading screen's first frame (the theme:
         // FdGameTheme / FdGameThemeFo3), shown by the system before this process runs.

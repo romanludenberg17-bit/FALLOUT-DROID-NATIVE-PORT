@@ -269,6 +269,18 @@ public final class FalloutEngine {
     }
 
     public static void launch(Activity activity, Prepared.Ok ok) throws IOException {
+        // Little free memory (other apps hold it): the engine reads the whole game's data at
+        // start and the system may refuse it (a phone with under 1 GB free ended so).
+        try {
+            android.app.ActivityManager am = (android.app.ActivityManager) activity.getSystemService(Context.ACTIVITY_SERVICE);
+            android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
+            am.getMemoryInfo(mi);
+            long freeMb = mi.availMem / (1024 * 1024);
+            if (freeMb < 1500) {
+                android.widget.Toast.makeText(activity, "Мало свободной памяти (" + freeMb + " МБ). Закройте другие приложения — иначе игра может вылететь при загрузке.", android.widget.Toast.LENGTH_LONG).show();
+            }
+        } catch (Exception ignored) {
+        }
         StringBuilder sb = new StringBuilder();
         for (String a : ok.getArgs()) sb.append(a).append('\n');
         writeText(new File(activity.getFilesDir(), ARGS_FILE), sb.toString());
@@ -595,7 +607,8 @@ public final class FalloutEngine {
         }
         com.wastelanddroid.game.DeviceProfile.Quality q = quality(context);
         int base = q == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? 810
-                : q == com.wastelanddroid.game.DeviceProfile.Quality.MEDIUM ? 660 : 480;
+                : q == com.wastelanddroid.game.DeviceProfile.Quality.MEDIUM ? 660
+                : com.wastelanddroid.game.DeviceProfile.veryLow() ? 360 : 480;
         int scale = Math.max(50, Math.min(100, prefs.getInt(Prefs.RES_SCALE, 100)));
         int h = Math.max(360, base * scale / 100);
         if (prefs.getInt(GPU_SAFE, 0) >= 2) h = Math.min(h, 660);
@@ -717,6 +730,7 @@ public final class FalloutEngine {
         sb.append("Exit: ").append(exitStatus(context)).append(gameProcessAlive(context) ? " (game process alive)" : "").append("\n");
         section(sb, "command line", new File(base, "nvport_args.txt"), 16 * 1024);
         sb.append("\n===== how the game process ended (Android) =====\n").append(exitReasons(context, 6)).append('\n');
+        section(sb, "java crash of the game", new File(base, "java_crash.txt"), 16 * 1024);
         section(sb, LOG_FILE, log, 96 * 1024);
         // Both games, the last played first: a crash while loading a save is followed by
         // the restart's own run, so the last three runs and crash reports of each go in.

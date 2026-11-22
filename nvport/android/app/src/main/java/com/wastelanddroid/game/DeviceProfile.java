@@ -33,6 +33,15 @@ public final class DeviceProfile {
      * Exynos 2500; MEDIUM: Snapdragon 8 Gen 1..2, 8+ Gen 1, 888, 7+ Gen 3, Dimensity 8200..8400,
      * Exynos 2400, Tensor G3..G5; LOW: the rest (Helio G99, Snapdragon 6/7 Gen x, Dimensity 7xxx).
      */
+    /**
+     * The weakest GPUs met (Mali-G52/G57 MC1-2, PowerVR GE8320: Helio G85/G88/G80/G35/P35,
+     * Unisoc T606-T616): 8 FPS at 480p indoors in testers' reports, 360p for them.
+     */
+    public static boolean veryLow() {
+        String soc = (socModel() + " " + Build.HARDWARE + " " + Build.BOARD).toLowerCase(Locale.ROOT);
+        return soc.matches(".*(mt676[0-9]|mt6769|mt6768|mt6762|mt6765|ums9230|ums512|t606|t610|t612|t615|t616|t618|sc9863).*");
+    }
+
     public static Quality autoQuality(Context context) {
         String soc = (socModel() + " " + Build.HARDWARE + " " + Build.BOARD).toLowerCase(Locale.ROOT);
         long ram = totalRamMb(context);

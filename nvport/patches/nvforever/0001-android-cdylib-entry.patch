@@ -213,8 +213,21 @@ index b79e856..213d2b4 100644
  wgpu-hal = { path = "vendor/wgpu-hal" }
  naga = { path = "vendor/naga" }
 +android-activity = { path = "vendor/android-activity" }
+diff --git a/engine/nvf-assets/src/model.rs b/engine/nvf-assets/src/model.rs
+index 7df5242..f1ca354 100644
+--- a/engine/nvf-assets/src/model.rs
++++ b/engine/nvf-assets/src/model.rs
+@@ -1398,7 +1398,7 @@ impl ModelCtx<'_> {
+             providers,
+             cached,
+             workers: self.textures.workers.clone(),
+-            bc_supported: self.formats.as_deref().is_none_or(|f| f.0.contains(CompressedImageFormats::BC)),
++            bc_supported: crate::texture::bc_supported_or_known(self.formats.as_deref()),
+             unmasked: HashMap::new(),
+             out: DeferredAssets::default(),
+         }
 diff --git a/engine/nvf-assets/src/texture.rs b/engine/nvf-assets/src/texture.rs
-index 4f6f70c..3164ae0 100644
+index 4f6f70c..85eefd6 100644
 --- a/engine/nvf-assets/src/texture.rs
 +++ b/engine/nvf-assets/src/texture.rs
 @@ -128,7 +128,7 @@ pub(crate) fn worker_texture(
@@ -226,7 +239,7 @@ index 4f6f70c..3164ae0 100644
          decoded.image.texture_descriptor.label = Some(folder_label(path));
          Ok(decoded)
      })
-@@ -232,34 +232,73 @@ pub fn dds_image_top(bytes: &[u8], srgb: bool, bc_supported: bool) -> Result<Ima
+@@ -232,34 +232,94 @@ pub fn dds_image_top(bytes: &[u8], srgb: bool, bc_supported: bool) -> Result<Ima
  }
  
  fn dds_texture(bytes: &[u8], usage: TextureUsage, bc_supported: bool, top_only: bool) -> Result<DecodedTexture, String> {
@@ -237,6 +250,27 @@ index 4f6f70c..3164ae0 100644
 -fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, top_only: bool) -> Result<DecodedTexture, String> {
 +fn dds_texture_skip(bytes: &[u8], usage: TextureUsage, bc_supported: bool, top_only: bool, skip: u32) -> Result<DecodedTexture, String> {
 +    crate::guard::guarded(|| dds_image_unguarded(bytes, usage, bc_supported, top_only, skip))
++}
++
++/// [nvport] Whether the GPU takes BC (DXT) textures. Where a caller has no
++/// `CompressedImageFormatSupport` to hand (the sky asked with `None`), the last answer
++/// seen is used; never seen: no on Android (Mali has none, and a BC texture there is
++/// dropped: the sky and others went missing), yes elsewhere.
++pub fn bc_supported_or_known(formats: Option<&CompressedImageFormatSupport>) -> bool {
++    use std::sync::atomic::{AtomicU8, Ordering};
++    static KNOWN: AtomicU8 = AtomicU8::new(0);
++    match formats {
++        Some(f) => {
++            let yes = f.0.contains(CompressedImageFormats::BC);
++            KNOWN.store(if yes { 1 } else { 2 }, Ordering::Relaxed);
++            yes
++        }
++        None => match KNOWN.load(Ordering::Relaxed) {
++            1 => true,
++            2 => false,
++            _ => !cfg!(target_os = "android"),
++        },
++    }
 +}
 +
 +/// [nvport] Mip levels a world texture loses on a phone (`NVF_TEX_MIP_SKIP`, 0 to 3; the
@@ -309,7 +343,7 @@ index 4f6f70c..3164ae0 100644
              } else {
                  let f = match (dds.format, srgb) {
                      (Format::Dxt1, true) => TextureFormat::Bc1RgbaUnormSrgb,
-@@ -293,7 +332,7 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
+@@ -293,7 +353,7 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
              } else {
                  let mut out = Vec::new();
                  for (m, level) in levels.iter().enumerate() {
@@ -318,7 +352,7 @@ index 4f6f70c..3164ae0 100644
                      let values = fnv_dds::decode_bc4(dds.format, lw, lh, level).ok_or("invalid BC4 block data")?;
                      if signed {
                          out.extend(values.into_iter().map(|v| (v * 127.0).round() as i8 as u8));
-@@ -314,7 +353,7 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
+@@ -314,7 +374,7 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
              } else {
                  let mut out = Vec::new();
                  for (m, level) in levels.iter().enumerate() {
@@ -327,7 +361,15 @@ index 4f6f70c..3164ae0 100644
                      let pixels = fnv_dds::decode_bc5(dds.format, lw, lh, level).ok_or("invalid BC5 block data")?;
                      for [r, g] in pixels {
                          if usage == TextureUsage::Normal {
-@@ -634,7 +673,7 @@ impl TextureCache {
+@@ -627,14 +687,14 @@ impl TextureCache {
+                 return Some(h);
+             }
+         }
+-        let bc = formats.is_none_or(|f| f.0.contains(CompressedImageFormats::BC));
++        let bc = bc_supported_or_known(formats);
+         let read_span = bevy::log::info_span!("texture::read").entered();
+         let read = self.ahead.remove(&path).map(|(bytes, _)| bytes).or_else(|| data.read(&path));
+         drop(read_span);
          let decode_span = bevy::log::info_span!("texture::decode").entered();
          let result = match read {
              None => Err("not in any archive".to_string()),
@@ -443,6 +485,19 @@ index 8d81a9d..dbd9c13 100644
      let line = first_line(face, s);
      let w = line.width * scale;
      let x = match align {
+diff --git a/engine/nvf-play/src/interface.rs b/engine/nvf-play/src/interface.rs
+index 085d7ff..c1df072 100644
+--- a/engine/nvf-play/src/interface.rs
++++ b/engine/nvf-play/src/interface.rs
+@@ -457,7 +457,7 @@ pub fn line_anchor(base: f32) -> (Node, LayoutConfig, UiTransform) {
+ 
+ /// Whether the device can sample the block-compressed textures the game ships.
+ pub fn bc_supported(formats: Option<&CompressedImageFormatSupport>) -> bool {
+-    formats.is_none_or(|f| f.0.contains(CompressedImageFormats::BC))
++    nvf_assets::texture::bc_supported_or_known(formats)
+ }
+ 
+ /// A line of text: where it starts and the line its letters stand on.
 diff --git a/engine/nvf-play/src/lockpick.rs b/engine/nvf-play/src/lockpick.rs
 index 211d51d..f65dce6 100644
 --- a/engine/nvf-play/src/lockpick.rs
@@ -1623,6 +1678,19 @@ index 6f12c0e..c59a1eb 100644
                  AmbientLight { color: Color::WHITE, brightness: 250.0, ..default() },
                  Transform::from_translation(to(eye)).looking_at(to(aim), Vec3::Y),
                  layer.clone(),
+diff --git a/engine/nvforever/src/lod.rs b/engine/nvforever/src/lod.rs
+index fa89874..4f55058 100644
+--- a/engine/nvforever/src/lod.rs
++++ b/engine/nvforever/src/lod.rs
+@@ -1062,7 +1062,7 @@ fn poll_generated(lod: &mut LodState, models: &mut ModelCtx) {
+     for (chunk, _) in &done {
+         gen.pending.remove(chunk);
+     }
+-    let bc = models.formats.as_deref().is_none_or(|f| f.0.contains(CompressedImageFormats::BC));
++    let bc = nvf_assets::texture::bc_supported_or_known(models.formats.as_deref());
+     for (chunk, result) in done {
+         let baked = match result {
+             Ok(Some(b)) => b,
 diff --git a/engine/nvforever/src/main.rs b/engine/nvforever/src/main.rs
 index a6cf138..1dd8f91 100644
 --- a/engine/nvforever/src/main.rs
@@ -2095,6 +2163,35 @@ index 5a7c1e2..5f62ce4 100644
              AmbientLight { color: Color::WHITE, brightness: 150.0, ..default() },
              Transform::from_translation(to(eye)).looking_at(to(aim), Vec3::Y),
              layer.clone(),
+diff --git a/engine/nvforever/src/vats_mask.wesl b/engine/nvforever/src/vats_mask.wesl
+index a2bbfd6..42c79bb 100644
+--- a/engine/nvforever/src/vats_mask.wesl
++++ b/engine/nvforever/src/vats_mask.wesl
+@@ -35,16 +35,18 @@ fn cover(uv: vec2<f32>) -> f32 {
+     return smoothstep(mask.more.y - 0.1, mask.more.y + 0.1, v);
+ }
+ 
+-// The share of a round brush `radius` pixels about `uv` that is the part's: three rings of
+-// twelve, each counted by its share of the brush's area.
++// The share of a round brush `radius` pixels about `uv` that is the part's: rings of reads,
++// each counted by its share of the brush's area.
+ fn brushed(uv: vec2<f32>, radius: f32) -> f32 {
+     let px = mask.shape.xy * radius;
+     var sum = cover(uv) * 0.5;
+     var total = 0.5;
+-    for (var ring = 1; ring <= 3; ring = ring + 1) {
+-        let r = f32(ring) / 3.0;
+-        for (var k = 0; k < 12; k = k + 1) {
+-            let a = (f32(k) + f32(ring) * 0.33) * 0.5235988;
++    // [nvport] Two rings of eight (17 reads a pixel, not 37): the full-screen pass was a
++    // heavy one on phones as V.A.T.S. opened.
++    for (var ring = 1; ring <= 2; ring = ring + 1) {
++        let r = f32(ring) / 2.0;
++        for (var k = 0; k < 8; k = k + 1) {
++            let a = (f32(k) + f32(ring) * 0.5) * 0.7853982;
+             sum = sum + cover(uv + vec2<f32>(cos(a), sin(a)) * px * r) * r;
+             total = total + r;
+         }
 diff --git a/engine/nvforever/src/vigor_view.rs b/engine/nvforever/src/vigor_view.rs
 index 1bc62a8..81a905e 100644
 --- a/engine/nvforever/src/vigor_view.rs
@@ -2139,6 +2236,79 @@ index 22ad677..df42c57 100644
              {
                  warn!(
                      "Could not set cursor grab mode for window {}: {}",
+diff --git a/engine/vendor/wgpu-hal/src/vulkan/descriptor.rs b/engine/vendor/wgpu-hal/src/vulkan/descriptor.rs
+index 5961c3c..3f0f658 100644
+--- a/engine/vendor/wgpu-hal/src/vulkan/descriptor.rs
++++ b/engine/vendor/wgpu-hal/src/vulkan/descriptor.rs
+@@ -173,42 +173,34 @@ impl DescriptorAllocator {
+         // Prefer smaller/older/fuller pools for new allocations to prevent
+         // fragmentation and possibly fragmentation of hardware resources
+         // (VK_ERROR_FRAGMENTATION)
+-        let pool = bucket
+-            .pools
+-            .iter_mut()
+-            .enumerate()
+-            .find(|(_, pool)| pool.available != 0);
+-
+-        let (pool_index, pool) = if let Some(pool) = pool {
+-            pool
+-        } else {
+-            let capacity_hint = bucket.allocated_sets;
+-            bucket.create_pool(device, &key, capacity_hint)?
++        // [nvport] Some drivers (Mali-G52 r32p1) answer ERROR_FRAGMENTED_POOL or
++        // ERROR_OUT_OF_POOL_MEMORY where the Vulkan rules say they cannot: that pool is
++        // treated as full and the set is taken from a new one (at most a few tries).
++        let mut tries = 0;
++        let (pool_index, pool, raw) = loop {
++            let found = bucket.pools.iter().position(|pool| pool.available != 0);
++            let pool_index = match found {
++                Some(i) => i,
++                None => {
++                    let capacity_hint = bucket.allocated_sets;
++                    bucket.create_pool(device, &key, capacity_hint)?.0
++                }
++            };
++            let pool_raw = bucket.pools[pool_index].raw;
++            let vk_info = vk::DescriptorSetAllocateInfo::default()
++                .descriptor_pool(pool_raw)
++                .set_layouts(core::slice::from_ref(&layout.raw));
++            match unsafe { device.allocate_descriptor_sets(&vk_info) } {
++                Ok(sets) => break (pool_index, &mut bucket.pools[pool_index], sets[0]),
++                Err(vk::Result::ERROR_FRAGMENTED_POOL | vk::Result::ERROR_OUT_OF_POOL_MEMORY) if tries < 4 => {
++                    tries += 1;
++                    bucket.pools[pool_index].available = 0;
++                }
++                Err(vk::Result::ERROR_FRAGMENTED_POOL | vk::Result::ERROR_OUT_OF_POOL_MEMORY) => return Err(crate::DeviceError::OutOfMemory),
++                Err(err) => return Err(super::map_host_device_oom_err(err)),
++            }
+         };
+ 
+-        let vk_info = vk::DescriptorSetAllocateInfo::default()
+-            .descriptor_pool(pool.raw)
+-            .set_layouts(core::slice::from_ref(&layout.raw));
+-
+-        let raw = match unsafe { device.allocate_descriptor_sets(&vk_info) } {
+-            Ok(sets) => Ok(sets[0]),
+-            // We make sure not to exceed the size of the pool.
+-            Err(vk::Result::ERROR_OUT_OF_POOL_MEMORY) => unreachable!(),
+-            // We only allocate from a pool if the nr and type of descriptors
+-            // used by a layout is the same as those specified at pool
+-            // creation time.
+-            //
+-            // > Additionally, if all sets allocated from the pool since it was
+-            // created or most recently reset use the same number of
+-            // descriptors (of each type) and the requested allocation also
+-            // uses that same number of descriptors (of each type),
+-            // then fragmentation must not cause an allocation failure.
+-            //
+-            // from https://docs.vulkan.org/refpages/latest/refpages/source/VkDescriptorPoolCreateInfo.html#_description
+-            Err(vk::Result::ERROR_FRAGMENTED_POOL) => unreachable!(),
+-            Err(err) => Err(super::map_host_device_oom_err(err)),
+-        }?;
+-
+         pool.available -= 1;
+         bucket.available_sets -= 1;
+         bucket.allocated_sets += 1;
 diff --git a/lang/ru.toml b/lang/ru.toml
 index 69dc72c..06b953d 100644
 --- a/lang/ru.toml
