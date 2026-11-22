@@ -37,7 +37,7 @@ public final class FalloutEngine {
     /** The game's process (manifest: NativeGameActivity android:process). */
     public static final String GAME_PROCESS_SUFFIX = ":game";
     /** Bumped when the bundled engine data (schemas) changes. */
-    private static final int ENGINE_DATA_VERSION = 1;
+    private static final int ENGINE_DATA_VERSION = 2; // 2: + lang (NVForever's own words)
 
     private FalloutEngine() {}
 
@@ -144,6 +144,25 @@ public final class FalloutEngine {
         profile.addArgs(args);
         java.util.Map<String, java.util.Map<String, String>> ini = new java.util.LinkedHashMap<>();
         ini.put("Settings", profile.iniSettings());
+        // NVForever's own words (menus, settings) in the phone's language: its translations
+        // go into the home's lang folder, and the language is chosen once (the settings
+        // page's choice is kept after that).
+        File home = homeDir(context, game.id);
+        try {
+            copyTree(new File(engineDataDir(context), "lang"), new File(home, "lang"));
+        } catch (IOException e) {
+            android.util.Log.w("NVForever", "lang: " + e);
+        }
+        String lang = java.util.Locale.getDefault().getLanguage();
+        File iniFile = new File(home, "NVForever.ini");
+        boolean chosen = false;
+        try {
+            chosen = iniFile.isFile() && readText(iniFile).matches("(?s).*\\n\\s*language\\s*=.*");
+        } catch (IOException ignored) {
+        }
+        if (!chosen && new File(home, "lang/" + lang + ".toml").isFile()) {
+            ini.get("Settings").put("language", lang);
+        }
         if (game == GameDef.FO3) {
             args.add("env:NVF_CHARGEN_QUEST=" + FO3_CHARGEN_QUEST);
             // Fallout 3's interface is green (its iSystemColorHUDMain / PipBoy 26, 255, 128),
@@ -568,12 +587,10 @@ public final class FalloutEngine {
         boolean alive = gameProcessAlive(context);
         String why;
         if (status.equals("ok")) return null;
-        if (status.equals("running")) {
-            if (alive) return null;
-            why = "Движок аварийно завершился (сбой в нативном коде).";
-        } else if (status.isEmpty()) {
-            if (alive) return null;
-            why = "Движок не запустился: android_main не был вызван (libnvforever.so не загрузилась?).";
+        // "running" or nothing: the game's process was ended from outside (closed from the
+        // recent apps, swiped away, killed by the system) — not an error to report.
+        if (status.equals("running") || status.isEmpty()) {
+            return null;
         } else if (status.startsWith("panic")) {
             why = "Ошибка движка: " + status.substring(5).trim();
         } else if (status.startsWith("java")) {
@@ -664,6 +681,20 @@ public final class FalloutEngine {
         }
         dest.mkdirs();
         for (String child : list) copyAssetTree(am, path + "/" + child, new File(dest, child));
+    }
+
+    private static void copyTree(File from, File to) throws IOException {
+        File[] kids = from.listFiles();
+        if (kids == null) return;
+        to.mkdirs();
+        for (File f : kids) {
+            File dest = new File(to, f.getName());
+            if (f.isDirectory()) {
+                copyTree(f, dest);
+            } else if (!dest.isFile() || dest.length() != f.length() || dest.lastModified() < f.lastModified()) {
+                java.nio.file.Files.copy(f.toPath(), dest.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+        }
     }
 
     private static String readText(File f) throws IOException {

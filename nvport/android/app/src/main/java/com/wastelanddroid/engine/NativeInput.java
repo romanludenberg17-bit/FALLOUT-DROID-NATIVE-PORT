@@ -29,6 +29,9 @@ public final class NativeInput {
      * arguments file holds its command line. */
     public static native boolean restartRequested();
 
+    /** The engine's main() returned (Quit in its menu, or an error): back to the launcher. */
+    public static native boolean engineExited();
+
     /** View pixels -> surface pixels (the surface is drawn smaller and scaled up: render scale). */
     private static volatile float scaleX = 1f, scaleY = 1f;
 

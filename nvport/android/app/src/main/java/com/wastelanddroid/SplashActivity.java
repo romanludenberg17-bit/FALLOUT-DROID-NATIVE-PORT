@@ -28,6 +28,13 @@ public final class SplashActivity extends Activity {
     @Override // android.app.Activity
     protected void onCreate(Bundle bundle) {
         super.onCreate(bundle);
+        // The launcher icon over a running app (the launcher or the game in it): show what
+        // was open, as it was. Starting the launcher again would close the game above it.
+        if (!isTaskRoot() && getIntent() != null && android.content.Intent.ACTION_MAIN.equals(getIntent().getAction())
+                && getIntent().hasCategory(android.content.Intent.CATEGORY_LAUNCHER)) {
+            finish();
+            return;
+        }
         Ui.immersive(this);
         FrameLayout frameLayout = new FrameLayout(this);
         frameLayout.setBackgroundColor(-16777216);

@@ -606,10 +606,10 @@ index bbdb0c0..ab27c2a 100644
  libloading = "0.8.9"
 diff --git a/engine/nvforever/src/android_input.rs b/engine/nvforever/src/android_input.rs
 new file mode 100644
-index 0000000..1a81a69
+index 0000000..4ba0308
 --- /dev/null
 +++ b/engine/nvforever/src/android_input.rs
-@@ -0,0 +1,259 @@
+@@ -0,0 +1,278 @@
 +//! [nvport] Input from the Android launcher (Fallout Droid): on-screen keys, touch look,
 +//! gamepads mapped to PC keys and physical keyboards/mice arrive through JNI
 +//! (`com.wastelanddroid.engine.NativeInput`) and are written as Bevy's own input messages,
@@ -705,6 +705,20 @@ index 0000000..1a81a69
 +#[unsafe(no_mangle)]
 +pub extern "C" fn Java_com_wastelanddroid_engine_NativeInput_restartRequested(_e: JEnv, _c: JClass) -> u8 {
 +    RESTART.load(Ordering::SeqCst) as u8
++}
++
++/// The engine's main() has returned (Quit, or an error): the activity goes back to the
++/// launcher (`NativeInput.engineExited`).
++static EXITED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
++
++pub fn mark_exited() {
++    EXITED.store(true, Ordering::SeqCst);
++}
++
++/// `NativeInput.engineExited()`.
++#[unsafe(no_mangle)]
++pub extern "C" fn Java_com_wastelanddroid_engine_NativeInput_engineExited(_e: JEnv, _c: JClass) -> u8 {
++    EXITED.load(Ordering::SeqCst) as u8
 +}
 +
 +/// A frame-rate cap the launcher's in-game panel asked for (-1: none pending).
@@ -804,6 +818,7 @@ index 0000000..1a81a69
 +    menu: Option<Res<nvf_play::menu::ActiveMenu>>,
 +    held: Option<Res<nvf_play::dialogue::WorldHeld>>,
 +    look: Option<Res<nvf_play::dialogue::FreeLook>>,
++    locks: Option<Res<nvf_play::control::ControlLocks>>,
 +) {
 +    let Ok((window, cursor)) = windows.single() else { return };
 +    let state = if main_menu.is_some_and(|m| m.open) {
@@ -822,6 +837,10 @@ index 0000000..1a81a69
 +        5
 +    } else if menu.is_some_and(|m| m.0.is_some()) {
 +        2
++    } else if locks.is_some_and(|l| l.movement && l.looking) {
++        // A scripted scene: the scripts took both the walk and the look (the birth, the
++        // opening at Doc Mitchell's): nothing on screen to press.
++        3
 +    } else if !window.focused || cursor.grab_mode != CursorGrabMode::None {
 +        // Out of focus the game frees the pointer whatever it shows: keep every key then.
 +        1
@@ -948,7 +967,7 @@ index a154858..7bceae8 100644
          let wp = select(w, 0.0, near(uv + off));
          let wm = select(w, 0.0, near(uv - off));
 diff --git a/engine/nvforever/src/main.rs b/engine/nvforever/src/main.rs
-index a6cf138..8456fbd 100644
+index a6cf138..9f03b8c 100644
 --- a/engine/nvforever/src/main.rs
 +++ b/engine/nvforever/src/main.rs
 @@ -82,6 +82,8 @@ mod haze;
@@ -960,7 +979,7 @@ index a6cf138..8456fbd 100644
  mod dlss;
  mod dlss_download;
  mod nv_low_latency;
-@@ -1061,12 +1063,162 @@ fn parse_smoothing(value: &str) -> Result<nvf_play::smooth_terrain::Smoothing, S
+@@ -1061,12 +1063,163 @@ fn parse_smoothing(value: &str) -> Result<nvf_play::smooth_terrain::Smoothing, S
  #[global_allocator]
  static ALLOCATOR: crash::SaysWhenEmpty = crash::SaysWhenEmpty;
  
@@ -1018,6 +1037,7 @@ index a6cf138..8456fbd 100644
 +        }
 +    };
 +    eprintln!("nvport: engine exited: {status}");
++    android_input::mark_exited();
 +    if let Some(ext) = &ext {
 +        let _ = std::fs::write(ext.join("nvforever.exit"), format!("{status}\n"));
 +    }
@@ -1124,7 +1144,7 @@ index a6cf138..8456fbd 100644
      if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(std::path::Path::to_path_buf)) {
          line = with_schemas_beside(line, &dir);
          let functions = dir.join("schemas").join("script").join("functions.json");
-@@ -1075,7 +1227,15 @@ fn main() -> AppExit {
+@@ -1075,7 +1228,15 @@ fn main() -> AppExit {
              std::env::set_var("NVF_PLAY_SCRIPT_FUNCTIONS", &functions);
          }
      }
@@ -1141,7 +1161,7 @@ index a6cf138..8456fbd 100644
      let _ = COMMAND_LINE.set(line);
      // Taking over a load: tell the old run at once that this run takes part (#1903).
      let handoff_marked = args.handoff.as_deref().map(handoff::mark_started);
-@@ -2326,6 +2486,8 @@ fn main() -> AppExit {
+@@ -2326,6 +2487,8 @@ fn main() -> AppExit {
              s.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
          });
      }

@@ -159,11 +159,18 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
         @Override
         public void run() {
             int state = 0;
-            boolean restart = false;
+            boolean restart = false, exited = false;
             try {
                 state = NativeInput.uiState();
                 restart = NativeInput.restartRequested();
+                exited = NativeInput.engineExited();
             } catch (UnsatisfiedLinkError ignored) {
+            }
+            if (exited && !restart && !restarting) {
+                // Quit Game: back to the launcher.
+                restarting = true;
+                finish();
+                return;
             }
             if (restart && !restarting) {
                 restartGame();

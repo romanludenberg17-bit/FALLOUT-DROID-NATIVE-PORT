@@ -96,7 +96,7 @@ public class ScreenKeysOverlay extends View {
             case UI_PAUSE:
                 return has(k, 1);
             case UI_FILM:
-                return has(k, 1) || has(k, 57); // skip
+                return false; // a scripted scene or a film: nothing to press
             case UI_MENU:
                 for (int c : OTHER_MENU_CODES) if (has(k, c)) return true;
                 return false;
