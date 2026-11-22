@@ -89,7 +89,7 @@ public class NativeGameActivity extends GameActivity {
                 state = NativeInput.uiState();
             } catch (UnsatisfiedLinkError ignored) {
             }
-            if (overlay != null) overlay.setMenuMode(state >= 2);
+            if (overlay != null) overlay.setUiState(state);
             ui.postDelayed(this, 120);
         }
     };

@@ -63,38 +63,191 @@ public class ScreenKeysOverlay extends View {
     private boolean invertY, haptics, tapFires;
     private String mode;
 
-    // ---- smart hiding: in menus only the menu keys stay and the screen is a pointer
+    // ---- smart hiding and menu gestures, by what the engine shows (NativeInput.uiState)
+    public static final int UI_PLAY = 1, UI_MENU = 2, UI_FILM = 3, UI_PIPBOY = 4, UI_TALK = 5,
+            UI_MAIN_MENU = 6, UI_CHARGEN = 7, UI_PAUSE = 8, UI_MESSAGE = 9, UI_PIPBOY_MAP = 10;
     private boolean smartHide = true;
+    /** The engine's screen (0 not known yet). */
+    private int uiState;
+    /** A menu, the Pip-Boy, a conversation...: the screen is a pointer, drags scroll. */
     private boolean menuMode;
-    /**
-     * Keys that stay in menus: Esc (pause), Tab (Pip-Boy), Enter, E (accept / take), R (take
-     * all), Q, Space, V (V.A.T.S.: its target screen frees the pointer), right mouse button.
-     */
-    private static final int[] MENU_CODES = {1, 15, 28, 18, 19, 16, 57, 47, 273};
+    /** Container, barter, repair, lockpick, V.A.T.S. targets: Esc, E, R, Enter, V, Tab. */
+    private static final int[] OTHER_MENU_CODES = {1, 18, 19, 28, 47, 15};
 
-    private boolean menuKey(ScreenKey k) {
-        for (int c : k.codes) for (int m : MENU_CODES) if (c == m) return true;
+    private static boolean has(ScreenKey k, int code) {
+        for (int c : k.codes) if (c == code) return true;
         return false;
     }
 
-    /** Hidden now (smart hiding in a menu, or a hidden key). */
-    private boolean hiddenNow(ScreenKey k) {
-        return k.shape == 10 || (menuMode && !editing && !menuKey(k));
+    /** Whether a key is shown on this screen (smart hiding). */
+    private boolean keyShown(ScreenKey k) {
+        if (editing || !smartHide) return true;
+        switch (uiState) {
+            case UI_PIPBOY:
+            case UI_PIPBOY_MAP:
+                return has(k, 15); // the Pip-Boy key, to close it
+            case UI_TALK:
+            case UI_MAIN_MENU:
+            case UI_CHARGEN:
+            case UI_MESSAGE:
+                return false; // chosen with the finger
+            case UI_PAUSE:
+                return has(k, 1);
+            case UI_FILM:
+                return has(k, 1) || has(k, 57); // skip
+            case UI_MENU:
+                for (int c : OTHER_MENU_CODES) if (has(k, c)) return true;
+                return false;
+            default:
+                return true;
+        }
     }
 
-    /** The engine says a menu, the Pip-Boy, a conversation or the pause menu is up. */
-    public void setMenuMode(boolean on) {
-        on = on && smartHide;
-        if (on == menuMode) return;
-        // Held keys (a stick, a pressed key) let go; latched toggles (sneak) stay on.
-        for (List<Integer> c : held.values()) press(c, false);
-        for (Integer k : pressed.values()) if (k != null && k < keys.size() && !latched.contains(k)) press(keys.get(k).codes, false);
-        held.clear();
-        pressed.clear();
-        armed.clear();
-        lookId = -1;
-        menuMode = on;
+    /** Hidden now (smart hiding, or a hidden key). */
+    private boolean hiddenNow(ScreenKey k) {
+        return k.shape == 10 || !keyShown(k);
+    }
+
+    /** What the engine shows now (polled by NativeGameActivity). */
+    public void setUiState(int state) {
+        if (state == uiState) return;
+        boolean menu = state >= UI_MENU && state != UI_FILM;
+        if (menu != menuMode || state != uiState) {
+            // Held keys (a stick, a pressed key) let go; latched toggles (sneak) stay on.
+            for (List<Integer> c : held.values()) press(c, false);
+            for (Integer k : pressed.values()) if (k != null && k < keys.size() && !latched.contains(k)) press(keys.get(k).codes, false);
+            held.clear();
+            pressed.clear();
+            armed.clear();
+            endGesture();
+            lookId = -1;
+        }
+        uiState = state;
+        menuMode = menu;
         invalidate();
+    }
+
+    /** Kept for callers of the first smart-hiding build. */
+    public void setMenuMode(boolean on) {
+        setUiState(on ? UI_MENU : UI_PLAY);
+    }
+
+    // Menu gestures: a tap clicks; a drag scrolls (wheel steps, the cursor stays where the
+    // finger came down, over the list); on the Pip-Boy's map a drag pans it (left button
+    // held); a press held still then dragged drags with the left button (sliders, scroll
+    // bars); two fingers pinch to zoom (wheel steps).
+    private static final int G_NONE = 0, G_PENDING = 1, G_SCROLL = 2, G_DRAG = 3, G_PINCH = 4;
+    private static final long HOLD_TO_DRAG_MS = 350;
+    private static final float SCROLL_STEP_DP = 34f;
+    private static final float PINCH_STEP = 0.12f;
+    private int gesture = G_NONE;
+    private int pinchId = -1;
+    private float pinchX, pinchY, pinchBase, scrollAcc;
+    private boolean lmbHeld;
+
+    private void endGesture() {
+        if (lmbHeld) NativeInput.key(272, false);
+        lmbHeld = false;
+        gesture = G_NONE;
+        pinchId = -1;
+        scrollAcc = 0;
+    }
+
+    private float pinchDistance() {
+        return (float) Math.hypot(lastX - pinchX, lastY - pinchY);
+    }
+
+    private void menuDown(int id, float x, float y, long t) {
+        if (lookId == -1) {
+            lookId = id;
+            lastX = downX = x;
+            lastY = downY = y;
+            downAt = t;
+            lookMoved = false;
+            gesture = G_PENDING;
+            scrollAcc = 0;
+            NativeInput.pointTo(x, y);
+        } else if (pinchId == -1) {
+            // A second finger: pinch (zoom) from here on.
+            if (lmbHeld) {
+                NativeInput.key(272, false);
+                lmbHeld = false;
+            }
+            pinchId = id;
+            pinchX = x;
+            pinchY = y;
+            pinchBase = Math.max(1f, pinchDistance());
+            gesture = G_PINCH;
+            lookMoved = true;
+        }
+    }
+
+    private void menuMove(int id, float x, float y, long t) {
+        if (id == pinchId) {
+            pinchX = x;
+            pinchY = y;
+        } else if (id == lookId) {
+            float dy = y - lastY;
+            lastX = x;
+            lastY = y;
+            if (gesture == G_PENDING && Math.hypot(x - downX, y - downY) > dp(TAP_SLOP_DP)) {
+                lookMoved = true;
+                boolean held = t - downAt >= HOLD_TO_DRAG_MS;
+                if (uiState == UI_PIPBOY_MAP || held) {
+                    gesture = G_DRAG;
+                    NativeInput.pointTo(downX, downY);
+                    NativeInput.key(272, true);
+                    lmbHeld = true;
+                } else {
+                    gesture = G_SCROLL;
+                    dy = y - downY;
+                }
+            }
+            if (gesture == G_DRAG) {
+                NativeInput.pointTo(x, y);
+            } else if (gesture == G_SCROLL) {
+                // Natural scrolling: the finger up shows what is below (wheel down).
+                scrollAcc += dy;
+                float step = dp(SCROLL_STEP_DP);
+                while (Math.abs(scrollAcc) >= step) {
+                    float dir = Math.signum(scrollAcc);
+                    NativeInput.scroll(dir);
+                    scrollAcc -= dir * step;
+                }
+            }
+        } else {
+            return;
+        }
+        if (gesture == G_PINCH && lookId != -1 && pinchId != -1) {
+            float d = pinchDistance();
+            float ratio = d / pinchBase;
+            if (ratio > 1f + PINCH_STEP) {
+                NativeInput.scroll(1f); // zoom in
+                pinchBase = d;
+            } else if (ratio < 1f - PINCH_STEP) {
+                NativeInput.scroll(-1f); // zoom out
+                pinchBase = d;
+            }
+        }
+    }
+
+    private void menuUp(int id, float x, float y, long t) {
+        if (id == pinchId) {
+            pinchId = -1;
+            return;
+        }
+        if (id != lookId) return;
+        lookId = -1;
+        boolean tap = gesture == G_PENDING && !lookMoved && t >= 0;
+        if (gesture == G_DRAG) {
+            NativeInput.pointTo(x, y);
+        }
+        endGesture();
+        if (tap) {
+            NativeInput.pointTo(x, y);
+            NativeInput.key(272, true);
+            NativeInput.key(272, false);
+        }
     }
 
     // ---- editor mode (ControlsEditorActivity)
@@ -242,7 +395,7 @@ public class ScreenKeysOverlay extends View {
         int w = getWidth(), h = getHeight();
         for (int i = keys.size() - 1; i >= 0; i--) {
             ScreenKey k = keys.get(i);
-            if (menuMode && !editing && !menuKey(k)) continue;
+            if (!keyShown(k)) continue;
             float cx = k.x * w, cy = k.y * h, hh = dp(k.size) / 2f + dp(6), hw = half(k) + dp(6);
             if (Math.abs(x - cx) <= hw && Math.abs(y - cy) <= hh) return i;
         }
@@ -293,7 +446,7 @@ public class ScreenKeysOverlay extends View {
                 pointerDown(e.getPointerId(idx), e.getX(idx), e.getY(idx), e.getEventTime());
                 break;
             case MotionEvent.ACTION_MOVE:
-                for (int i = 0; i < e.getPointerCount(); i++) pointerMove(e.getPointerId(i), e.getX(i), e.getY(i));
+                for (int i = 0; i < e.getPointerCount(); i++) pointerMove(e.getPointerId(i), e.getX(i), e.getY(i), e.getEventTime());
                 break;
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_POINTER_UP:
@@ -310,6 +463,10 @@ public class ScreenKeysOverlay extends View {
 
     private void pointerDown(int id, float x, float y, long t) {
         int k = keyAt(x, y);
+        if (k < 0 && menuMode) {
+            menuDown(id, x, y, t);
+            return;
+        }
         if (k < 0) {
             if (lookId == -1) {
                 lookId = id;
@@ -345,7 +502,11 @@ public class ScreenKeysOverlay extends View {
         return menuMode || "direct".equals(mode);
     }
 
-    private void pointerMove(int id, float x, float y) {
+    private void pointerMove(int id, float x, float y, long t) {
+        if (menuMode && (id == lookId || id == pinchId)) {
+            menuMove(id, x, y, t);
+            return;
+        }
         if (id == lookId) {
             float dx = x - lastX, dy = y - lastY;
             lastX = x;
@@ -376,6 +537,10 @@ public class ScreenKeysOverlay extends View {
     }
 
     private void pointerUp(int id, float x, float y, long t) {
+        if (menuMode && (id == lookId || id == pinchId)) {
+            menuUp(id, x, y, t);
+            return;
+        }
         if (id == lookId) {
             lookId = -1;
             boolean tap = !lookMoved && t >= 0 && t - downAt <= TAP_MS;
@@ -406,6 +571,7 @@ public class ScreenKeysOverlay extends View {
         pressed.clear();
         latched.clear();
         armed.clear();
+        endGesture();
         lookId = -1;
         invalidate();
     }

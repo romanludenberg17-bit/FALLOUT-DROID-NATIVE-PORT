@@ -66,6 +66,26 @@ index bf36d9e..5968bf0 100644
      }
  }
  
+diff --git a/crates/fnv-world/src/radio.rs b/crates/fnv-world/src/radio.rs
+index e6c8db0..f02aa9f 100644
+--- a/crates/fnv-world/src/radio.rs
++++ b/crates/fnv-world/src/radio.rs
+@@ -205,6 +205,15 @@ pub fn placed(lo: &LoadOrder, schema: &Schema, ix: &WorldIndex, forms: &RadioFor
+                     let pos_ref = v.get("position_reference").and_then(formid_of).and_then(|l| global(lo, pi, l));
+                     (num(&v, "range_radius").unwrap_or(0.0) as f32, BroadcastRange::of(range), num(&v, "static_percentage").unwrap_or(0.0) as f32, pos_ref)
+                 });
++                // [nvport] Fallout 3's station references have no XRDO (New Vegas added the
++                // broadcast range): its radio stations are heard everywhere, as the
++                // Pip-Boy lists them in the original [hypothesis: Galaxy News Radio's
++                // reception is scripted, not ranged].
++                let radio = radio.or_else(|| {
++                    let fo3 = std::env::var("NVPORT_GAME").is_ok_and(|v| v.trim().eq_ignore_ascii_case("fo3"));
++                    let radio_station = forms.stations.get(&base).is_some_and(Station::is_radio);
++                    (fo3 && radio_station).then_some((0.0, BroadcastRange::Everywhere, 0.0, None))
++                });
+                 stations.push(StationRef { ref_id: fid, base, cell, position: p.position, initially_disabled: p.initially_disabled(), radio });
+             }
+             if let Some(rb) = receiver {
 diff --git a/engine/Cargo.lock b/engine/Cargo.lock
 index 5cdaf9e..0715284 100644
 --- a/engine/Cargo.lock
@@ -220,11 +240,78 @@ index 4f6f70c..c60af4c 100644
          };
          drop(decode_span);
          let handle = match result {
+diff --git a/engine/nvf-play/src/music.rs b/engine/nvf-play/src/music.rs
+index 70bfca9..d0b27f7 100644
+--- a/engine/nvf-play/src/music.rs
++++ b/engine/nvf-play/src/music.rs
+@@ -343,6 +343,46 @@ pub fn wanted_battle(set: &audio::MediaSet) -> Wanted {
+     }
+ }
+ 
++/// [nvport] Fallout 3 on its own (`NVPORT_GAME=fo3`).
++fn is_fo3() -> bool {
++    static FO3: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
++    *FO3.get_or_init(|| std::env::var("NVPORT_GAME").is_ok_and(|v| v.trim().eq_ignore_ascii_case("fo3")))
++}
++
++/// [nvport] One of Fallout 3's music folders (`Data\Music\<folder>`), a track picked at
++/// random from it, looped while the place lasts.
++fn fo3_folder(folder: &str, id: u32) -> Wanted {
++    Wanted {
++        key: Key::Type(id),
++        name: format!("Fallout 3 {folder}"),
++        files: [Some(format!("{folder}\\")), None, None],
++        db: [-4.0, 0.0, 0.0],
++        on: [true, false, false],
++        fade: DEFAULT_FADE,
++        min_on: 0.0,
++        looping: true,
++        layers: ONE_LAYER,
++    }
++}
++
++/// [nvport] Fallout 3's music for a place: an interior's CELL `XCMT` (0 default, 1 public,
++/// 2 dungeon [documented: xEdit wbDefinitionsFO3 CELL XCMT]) chooses Public or Dungeon,
++/// the wasteland plays Explore.
++fn fo3_place_music(lo: &fnv_esm::LoadOrder, cell: Option<u32>, interior: bool) -> Option<Wanted> {
++    if !is_fo3() {
++        return None;
++    }
++    if !interior {
++        return Some(fo3_folder("Explore", 0xFFFF_FF00));
++    }
++    let kind = cell
++        .and_then(|c| fnv_world::fields::winner(lo, c))
++        .and_then(|(_, r)| r.subrecords().ok())
++        .and_then(|subs| subs.iter().find(|s| &s.sig == b"XCMT").and_then(|s| s.data.first().copied()))
++        .unwrap_or(0);
++    Some(if kind == 1 { fo3_folder("Public", 0xFFFF_FF01) } else { fo3_folder("Dungeon", 0xFFFF_FF02) })
++}
++
+ /// A music type as one track [hypothesis: `ANAM` is a level in decibels whose sign says
+ /// whether the file loops; its size is taken off].
+ pub fn wanted_type(m: &audio::MusicType) -> Option<Wanted> {
+@@ -1112,9 +1152,15 @@ fn play(
+             let of_world = || loc.interior.is_none().then(|| *music.types.entry(loc.world).or_insert_with(|| audio::world_music(d.lo, d.schema, loc.world))).flatten();
+             wanted_type(places.forms.music.get(&of_cell.or_else(of_world)?)?)
+         })
++        // [nvport] Fallout 3 has no media sets: its music is folders of tracks chosen by
++        // the place (the original's Explore / Public / Dungeon).
++        .or_else(|| fo3_place_music(d.lo, cell, loc.interior.is_some()).filter(|w| w.files.iter().flatten().all(|f| music.playable(&data.vfs, f))))
+     };
++    let fo3_battle = music.battle.active && battle_set.is_none() && is_fo3();
+     let wanted = if music.dead {
+         None
++    } else if fo3_battle {
++        Some(fo3_folder("Battle", 0xFFFF_FF03)).filter(|w| w.files.iter().flatten().all(|f| music.playable(&data.vfs, f)))
+     } else if battle_loop {
+         battle_set.map(wanted_battle)
+     } else if recovering {
 diff --git a/engine/nvf-play/src/script.rs b/engine/nvf-play/src/script.rs
-index c1893ca..dd73720 100644
+index c1893ca..38e3d2b 100644
 --- a/engine/nvf-play/src/script.rs
 +++ b/engine/nvf-play/src/script.rs
-@@ -196,6 +196,106 @@ pub struct NewGameStart {
+@@ -196,6 +196,179 @@ pub struct NewGameStart {
  /// The new game's start: the marker the opening moves the player to
  /// (`fnv_game::runner::NEW_GAME_START`) in [`NEW_GAME_CELL`].
  pub fn new_game_start(lo: &fnv_esm::LoadOrder, schema: &fnv_esm::Schema, index: &WorldIndex) -> Result<NewGameStart, String> {
@@ -279,7 +366,57 @@ index c1893ca..dd73720 100644
 +        }
 +    }
 +    let quest = std::env::var("NVF_CHARGEN_QUEST").ok().filter(|q| !q.trim().is_empty()).unwrap_or_else(|| "MQ01".to_string());
-+    if let Some((pi, qrec)) = find(b"QUST", quest.trim()) {
++    let qfound = find(b"QUST", quest.trim());
++    // Where the opening's own script moves the player: `player.moveto <ref>` in the source
++    // of its earliest stage (SCTX after the stage's INDX), else in the quest's script.
++    if let Some((pi, qrec)) = qfound {
++        let mut texts: Vec<(i32, String)> = Vec::new();
++        if let Ok(subs) = qrec.subrecords() {
++            let mut stage = i32::MAX - 1;
++            for sub in &subs {
++                if &sub.sig == b"INDX" && sub.data.len() >= 2 {
++                    stage = i16::from_le_bytes([sub.data[0], sub.data[1]]) as i32;
++                } else if &sub.sig == b"SCTX" {
++                    texts.push((stage, String::from_utf8_lossy(&sub.data).into_owned()));
++                } else if &sub.sig == b"SCRI" && sub.data.len() >= 4 {
++                    let local = u32::from_le_bytes([sub.data[0], sub.data[1], sub.data[2], sub.data[3]]);
++                    if let Some((_, srec)) = fnv_world::fields::global(lo, pi, local).and_then(|g| fnv_world::fields::winner(lo, g)) {
++                        if let Ok(ss) = srec.subrecords() {
++                            for t in ss.iter().filter(|t| &t.sig == b"SCTX") {
++                                texts.push((i32::MAX, String::from_utf8_lossy(&t.data).into_owned()));
++                            }
++                        }
++                    }
++                }
++            }
++        }
++        texts.sort_by_key(|(stage, _)| *stage);
++        for (stage, text) in &texts {
++            for target in player_moveto_targets(text) {
++                for sig in [b"REFR", b"ACHR"] {
++                    let Some((rpi, rrec)) = find(sig, &target) else { continue };
++                    let Some(g) = fnv_world::fields::global(lo, rpi, rrec.header.form_id) else { continue };
++                    if let Some(s) = interior_of(g).and_then(|c| start_at(g, c)) {
++                        info!("new game: {quest} stage {stage} moves the player to {target} ({g:08X}): the start");
++                        return Ok(s);
++                    }
++                }
++            }
++        }
++    }
++    // A birth room (Fallout 3's opening is the player's birth): its heading marker.
++    {
++        let mut births: Vec<&fnv_world::index::Cell> = index.cells.values().filter(|c| c.world.is_none() && c.edid.as_deref().is_some_and(|e| e.to_ascii_lowercase().contains("birth"))).collect();
++        births.sort_by_key(|c| c.form_id);
++        for c in births {
++            let marker = c.refs.iter().copied().find(|&r| fnv_world::placed::placement(lo, schema, r).and_then(|p| p.base).is_some_and(|b| b == 0x34 || b == 0x3B));
++            if let Some(s) = marker.and_then(|r| start_at(r, c.form_id)) {
++                info!("new game: the birth room {} ({:08X}): the start", c.edid.as_deref().unwrap_or("?"), c.form_id);
++                return Ok(s);
++            }
++        }
++    }
++    if let Some((pi, qrec)) = qfound {
 +        // Every reference the quest's stage results and its script name, in record order.
 +        let mut named: Vec<u32> = Vec::new();
 +        let mut collect = |pi: usize, rec: &fnv_esm::raw::Record, named: &mut Vec<u32>| {
@@ -327,6 +464,29 @@ index c1893ca..dd73720 100644
 +    Err(format!("no start found for quest {quest} (set NVF_NEW_GAME_MARKER or NVF_NEW_GAME_CELL)"))
 +}
 +
++/// The references a script's source moves the player to: `player.moveto X`,
++/// `playerref.moveto X` (any case; a trailing comment or arguments ignored).
++fn player_moveto_targets(text: &str) -> Vec<String> {
++    let mut out = Vec::new();
++    for line in text.lines() {
++        let code = line.split(';').next().unwrap_or("");
++        let low = code.to_ascii_lowercase();
++        let mut from = 0;
++        while let Some(i) = low[from..].find("moveto") {
++            let at = from + i;
++            let before = low[..at].trim_end();
++            let ok = before.ends_with("player.") || before.ends_with("playerref.");
++            let rest = code[at + 6..].trim_start();
++            let target: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
++            if ok && !target.is_empty() && !out.contains(&target) {
++                out.push(target);
++            }
++            from = at + 6;
++        }
++    }
++    out
++}
++
 +fn fnv_new_game_start(lo: &fnv_esm::LoadOrder, schema: &fnv_esm::Schema, index: &WorldIndex) -> Result<NewGameStart, String> {
      let cell = index.cell_by_name(NEW_GAME_CELL).filter(|c| c.world.is_none()).ok_or_else(|| format!("no interior cell {NEW_GAME_CELL}"))?;
      for &r in &cell.refs {
@@ -363,10 +523,10 @@ index bbdb0c0..ab27c2a 100644
  libloading = "0.8.9"
 diff --git a/engine/nvforever/src/android_input.rs b/engine/nvforever/src/android_input.rs
 new file mode 100644
-index 0000000..12cc350
+index 0000000..700d879
 --- /dev/null
 +++ b/engine/nvforever/src/android_input.rs
-@@ -0,0 +1,179 @@
+@@ -0,0 +1,212 @@
 +//! [nvport] Input from the Android launcher (Fallout Droid): on-screen keys, touch look,
 +//! gamepads mapped to PC keys and physical keyboards/mice arrive through JNI
 +//! (`com.wastelanddroid.engine.NativeInput`) and are written as Bevy's own input messages,
@@ -386,9 +546,11 @@ index 0000000..12cc350
 +use std::sync::atomic::{AtomicI32, Ordering};
 +
 +/// What the game shows, for the launcher's on-screen keys (`NativeInput.uiState`):
-+/// 0 not known yet, 1 playing (the pointer is grabbed: all keys), 2 a menu, the Pip-Boy, a
-+/// conversation, a message box or the pause menu (the pointer is free: menu keys only),
-+/// 3 neither grabbed nor shown (a film, a scene that drives the view).
++/// 0 not known yet, 1 playing, 2 another menu (container, barter, repair, lockpick, V.A.T.S.
++/// target screen...), 3 a film or a scene (no pointer), 4 the Pip-Boy, 5 a conversation,
++/// 6 the main menu, 7 character creation (face and race, SPECIAL, traits, tag skills, name,
++/// level-up), 8 the pause menu, 9 a message box, 10 the Pip-Boy's map. The launcher keeps
++/// the keys each needs and turns finger drags into wheel steps or a held left button.
 +static UI_STATE: AtomicI32 = AtomicI32::new(0);
 +
 +enum Ev {
@@ -496,10 +658,41 @@ index 0000000..12cc350
 +    }
 +}
 +
-+/// The game's own pointer rules (nvf_play::player::grab_cursor) say what is on screen.
-+fn publish_ui_state(windows: Query<(&Window, &CursorOptions), With<PrimaryWindow>>) {
++/// The open screen, the most specific first; else the game's own pointer rules
++/// (nvf_play::player::grab_cursor): a grabbed pointer is play, a free one a menu.
++#[allow(clippy::too_many_arguments)]
++fn publish_ui_state(
++    windows: Query<(&Window, &CursorOptions), With<PrimaryWindow>>,
++    main_menu: Option<Res<nvf_play::main_menu::MainMenu>>,
++    creator: Option<Res<nvf_play::creator::CreatorMenu>>,
++    chargen: Option<Res<nvf_play::chargen::ChargenMenus>>,
++    levelup: Option<Res<nvf_play::levelup::LevelUpMenu>>,
++    paused: Option<Res<nvf_play::pause::Paused>>,
++    pipboy: Option<Res<nvf_play::pipboy::PipBoy>>,
++    talk: Option<Res<nvf_play::dialogue_menu::DialogueMenu>>,
++    message: Option<Res<nvf_play::message_menu::MessagePanel>>,
++    menu: Option<Res<nvf_play::menu::ActiveMenu>>,
++    held: Option<Res<nvf_play::dialogue::WorldHeld>>,
++    look: Option<Res<nvf_play::dialogue::FreeLook>>,
++) {
 +    let Ok((window, cursor)) = windows.single() else { return };
-+    let state = if !window.focused || cursor.grab_mode != CursorGrabMode::None {
++    let state = if main_menu.is_some_and(|m| m.open) {
++        6
++    } else if creator.is_some_and(|c| c.is_open()) || chargen.is_some_and(|c| c.progress().is_some()) || levelup.is_some_and(|l| l.progress().is_some()) {
++        7
++    } else if paused.is_some_and(|p| p.0) {
++        8
++    } else if let Some(p) = pipboy.as_ref().filter(|p| p.open()) {
++        // Its map (Data page, local or world map tab): dragged to pan, pinched to zoom.
++        if matches!(p.page, nvf_play::pipboy::Page::Data) && p.tabs[2] <= 1 { 10 } else { 4 }
++    } else if message.is_some_and(|m| m.view.is_some()) {
++        9
++    } else if talk.is_some_and(|t| t.view.is_some()) || held.is_some_and(|h| h.0) || look.is_some_and(|l| l.0) {
++        // The choices, and an actor speaking (free look) between them.
++        5
++    } else if menu.is_some_and(|m| m.0.is_some()) {
++        2
++    } else if !window.focused || cursor.grab_mode != CursorGrabMode::None {
 +        // Out of focus the game frees the pointer whatever it shows: keep every key then.
 +        1
 +    } else if cursor.visible {
