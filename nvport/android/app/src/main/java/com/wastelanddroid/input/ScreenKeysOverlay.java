@@ -62,6 +62,8 @@ public class ScreenKeysOverlay extends View {
     private float sens;
     private boolean invertY, haptics, tapFires;
     private String mode;
+    /** All keys' opacity, from the in-game panel (keys_opacity, 10..100 %). */
+    private float opacityScale = 1f;
 
     // ---- smart hiding and menu gestures, by what the engine shows (NativeInput.uiState)
     public static final int UI_PLAY = 1, UI_MENU = 2, UI_FILM = 3, UI_PIPBOY = 4, UI_TALK = 5,
@@ -195,7 +197,7 @@ public class ScreenKeysOverlay extends View {
                 boolean held = t - downAt >= HOLD_TO_DRAG_MS;
                 if (uiState == UI_PIPBOY_MAP || held) {
                     gesture = G_DRAG;
-                    NativeInput.pointTo(downX, downY);
+                    // The pointer has stood at the press point since the finger came down.
                     NativeInput.key(272, true);
                     lmbHeld = true;
                 } else {
@@ -243,11 +245,23 @@ public class ScreenKeysOverlay extends View {
             NativeInput.pointTo(x, y);
         }
         endGesture();
-        if (tap) {
-            NativeInput.pointTo(x, y);
-            NativeInput.key(272, true);
-            NativeInput.key(272, false);
-        }
+        if (tap) clickAt(x, y);
+    }
+
+    // The engine finds what is under the pointer from the frames before a click (hover):
+    // a click in the frame the pointer moved lands on nothing. So the pointer goes first,
+    // the button a few frames later.
+    private static final long CLICK_PRESS_DELAY_MS = 50, CLICK_RELEASE_DELAY_MS = 110;
+    private final android.os.Handler clicks = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable lmbDown = () -> NativeInput.key(272, true);
+    private final Runnable lmbUp = () -> NativeInput.key(272, false);
+
+    private void clickAt(float x, float y) {
+        clicks.removeCallbacks(lmbDown);
+        clicks.removeCallbacks(lmbUp);
+        NativeInput.pointTo(x, y);
+        clicks.postDelayed(lmbDown, CLICK_PRESS_DELAY_MS);
+        clicks.postDelayed(lmbUp, CLICK_RELEASE_DELAY_MS);
     }
 
     // ---- editor mode (ControlsEditorActivity)
@@ -287,6 +301,7 @@ public class ScreenKeysOverlay extends View {
         tapFires = FalloutInput.tapFires(c);
         mode = Prefs.get(c).getString("touch_mode", "auto");
         smartHide = Prefs.get(c).getBoolean("smart_hide", true);
+        opacityScale = Math.max(0.1f, Math.min(1f, Prefs.get(c).getInt("keys_opacity", 100) / 100f));
         invalidate();
     }
 
@@ -308,7 +323,7 @@ public class ScreenKeysOverlay extends View {
             if (hiddenNow(k)) continue;
             float cx = k.x * w, cy = k.y * h, hh = dp(k.size) / 2f, hw = half(k);
             boolean down = pressed.containsValue(i) || latched.contains(i) || armed.containsKey(i);
-            int a = Math.round(255 * Math.max(0.1f, Math.min(1f, k.opacity)) * (down ? 1f : 0.75f));
+            int a = Math.round(255 * Math.max(0.1f, Math.min(1f, k.opacity)) * (down ? 1f : 0.75f) * (editing ? 1f : opacityScale));
             body.setColor(Color.argb(down ? a * 2 / 3 : a / 3, Color.red(tint), Color.green(tint), Color.blue(tint)));
             ring.setColor(Color.argb(a, Color.red(tint), Color.green(tint), Color.blue(tint)));
             ring.setStrokeWidth(dp(down ? 2.5f : 1.5f));
@@ -545,9 +560,12 @@ public class ScreenKeysOverlay extends View {
             lookId = -1;
             boolean tap = !lookMoved && t >= 0 && t - downAt <= TAP_MS;
             if (tap && (tapFires || menuMode || !"trackpad".equals(mode))) {
-                if (menuMode || !"trackpad".equals(mode)) NativeInput.pointTo(x, y);
-                NativeInput.key(272, true);
-                NativeInput.key(272, false);
+                if (menuMode || !"trackpad".equals(mode)) {
+                    clickAt(x, y);
+                } else {
+                    NativeInput.key(272, true);
+                    NativeInput.key(272, false);
+                }
             }
             return;
         }

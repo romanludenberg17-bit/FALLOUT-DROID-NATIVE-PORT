@@ -32,6 +32,8 @@ public final class FalloutEngine {
     /** Written by android_main: running / ok / error ... / panic ... ; or by the activity: java ... */
     public static final String EXIT_FILE = "nvforever.exit";
     public static final String REPORT_FILE = "fd_report.txt";
+    /** Prefs key prefix: a save to start straight into (the saves screen). */
+    public static final String PENDING_LOAD = "pending_load_";
     /** The game's process (manifest: NativeGameActivity android:process). */
     public static final String GAME_PROCESS_SUFFIX = ":game";
     /** Bumped when the bundled engine data (schemas) changes. */
@@ -144,6 +146,10 @@ public final class FalloutEngine {
         ini.put("Settings", profile.iniSettings());
         if (game == GameDef.FO3) {
             args.add("env:NVF_CHARGEN_QUEST=" + FO3_CHARGEN_QUEST);
+            // Fallout 3's interface is green (its iSystemColorHUDMain / PipBoy 26, 255, 128),
+            // New Vegas's amber.
+            ini.get("Settings").put("hud-colour", "Green");
+            ini.get("Settings").put("pipboy-colour", "Green");
             java.util.Map<String, String> general = new java.util.LinkedHashMap<>();
             general.put("sCharGenQuest", FO3_CHARGEN_QUEST);
             general.put("sIntroMovie", findChild(new File(data, "Video"), FO3_INTRO) != null ? FO3_INTRO : "");
@@ -167,7 +173,17 @@ public final class FalloutEngine {
             args.addAll(plugins);
         }
         args.add("--play");
-        args.add("--menu");
+        // A save chosen on the saves screen: straight into it, else the main menu.
+        String pending = prefs.getString(PENDING_LOAD + game.id, null);
+        if (pending != null) {
+            prefs.edit().remove(PENDING_LOAD + game.id).apply();
+        }
+        if (pending != null && new File(pending).isFile()) {
+            args.add("--load");
+            args.add(pending);
+        } else {
+            args.add("--menu");
+        }
         return new Prepared.Ok(game, args);
     }
 
@@ -201,15 +217,11 @@ public final class FalloutEngine {
             // textureQuality 0 high, 1 medium, 2 low -> levels skipped; phones always lose one
             // level below High (FNV's 1024/2048 textures on a 8 GB phone).
             p.mipSkip = Math.min(3, p.g.textureQuality + (p.quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? 0 : 1));
-            int lock = 0;
-            try {
-                lock = Integer.parseInt(Prefs.get(context).getString(Prefs.FPS_LOCK, "0").replaceAll("[^0-9]", ""));
-            } catch (RuntimeException ignored) {
-            }
             // Targets: 30 FPS on a low class (Helio G99), 60 on a medium one, up to 120 on a
-            // high one (Snapdragon 8 Gen 5 class: ~100). A chosen lock wins.
-            p.frameCap = lock > 0 ? (lock <= 30 ? 30 : lock <= 60 ? 60 : lock <= 90 ? 90 : 120)
-                    : p.quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? 120 : p.quality == com.wastelanddroid.game.DeviceProfile.Quality.MEDIUM ? 60 : 30;
+            // high one (Snapdragon 8 Gen 5 class: ~100). A chosen limit (the in-game panel,
+            // "fps_lock": auto / 30 / 60 / 90 / 120 / off) wins.
+            int auto = p.quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? 120 : p.quality == com.wastelanddroid.game.DeviceProfile.Quality.MEDIUM ? 60 : 30;
+            p.frameCap = fpsLock(context, auto);
             // Sun shadows cost the most and showed artefacts: only when chosen in the
             // graphics settings (a custom setup), never from a preset.
             p.custom = Prefs.get(context).getBoolean("gfx_custom", false);
@@ -242,8 +254,10 @@ public final class FalloutEngine {
             add(a, "--lodgen-res", g.textureQuality == 0 && high ? 512 : 256);
             add(a, "--lodgen-step", high ? 4 : 8);
             add(a, "--cell-fade", 0.5f);
-            add(a, "--msaa", 1);
+            add(a, "--msaa", high ? 4 : quality == com.wastelanddroid.game.DeviceProfile.Quality.MEDIUM ? 2 : 1);
             add(a, "--fov", g.fov);
+            // The music under the voices and effects, as the original's defaults mix it.
+            add(a, "--music-volume", 0.45f);
             if (g.grassDensity > 0) {
                 add(a, "--grass-distance", 1000 + g.grassDensity * 1000);
                 add(a, "--grass-density", Math.min(1f, 0.25f + g.grassDensity * 0.2f));
@@ -270,14 +284,20 @@ public final class FalloutEngine {
         /** The switches NVForever.ini keeps win over the command line: the launcher's go there too. */
         java.util.Map<String, String> iniSettings() {
             java.util.LinkedHashMap<String, String> set = new java.util.LinkedHashMap<>();
-            set.put("frame-cap", String.valueOf(frameCap));
-            set.put("anti-aliasing", quality == com.wastelanddroid.game.DeviceProfile.Quality.LOW ? "Off" : "FXAA");
+            set.put("frame-cap", frameCap <= 0 ? "Off" : String.valueOf(frameCap));
+            // Multisampling also smooths alpha-tested cut-outs (grates, plants, fences), which
+            // otherwise shimmer: cheap on tile-based mobile GPUs, resolved in tile memory.
+            set.put("anti-aliasing", quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? "4x"
+                    : quality == com.wastelanddroid.game.DeviceProfile.Quality.MEDIUM ? "2x" : "FXAA");
             set.put("sun-shadows", g.shadows <= 0 ? "Off" : g.shadows >= 3 ? "Quality" : "Performance");
             set.put("grass", g.grassDensity > 0 ? "1" : "0");
             set.put("distant-lod", "1");
             // The engine's frame-rate counter (pref "fps_counter", on in the alpha builds to
             // measure the phone's frame rate).
             set.put("fps-counter", fpsCounter ? "1" : "0");
+            // As in the original: aiming holds the gun low with the crosshair (the engine's
+            // "true iron sights" moves it to the eye and away from the usual framing).
+            set.put("true-iron-sights", "0");
             return set;
         }
 
@@ -337,7 +357,7 @@ public final class FalloutEngine {
     }
 
     /** Fallout 3's opening quest, film and archives (the engine's FNV defaults otherwise). */
-    static final String FO3_CHARGEN_QUEST = "MQ01";
+    static final String FO3_CHARGEN_QUEST = "CG00"; // the birth in Vault 101 (CG00..CG04: character creation)
     static final String FO3_INTRO = "Fallout INTRO Vsk.bik";
     static final String FO3_ARCHIVES = "Fallout - Textures.bsa, Fallout - Meshes.bsa, Fallout - Voices.bsa, "
             + "Fallout - Sound.bsa, Fallout - MenuVoices.bsa, Fallout - Misc.bsa";
@@ -357,6 +377,29 @@ public final class FalloutEngine {
      * hardware): the chosen resolution, else by quality (540 / 720 / 900) and the
      * resolution scale slider.
      */
+    /** The chosen frame-rate limit: 0 for none ("off"), `auto` when none is chosen. */
+    public static int fpsLock(Context context, int auto) {
+        String v;
+        try {
+            v = Prefs.get(context).getString(Prefs.FPS_LOCK, "auto");
+        } catch (ClassCastException e) {
+            v = "auto";
+        }
+        if (v == null || v.equals("auto")) return auto;
+        if (v.equals("off")) return 0;
+        try {
+            int n = Integer.parseInt(v.replaceAll("[^0-9]", ""));
+            return n <= 0 ? auto : n <= 30 ? 30 : n <= 60 ? 60 : n <= 90 ? 90 : 120;
+        } catch (NumberFormatException e) {
+            return auto;
+        }
+    }
+
+    /** The frame-rate cap the profile gives (the activity asks the display for it). */
+    public static int frameCap(Context context) {
+        return Profile.of(context).frameCap;
+    }
+
     public static int renderHeight(Context context) {
         SharedPreferences prefs = Prefs.get(context);
         String res = prefs.getString("resolution", null);

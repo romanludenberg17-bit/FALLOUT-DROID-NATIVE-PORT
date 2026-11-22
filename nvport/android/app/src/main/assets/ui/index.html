@@ -3560,7 +3560,7 @@ body.gamepad-connected-mode #ingame-controls-layer {
                   <button class="seg-btn" id="q-btn-low" onclick="selectSegGroup(this, 'Графика: НИЗКИЕ (720p)'); triggerNativeScheme('falloutpicker://quality_low')">НИЗКИЕ</button>
                   <button class="seg-btn" id="q-btn-medium" onclick="selectSegGroup(this, 'Графика: СРЕДНИЕ (900p)'); triggerNativeScheme('falloutpicker://quality_medium')">СРЕДНИЕ</button>
                   <button class="seg-btn active" id="q-btn-high" onclick="selectSegGroup(this, 'Графика: ВЫСОКИЕ (1080p)'); triggerNativeScheme('falloutpicker://quality_high')">ВЫСОКИЕ</button>
-                  <button class="seg-btn" onclick="triggerNativeScheme('falloutpicker://native_graphics')">Fallout.ini ⚙</button>
+                  <button class="seg-btn" onclick="triggerNativeScheme('falloutpicker://native_graphics')">Настройки графики ⚙</button>
                 </div>
               </div>
             </div>
@@ -3907,7 +3907,7 @@ body.gamepad-connected-mode #ingame-controls-layer {
           <div style="display:flex; gap:8px; flex-wrap:wrap;">
             <button class="btn-secondary-sm" id="pg-modmgr-btn" onclick="openModManagerModal()">Менеджер модов (Data Files)</button>
             <button class="btn-secondary-sm" onclick="triggerNativeScheme('falloutpicker://saves_' + currentGame)">Сохранения (.fos / Бэкапы)</button>
-            <button class="btn-secondary-sm" onclick="triggerNativeScheme('falloutpicker://native_graphics')">Тонкая графика (.ini)</button>
+            <button class="btn-secondary-sm" onclick="triggerNativeScheme('falloutpicker://native_graphics')">Настройки графики (FNV и FO3)</button>
           </div>
           <button class="btn-next-dalee" style="height:36px; padding:0 18px; font-size:13px;" onclick="closePerGameSettingsModal()">СОХРАНИТЬ</button>
         </div>

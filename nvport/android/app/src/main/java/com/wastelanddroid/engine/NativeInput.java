@@ -22,6 +22,13 @@ public final class NativeInput {
      */
     public static native int uiState();
 
+    /** The engine's frame-rate cap, live (0: none): the in-game panel's FPS limit. */
+    public static native void setFrameCap(int fps);
+
+    /** The engine asked for a fresh run (loading a save, back to the main menu): the
+     * arguments file holds its command line. */
+    public static native boolean restartRequested();
+
     /** View pixels -> surface pixels (the surface is drawn smaller and scaled up: render scale). */
     private static volatile float scaleX = 1f, scaleY = 1f;
 

@@ -128,6 +128,9 @@ public final class SavesActivity extends Activity {
             TextView textViewLabel = Ui.label(this, save.title() + "\n" + simpleDateFormat.format(new Date(save.file.lastModified())) + " | " + (save.size() / 1024) + " КБ" + (save.companions.isEmpty() ? "" : " | +" + save.companions.size()));
             textViewLabel.setTextSize(13.0f);
             linearLayoutRow.addView(textViewLabel, Ui.weight());
+            if (save.file.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".nvfsave")) {
+                linearLayoutRow.addView(Ui.button(this, "Загрузить", v -> loadSave(save)));
+            }
             linearLayoutRow.addView(Ui.styledButton(this, "Удалить", new View.OnClickListener() { // from class: com.wastelanddroid.saves.SavesActivity$$ExternalSyntheticLambda0
                 @Override // android.view.View.OnClickListener
                 public final void onClick(View view) {
@@ -194,6 +197,15 @@ public final class SavesActivity extends Activity {
             toast("Ошибка: " + e.getMessage());
         }
         render();
+    }
+
+    /** Start the game straight into this save (the launcher passes --load). */
+    private void loadSave(SaveStore.Save save) {
+        Prefs.get(this).edit().putString(FalloutEngine.PENDING_LOAD + this.game.id, save.file.getAbsolutePath()).commit();
+        startActivity(new android.content.Intent(this, com.wastelanddroid.MainActivity.class)
+                .putExtra(com.wastelanddroid.MainActivity.EXTRA_PLAY_GAME, this.game.id)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP | android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP));
+        finish();
     }
 
     private static String prettyStamp(String str) {

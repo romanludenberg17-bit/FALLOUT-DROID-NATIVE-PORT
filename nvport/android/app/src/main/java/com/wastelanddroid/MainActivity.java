@@ -143,6 +143,39 @@ public final class MainActivity extends Activity {
         }
     }
 
+    /** NativeGameActivity's fresh run (a save loaded in game): start the game again. */
+    public static final String EXTRA_RELAUNCH_GAME = "relaunch_game";
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        relaunchIfAsked(intent);
+    }
+
+    /** The saves screen's "Загрузить": play this game (FalloutEngine adds the pending --load). */
+    public static final String EXTRA_PLAY_GAME = "play_game";
+
+    private void relaunchIfAsked(Intent intent) {
+        final String play = intent == null ? null : intent.getStringExtra(EXTRA_PLAY_GAME);
+        if (play != null) {
+            intent.removeExtra(EXTRA_PLAY_GAME);
+            com.wastelanddroid.game.GameDef g = com.wastelanddroid.game.GameDef.byId(play);
+            if (g != null) onPlay(g);
+            return;
+        }
+        final String game = intent == null ? null : intent.getStringExtra(EXTRA_RELAUNCH_GAME);
+        if (game == null) return;
+        intent.removeExtra(EXTRA_RELAUNCH_GAME);
+        this.prefs.edit().putBoolean(Prefs.LAUNCH_PENDING, true).commit();
+        // The game's process ends as its activity finishes: start the next run after it.
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+            Intent g = new Intent(this, com.wastelanddroid.engine.NativeGameActivity.class).putExtra("game", game);
+            startActivity(g);
+            overridePendingTransition(0, 0);
+        }, 900);
+    }
+
     @Override // android.app.Activity
     protected void onCreate(Bundle bundle) {
         super.onCreate(bundle);
@@ -219,6 +252,7 @@ public final class MainActivity extends Activity {
                 }
             });
         }
+        relaunchIfAsked(getIntent());
     }
 
     private /* synthetic */ void lambda$onCreate$0() {

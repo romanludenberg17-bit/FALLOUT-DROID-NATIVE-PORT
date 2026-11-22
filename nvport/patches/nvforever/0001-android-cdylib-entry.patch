@@ -66,6 +66,35 @@ index bf36d9e..5968bf0 100644
      }
  }
  
+diff --git a/crates/fnv-world/src/imagespace.rs b/crates/fnv-world/src/imagespace.rs
+index 7fe5f8c..83aa51d 100644
+--- a/crates/fnv-world/src/imagespace.rs
++++ b/crates/fnv-world/src/imagespace.rs
+@@ -162,6 +162,24 @@ pub fn image_space(lo: &LoadOrder, schema: &Schema, fid: u32) -> Option<Cinemati
+     })
+ }
+ 
++/// [nvport] A Fallout 3 weather's own HDR values (WTHR `HNAM`, [`crate::sky::Weather::hdr`])
++/// over a grade: they stand where New Vegas's image space and adapters put theirs. A
++/// value not above 0 where 0 means nothing keeps the grade's.
++pub fn with_weather_hdr(mut c: Cinematic, h: Option<&[f32; 14]>) -> Cinematic {
++    let Some(h) = h else { return c };
++    for (i, &v) in h.iter().enumerate() {
++        if i == 2 {
++            c.hdr.blur_passes = v;
++            continue;
++        }
++        let positive_only = matches!(i, HDR_TARGET_LUM | HDR_UPPER_LUM_CLAMP | HDR_BRIGHT_SCALE | HDR_BRIGHT_CLAMP | HDR_EMISSIVE_MULT | HDR_SUNLIGHT_DIMMER | HDR_GRASS_DIMMER | HDR_TREE_DIMMER);
++        if !positive_only || v > 0.0 {
++            c.hdr.v[i] = v;
++        }
++    }
++    c
++}
++
+ /// The HDR and bloom values of an IMGS DNAM (`skin`: the 152-byte layout with the skin
+ /// dimmer at byte 56). HDR at bytes 0-55: eye adapt speed, blur radius, blur passes,
+ /// emissive mult, target lum, upper lum clamp, bright scale, bright clamp, lum ramp no
 diff --git a/crates/fnv-world/src/radio.rs b/crates/fnv-world/src/radio.rs
 index e6c8db0..f02aa9f 100644
 --- a/crates/fnv-world/src/radio.rs
@@ -86,6 +115,50 @@ index e6c8db0..f02aa9f 100644
                  stations.push(StationRef { ref_id: fid, base, cell, position: p.position, initially_disabled: p.initially_disabled(), radio });
              }
              if let Some(rb) = receiver {
+diff --git a/crates/fnv-world/src/sky.rs b/crates/fnv-world/src/sky.rs
+index c93f468..1df07af 100644
+--- a/crates/fnv-world/src/sky.rs
++++ b/crates/fnv-world/src/sky.rs
+@@ -98,6 +98,12 @@ pub fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+ 
+ #[derive(Debug, Clone, Default, PartialEq)]
+ pub struct Weather {
++    /// [nvport] Fallout 3's WTHR `HNAM` HDR data (14 floats in the IMGS HDR order: eye
++    /// adapt speed, blur radius, blur passes, emissive mult, target LUM, upper LUM clamp,
++    /// bright scale, bright clamp, LUM ramp no tex, min, max, sunlight, grass and tree
++    /// dimmer) [documented: xEdit wbDefinitionsFO3 WTHR HNAM]. New Vegas moved these to
++    /// the image space and its adapters.
++    pub hdr: Option<[f32; 14]>,
+     pub form_id: u32,
+     pub edid: Option<String>,
+     /// The file name of the plugin whose record this is: the last in the load order to
+@@ -274,6 +280,26 @@ pub fn weather(lo: &LoadOrder, schema: &Schema, fid: u32) -> Option<Weather> {
+         for (i, k) in ["day_near", "day_far", "night_near", "night_far", "day_power", "night_power"].iter().enumerate() {
+             w.fog[i] = num(&fog, k).unwrap_or(0.0) as f32;
+         }
++    } else if let Some(raw) = f.raw(b"FNAM").filter(|s| s.data.len() >= 16) {
++        // [nvport] Fallout 3's FNAM: four floats, no powers (a linear fog) [documented:
++        // xEdit wbDefinitionsFO3 WTHR FNAM].
++        for i in 0..(raw.data.len() / 4).min(6) {
++            let b = &raw.data[4 * i..4 * i + 4];
++            let v = f32::from_le_bytes([b[0], b[1], b[2], b[3]]);
++            if v.is_finite() {
++                w.fog[i] = v;
++            }
++        }
++    }
++    if let Some(raw) = f.raw(b"HNAM").filter(|s| s.data.len() >= 56) {
++        let mut h = [0.0f32; 14];
++        for (i, v) in h.iter_mut().enumerate() {
++            let b = &raw.data[4 * i..4 * i + 4];
++            *v = f32::from_le_bytes([b[0], b[1], b[2], b[3]]);
++        }
++        if h.iter().all(|v| v.is_finite()) {
++            w.hdr = Some(h);
++        }
+     }
+     for (i, s) in [b"DNAM", b"CNAM", b"ANAM", b"BNAM"].iter().enumerate() {
+         w.cloud_textures[i] = f.string(s).filter(|s| !s.is_empty());
 diff --git a/engine/Cargo.lock b/engine/Cargo.lock
 index 5cdaf9e..0715284 100644
 --- a/engine/Cargo.lock
@@ -308,10 +381,10 @@ index 70bfca9..d0b27f7 100644
          battle_set.map(wanted_battle)
      } else if recovering {
 diff --git a/engine/nvf-play/src/script.rs b/engine/nvf-play/src/script.rs
-index c1893ca..38e3d2b 100644
+index c1893ca..010b93b 100644
 --- a/engine/nvf-play/src/script.rs
 +++ b/engine/nvf-play/src/script.rs
-@@ -196,6 +196,179 @@ pub struct NewGameStart {
+@@ -196,6 +196,189 @@ pub struct NewGameStart {
  /// The new game's start: the marker the opening moves the player to
  /// (`fnv_game::runner::NEW_GAME_START`) in [`NEW_GAME_CELL`].
  pub fn new_game_start(lo: &fnv_esm::LoadOrder, schema: &fnv_esm::Schema, index: &WorldIndex) -> Result<NewGameStart, String> {
@@ -328,8 +401,8 @@ index c1893ca..38e3d2b 100644
 +
 +/// [nvport] The new game's start without Doc Mitchell's house (Fallout3.esm alone):
 +/// `NVF_NEW_GAME_MARKER` (a placed reference's Editor ID), else the first marker in an
-+/// interior that the start quest refers to (`NVF_CHARGEN_QUEST`, default `MQ01`, Fallout 3's
-+/// opening): its stage results and its script name the reference the opening moves the
++/// interior that the start quest refers to (`NVF_CHARGEN_QUEST`, else `CG00`, Fallout 3's
++/// birth, else `MQ01`): its stage results and its script name the reference the opening moves the
 +/// player to [hypothesis: as VCG00 stage 0 names VCG01PlayerStartMarkerREF], else any
 +/// interior reference it names, else the middle of `NVF_NEW_GAME_CELL`.
 +fn other_new_game_start(lo: &fnv_esm::LoadOrder, schema: &fnv_esm::Schema, index: &WorldIndex) -> Result<NewGameStart, String> {
@@ -365,8 +438,18 @@ index c1893ca..38e3d2b 100644
 +            }
 +        }
 +    }
-+    let quest = std::env::var("NVF_CHARGEN_QUEST").ok().filter(|q| !q.trim().is_empty()).unwrap_or_else(|| "MQ01".to_string());
-+    let qfound = find(b"QUST", quest.trim());
++    // Fallout 3's character creation is CG00 (the birth) to CG04 (the escape) [observed:
++    // New Vegas's VCG00/VCG01 continue its names]; MQ01 is the main quest after the vault.
++    let wanted = std::env::var("NVF_CHARGEN_QUEST").ok().filter(|q| !q.trim().is_empty());
++    let mut quest = String::new();
++    let mut qfound = None;
++    for q in wanted.iter().map(String::as_str).chain(["CG00", "MQ01"]) {
++        if let Some(f) = find(b"QUST", q.trim()) {
++            quest = q.trim().to_string();
++            qfound = Some(f);
++            break;
++        }
++    }
 +    // Where the opening's own script moves the player: `player.moveto <ref>` in the source
 +    // of its earliest stage (SCTX after the stage's INDX), else in the quest's script.
 +    if let Some((pi, qrec)) = qfound {
@@ -523,10 +606,10 @@ index bbdb0c0..ab27c2a 100644
  libloading = "0.8.9"
 diff --git a/engine/nvforever/src/android_input.rs b/engine/nvforever/src/android_input.rs
 new file mode 100644
-index 0000000..700d879
+index 0000000..1a81a69
 --- /dev/null
 +++ b/engine/nvforever/src/android_input.rs
-@@ -0,0 +1,212 @@
+@@ -0,0 +1,259 @@
 +//! [nvport] Input from the Android launcher (Fallout Droid): on-screen keys, touch look,
 +//! gamepads mapped to PC keys and physical keyboards/mice arrive through JNI
 +//! (`com.wastelanddroid.engine.NativeInput`) and are written as Bevy's own input messages,
@@ -598,6 +681,53 @@ index 0000000..700d879
 +    push(Ev::CursorTo(x, y));
 +}
 +
++/// The launcher's arguments file (`<internal data>/nvport_args.txt`), set by android_main.
++pub static ARGS_FILE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
++/// A load or a return to the main menu asked for a fresh run (`NativeInput.restartRequested`).
++static RESTART: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
++
++/// Write the next run's command line (`args`, without the program) under the launcher's
++/// `env:` lines and ask the activity to start the game again.
++pub fn request_restart(args: &[String]) -> Result<(), String> {
++    let file = ARGS_FILE.get().ok_or("no arguments file")?;
++    let old = std::fs::read_to_string(file).unwrap_or_default();
++    let mut text: String = old.lines().filter(|l| l.trim_start().starts_with("env:")).map(|l| format!("{l}\n")).collect();
++    for a in args {
++        text.push_str(a);
++        text.push('\n');
++    }
++    std::fs::write(file, text).map_err(|e| format!("{}: {e}", file.display()))?;
++    RESTART.store(true, Ordering::SeqCst);
++    Ok(())
++}
++
++/// `NativeInput.restartRequested()`.
++#[unsafe(no_mangle)]
++pub extern "C" fn Java_com_wastelanddroid_engine_NativeInput_restartRequested(_e: JEnv, _c: JClass) -> u8 {
++    RESTART.load(Ordering::SeqCst) as u8
++}
++
++/// A frame-rate cap the launcher's in-game panel asked for (-1: none pending).
++static FRAME_CAP: AtomicI32 = AtomicI32::new(-1);
++
++/// `NativeInput.setFrameCap(int fps)`: 0 no cap, else frames a second at most; applied on
++/// the next frame, as the settings page's Frame rate limit row sets it.
++#[unsafe(no_mangle)]
++pub extern "C" fn Java_com_wastelanddroid_engine_NativeInput_setFrameCap(_e: JEnv, _c: JClass, fps: i32) {
++    FRAME_CAP.store(fps.max(0), Ordering::Relaxed);
++}
++
++fn apply_frame_cap(pace: Option<ResMut<crate::frame_pace::FramePace>>) {
++    let want = FRAME_CAP.swap(-1, Ordering::Relaxed);
++    if want < 0 {
++        return;
++    }
++    if let Some(mut pace) = pace {
++        pace.cap = want as u32;
++        info!("android: frame-rate cap {} (in-game panel)", want);
++    }
++}
++
 +/// `NativeInput.uiState()`: see [`UI_STATE`].
 +#[unsafe(no_mangle)]
 +pub extern "C" fn Java_com_wastelanddroid_engine_NativeInput_uiState(_e: JEnv, _c: JClass) -> i32 {
@@ -608,7 +738,7 @@ index 0000000..700d879
 +
 +impl Plugin for AndroidInputPlugin {
 +    fn build(&self, app: &mut App) {
-+        app.add_systems(PreUpdate, drain.before(InputSystems)).add_systems(Last, publish_ui_state);
++        app.add_systems(PreUpdate, drain.before(InputSystems)).add_systems(Last, publish_ui_state).add_systems(PreUpdate, apply_frame_cap);
 +    }
 +}
 +
@@ -739,8 +869,86 @@ index 0000000..700d879
 +        _ => return None,
 +    })
 +}
+diff --git a/engine/nvforever/src/handoff.rs b/engine/nvforever/src/handoff.rs
+index c1ed297..e736041 100644
+--- a/engine/nvforever/src/handoff.rs
++++ b/engine/nvforever/src/handoff.rs
+@@ -318,6 +318,29 @@ pub fn leave(
+             let _ = std::fs::remove_file(&file);
+             let _ = std::fs::remove_file(started_marker(&file));
+             let keep = crate::restart_args(&crate::command_line());
++            // [nvport] Android cannot start this program again (its executable is the app
++            // runtime): the next run's command line goes to the launcher's arguments file and
++            // the game's activity starts again in a fresh process, with the save.
++            #[cfg(target_os = "android")]
++            {
++                let mut args = new_run_args(&keep, r.as_ref(), None, &file);
++                if let Some(i) = args.iter().position(|a| a == "--handoff") {
++                    args.drain(i..(i + 2).min(args.len()));
++                }
++                args.extend(handoff.1.iter().map(|why| format!("--load-refused={why}")));
++                match crate::android_input::request_restart(&args) {
++                    Ok(()) => {
++                        info!("load: restarting the game with {}", r.as_ref().map_or("--menu".to_string(), |r| format!("--load {}", r.path.display())));
++                        *h = Leaving::HandedOver;
++                    }
++                    Err(e) => {
++                        warn!("load: {e}; staying");
++                        uncover.write(Uncover);
++                    }
++                }
++                return;
++            }
++            #[allow(unreachable_code)]
+             let mut args = new_run_args(&keep, r.as_ref(), window.single().ok().map(|(e, w)| placement(w, e)), &file);
+             args.extend(handoff.1.iter().map(|why| format!("--load-refused={why}")));
+             let started = std::env::current_exe()
+diff --git a/engine/nvforever/src/imagespace_blur.wesl b/engine/nvforever/src/imagespace_blur.wesl
+index a154858..7bceae8 100644
+--- a/engine/nvforever/src/imagespace_blur.wesl
++++ b/engine/nvforever/src/imagespace_blur.wesl
+@@ -53,7 +53,10 @@ fn near(uv: vec2<f32>) -> bool {
+ // A blur radius of 1 reaches this part of the screen height to each side [hypothesis:
+ // the wiki gives 0 as none and 7 as the most; image-modifiers.md §5].
+ const REACH_PER_RADIUS: f32 = 1.0 / 270.0;
+-const MAX_PAIRS: i32 = 48;
++// [nvport] At most 12 pairs a pass (was 48): a strong blur at a phone's resolution read
++// ~200 samples a pixel and hung the GPU (Adreno: device lost). Past 12 pairs the pairs
++// spread out instead, so the blur keeps its reach.
++const MAX_PAIRS: i32 = 12;
+ 
+ // The blurred picture of the depth of field has this blur radius [hypothesis, §8.5].
+ const DOF_BLUR_RADIUS: f32 = 3.0;
+@@ -68,17 +71,21 @@ fn gauss(uv: vec2<f32>, dir: vec2<f32>, radius: f32, centre: vec4<f32>) -> vec4<
+         return centre;
+     }
+     let k = -0.5 / (sigma * sigma);
+-    let pairs = min(i32(ceil(1.25 * sigma)), MAX_PAIRS);
++    let need = i32(ceil(1.25 * sigma));
++    let pairs = min(need, MAX_PAIRS);
++    let stride = f32(max(1, (need + MAX_PAIRS - 1) / MAX_PAIRS));
+     var acc = centre.rgb;
+     var total = 1.0;
+     // Pixels 1 and 2, 3 and 4, ... to each side, each pair read as one filtered sample
+-    // between them.
++    // between them; spread `stride` times wider when the blur needs more pairs.
+     for (var p = 0; p < pairs; p++) {
+-        let a = f32(2 * p + 1);
++        let a = f32(2 * p + 1) * stride;
++        let b = a + stride;
+         let wa = exp(k * a * a);
+-        let wb = exp(k * (a + 1.0) * (a + 1.0));
+-        let w = wa + wb;
+-        let off = dir * ((a * wa + (a + 1.0) * wb) / w) / dims;
++        let wb = exp(k * b * b);
++        let off = dir * ((a * wa + b * wb) / (wa + wb)) / dims;
++        // A spread pair stands for `stride` times as many pixels.
++        let w = (wa + wb) * stride;
+         // What is near is left out of the blur behind it.
+         let wp = select(w, 0.0, near(uv + off));
+         let wm = select(w, 0.0, near(uv - off));
 diff --git a/engine/nvforever/src/main.rs b/engine/nvforever/src/main.rs
-index a6cf138..b455711 100644
+index a6cf138..8456fbd 100644
 --- a/engine/nvforever/src/main.rs
 +++ b/engine/nvforever/src/main.rs
 @@ -82,6 +82,8 @@ mod haze;
@@ -752,7 +960,7 @@ index a6cf138..b455711 100644
  mod dlss;
  mod dlss_download;
  mod nv_low_latency;
-@@ -1061,12 +1063,159 @@ fn parse_smoothing(value: &str) -> Result<nvf_play::smooth_terrain::Smoothing, S
+@@ -1061,12 +1063,162 @@ fn parse_smoothing(value: &str) -> Result<nvf_play::smooth_terrain::Smoothing, S
  #[global_allocator]
  static ALLOCATOR: crash::SaysWhenEmpty = crash::SaysWhenEmpty;
  
@@ -772,6 +980,9 @@ index a6cf138..b455711 100644
 +        let _ = std::fs::write(ext.join("nvforever.exit"), "running\n");
 +    }
 +    let mut line = vec!["nvforever".to_string()];
++    if let Some(dir) = android_app.internal_data_path() {
++        let _ = android_input::ARGS_FILE.set(dir.join("nvport_args.txt"));
++    }
 +    match android_app.internal_data_path() {
 +        Some(dir) => match std::fs::read_to_string(dir.join("nvport_args.txt")) {
 +            Ok(text) => {
@@ -913,7 +1124,7 @@ index a6cf138..b455711 100644
      if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(std::path::Path::to_path_buf)) {
          line = with_schemas_beside(line, &dir);
          let functions = dir.join("schemas").join("script").join("functions.json");
-@@ -1075,7 +1224,15 @@ fn main() -> AppExit {
+@@ -1075,7 +1227,15 @@ fn main() -> AppExit {
              std::env::set_var("NVF_PLAY_SCRIPT_FUNCTIONS", &functions);
          }
      }
@@ -930,7 +1141,7 @@ index a6cf138..b455711 100644
      let _ = COMMAND_LINE.set(line);
      // Taking over a load: tell the old run at once that this run takes part (#1903).
      let handoff_marked = args.handoff.as_deref().map(handoff::mark_started);
-@@ -2326,6 +2483,8 @@ fn main() -> AppExit {
+@@ -2326,6 +2486,8 @@ fn main() -> AppExit {
              s.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
          });
      }
@@ -978,6 +1189,51 @@ index 0d206a3..29f7260 100644
      let full = KeepLimits::default();
      KeepLimits { secs: (full.secs * s).round().max(MIN_LIMITS.secs), max: ((full.max as f64 * s).round() as usize).max(MIN_LIMITS.max) }
  }
+diff --git a/engine/nvforever/src/sky.rs b/engine/nvforever/src/sky.rs
+index bd2755d..9e9e53d 100644
+--- a/engine/nvforever/src/sky.rs
++++ b/engine/nvforever/src/sky.rs
+@@ -981,6 +981,13 @@ impl SkyState {
+ 
+     /// The image-space grade now: the base image space with the weather's adapters for
+     /// the time of day, blended across a weather fade; none indoors yet [interim].
++    /// [nvport] Fallout 3 outdoors without a worldspace image space: a neutral grade that
++    /// the weather's own HDR (WTHR HNAM) fills, so its sun dimmer and target luminance
++    /// count as New Vegas's image space values do.
++    fn fo3_base(&self) -> Option<Cinematic> {
++        (self.weather.hdr.is_some() || self.prev.as_ref().is_some_and(|p| p.hdr.is_some())).then(Cinematic::default)
++    }
++
+     pub fn cinematic(&self) -> Cinematic {
+         if !self.grade {
+             return Cinematic::default();
+@@ -988,9 +995,9 @@ impl SkyState {
+         if self.interior.is_some() {
+             return self.interior_grade.unwrap_or_default();
+         }
+-        let Some(base) = self.image_space else { return Cinematic::default() };
++        let Some(base) = self.image_space.or_else(|| self.fo3_base()) else { return Cinematic::default() };
+         let none = [None; 6];
+-        let at = |w: &Weather| cinematic_at(&base, self.adapters.get(&w.form_id).unwrap_or(&none), &self.climate, self.hour);
++        let at = |w: &Weather| fnv_world::imagespace::with_weather_hdr(cinematic_at(&base, self.adapters.get(&w.form_id).unwrap_or(&none), &self.climate, self.hour), w.hdr.as_ref());
+         let cur = at(&self.weather);
+         match &self.prev {
+             Some(p) => at(p).lerp(&cur, self.fade),
+@@ -1004,9 +1011,12 @@ impl SkyState {
+     /// (`fnv_world::imagespace::sun_scale`; world.md §6). 1 without an image space. Kept
+     /// when the grade is switched off: it is light, not a colour grade.
+     pub fn sun_scale(&self) -> f32 {
+-        let Some(base) = self.image_space else { return 1.0 };
++        let Some(base) = self.image_space.or_else(|| self.fo3_base()) else { return 1.0 };
+         let none = [None; 6];
+-        let at = |w: &Weather| cinematic_at(&base, self.adapters.get(&w.form_id).unwrap_or(&none), &self.climate, self.hour).hdr.v[fnv_world::imagespace::HDR_SUNLIGHT_DIMMER];
++        let at = |w: &Weather| {
++            fnv_world::imagespace::with_weather_hdr(cinematic_at(&base, self.adapters.get(&w.form_id).unwrap_or(&none), &self.climate, self.hour), w.hdr.as_ref()).hdr.v
++                [fnv_world::imagespace::HDR_SUNLIGHT_DIMMER]
++        };
+         let cur = at(&self.weather);
+         let dimmer = match &self.prev {
+             Some(p) => at(p) + (cur - at(p)) * self.fade,
 diff --git a/engine/vendor/bevy_winit/src/system.rs b/engine/vendor/bevy_winit/src/system.rs
 index 22ad677..cd70569 100644
 --- a/engine/vendor/bevy_winit/src/system.rs
