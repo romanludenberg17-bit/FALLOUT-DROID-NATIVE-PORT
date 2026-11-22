@@ -3332,7 +3332,7 @@ body.gamepad-connected-mode #ingame-controls-layer {
     </div>
 
     <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text-muted); padding:0 4px;">
-      <span>Движок: NVForever · нативный ARM64 · Vulkan/GLES · AAudio</span>
+      <span>Движок: Fallout Droid Engine · нативный ARM64 · Vulkan/GLES · AAudio</span>
       <span id="screen-scale-indicator">Автомасштабирование по диагонали активно</span>
     </div>
   </div>
@@ -3413,7 +3413,7 @@ body.gamepad-connected-mode #ingame-controls-layer {
                 <img src="../art/logo_fnv.png" id="hero-active-logo" alt="Fallout: New Vegas" class="hero-game-logo" />
                 <div class="hero-status-list">
                   <div>Статус: <span class="badge-ok" id="hero-exe-status" onclick="reopenSetupWizard()" style="cursor:pointer;text-decoration:underline;">Движок готов к запуску</span></div>
-                  <div>Ядро: <span>NVForever · нативный ARM64</span></div>
+                  <div>Ядро: <span>Fallout Droid Engine · нативный ARM64</span></div>
                   <div>Ввод: <span id="hero-input-status">Сенсор (Стик WASD + Мышь) · Авто-геймпад</span></div>
                 </div>
               </div>
@@ -3714,7 +3714,7 @@ body.gamepad-connected-mode #ingame-controls-layer {
 
             <!-- SUB 5: CONTAINER -->
             <div class="settings-section" id="set-sec-service">
-              <div class="sec-group-title">Нативный движок NVForever</div>
+              <div class="sec-group-title">Нативный движок Fallout Droid Engine</div>
               <div class="setting-row">
                 <div>
                   <div class="setting-name">Статус компонентов контейнера</div>
@@ -3751,7 +3751,7 @@ body.gamepad-connected-mode #ingame-controls-layer {
           <div class="card-box">
             <h3>Диагностика среды FalloutDroid</h3>
             <pre style="font-family:'Monofonto',monospace; font-size:11.5px; color:#D1D5DB; background:rgba(0,0,0,0.45); padding:10px; border-radius:8px; line-height:1.45;" id="device-diag-box">СБОРКА      FalloutDroid v1.1.1 (Official Edition by Rommy)
-ДВИЖОК      NVForever (Rust) · нативный ARM64 · Vulkan/GLES · AAudio
+ДВИЖОК      Fallout Droid Engine (Rust) · нативный ARM64 · Vulkan/GLES · AAudio
 ИНТЕРФЕЙС   Pip-Boy 3000 UI + GameActivity
 УПРАВЛЕНИЕ  Стик WASD + Зона мыши (Прямой / Тачпад) + XInput Геймпад
 МОДЫ И СЕЙВЫ Полный менеджер плагинов (.esm/.esp) и бэкапов сохранений
@@ -3764,7 +3764,7 @@ body.gamepad-connected-mode #ingame-controls-layer {
           <div class="card-box">
             <h3>Источники и лицензии открытого ПО (NOTICE)</h3>
             <div style="font-size:11.5px; color:var(--text-muted); line-height:1.42; max-height:195px; overflow-y:auto;">
-              <p style="margin-bottom:6px;"><b>Игровой движок:</b> <a href="https://github.com/LootJunkieAzza/NVForever" target="_blank" style="color:var(--accent);">NVForever</a> (GPL-3.0-or-later) с изменениями для Android — исходники в репозитории Fallout Droid (nvport/).</p>
+              <p style="margin-bottom:6px;"><b>Игровой движок:</b> <a href="https://github.com/LootJunkieAzza/Fallout Droid Engine" target="_blank" style="color:var(--accent);">Fallout Droid Engine</a> (GPL-3.0-or-later) с изменениями для Android — исходники в репозитории Fallout Droid (nvport/).</p>
               <p style="margin-bottom:6px;"><b>Иконки интерфейса:</b> <a href="https://github.com/microsoft/fluentui-system-icons" target="_blank" style="color:var(--accent);">Fluent UI System Icons</a> и <a href="https://github.com/andrsrxn/icons" target="_blank" style="color:var(--accent);">andrsrxn/icons</a> (MIT License).</p>
               <p style="margin-bottom:6px;"><b>Лицензия:</b> Fallout Droid распространяется под GPL-3.0. Fallout — товарный знак Bethesda Softworks; проект с Bethesda не связан.</p>
             </div>
@@ -3889,7 +3889,6 @@ body.gamepad-connected-mode #ingame-controls-layer {
           <div style="display:flex; gap:8px; flex-wrap:wrap;">
             <button class="btn-secondary-sm" id="pg-modmgr-btn" onclick="openModManagerModal()">Менеджер модов (Data Files)</button>
             <button class="btn-secondary-sm" onclick="triggerNativeScheme('falloutpicker://saves_' + currentGame)">Сохранения (.fos / Бэкапы)</button>
-            <button class="btn-secondary-sm" onclick="triggerNativeScheme('falloutpicker://native_graphics')">Настройки графики (FNV и FO3)</button>
           </div>
           <button class="btn-next-dalee" style="height:36px; padding:0 18px; font-size:13px;" onclick="closePerGameSettingsModal()">СОХРАНИТЬ</button>
         </div>
@@ -3979,7 +3978,7 @@ body.gamepad-connected-mode #ingame-controls-layer {
 
   <div id="ingame-boot-banner">
     <span style="color:var(--accent); font-weight:800;">● ДВИЖОК АКТИВЕН</span>
-    <span id="ingame-boot-status-txt">NVForever · нативный ARM64</span>
+    <span id="ingame-boot-status-txt">Fallout Droid Engine · нативный ARM64</span>
   </div>
 
   <!-- Live Interactive Controls Overlay Inside Running Container -->
@@ -4537,7 +4536,7 @@ window.onNativeStateSync = function(fnvDirEnc, fo3DirEnc, engineReady, fnvOk, fn
   const contHint = document.getElementById('container-verify-hint');
   if (contHint) {
     contHint.textContent = nativeEngineReady
-      ? 'Движок готов: NVForever · нативный ARM64'
+      ? 'Движок готов: Fallout Droid Engine · нативный ARM64'
       : 'Движок не готов — откройте Мастер подготовки';
   }
   refreshHeroGameStatus();
@@ -4958,7 +4957,7 @@ function startLiveFpsTelemetry() {
       const txt = document.getElementById('fps-hud-text');
       if (txt) {
         txt.textContent = fpsHudMode === 'full'
-          ? `${measuredFps} FPS · ${measuredMs} мс · NVForever`
+          ? `${measuredFps} FPS · ${measuredMs} мс · Fallout Droid Engine`
           : `${measuredFps} FPS · ${measuredMs} мс`;
       }
       frames = 0;

@@ -189,8 +189,8 @@ public final class FalloutEngine {
             ini.get("Settings").put("language", lang);
         }
         if (game == GameDef.FO3) {
-            // Fallout 3 aims by zooming the view, without iron sights: the gun stays where it is.
-            ini.get("Settings").put("true-iron-sights", "0");
+            // Fallout 3 aims down the sights as New Vegas does (true iron sights; the
+            // crosshair hides while aiming, nvf_play::reticle).
             args.add("env:NVF_CHARGEN_QUEST=" + FO3_CHARGEN_QUEST);
             // Fallout 3's interface is green (its iSystemColorHUDMain / PipBoy 26, 255, 128),
             // New Vegas's amber.
@@ -210,6 +210,9 @@ public final class FalloutEngine {
             android.util.Log.w("NVForever", "NVForever.ini: " + e);
         }
         if (game == GameDef.FO3) {
+            // Fallout 3's room markers and portals (Vault 101 and the like) left the walls of
+            // rooms in view culled from some angles: every room of an interior is drawn.
+            args.add("--no-room-culling");
             args.add("--world");
             args.add("Wasteland");
         }

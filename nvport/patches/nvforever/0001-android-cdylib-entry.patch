@@ -505,6 +505,19 @@ index 70bfca9..d0b27f7 100644
      } else if battle_loop {
          battle_set.map(wanted_battle)
      } else if recovering {
+diff --git a/engine/nvf-play/src/pause.rs b/engine/nvf-play/src/pause.rs
+index 5da7865..910bf26 100644
+--- a/engine/nvf-play/src/pause.rs
++++ b/engine/nvf-play/src/pause.rs
+@@ -2712,7 +2712,7 @@ fn window_bar(root: &mut ChildSpawnerCommands, look: &PauseLook, rows: usize, fi
+ /// column's entries in the small face [design: owner 2026-11-15; the original shows its own
+ /// at the bottom left, observed].
+ fn version(root: &mut ChildSpawnerCommands, f: &Faces, top: f32) {
+-    let words = concat!("NVForever ", env!("CARGO_PKG_VERSION"));
++    let words = if cfg!(target_os = "android") { "Fallout Droid" } else { concat!("NVForever ", env!("CARGO_PKG_VERSION")) };
+     let w = COLUMN - 5.0;
+     root.spawn(from_right(RIGHT, top, w, ITEM)).with_children(|t| {
+         sm_text(t, &f.small, words, w - f.small.font.width(words) - 10.0, 30.0, color(Shade::Bright));
 diff --git a/engine/nvf-play/src/quick_loot.rs b/engine/nvf-play/src/quick_loot.rs
 index 8c7cbf9..1266692 100644
 --- a/engine/nvf-play/src/quick_loot.rs
@@ -584,7 +597,7 @@ index 8c7cbf9..1266692 100644
  }
  
 diff --git a/engine/nvf-play/src/reticle.rs b/engine/nvf-play/src/reticle.rs
-index 4cf8199..5cf51d2 100644
+index 4cf8199..9cd994b 100644
 --- a/engine/nvf-play/src/reticle.rs
 +++ b/engine/nvf-play/src/reticle.rs
 @@ -541,7 +541,7 @@ fn draw(
@@ -604,7 +617,7 @@ index 4cf8199..5cf51d2 100644
      ),
      data: Option<Res<GameData>>,
      mut images: ResMut<Assets<Image>>,
-@@ -666,7 +667,12 @@ fn draw(
+@@ -666,7 +667,13 @@ fn draw(
      // The player's tweaks: no crosshair in first or in third person (the prompt stays)
      // [design: docs/design/tweaks.md].
      let third = control.as_ref().is_some_and(|c| c.third_person_view());
@@ -612,8 +625,9 @@ index 4cf8199..5cf51d2 100644
 +    // [nvport] Down the sights in first person, as the original: no crosshair while the view
 +    // zooms to the weapon's Sight FOV (the gun's own sights aim).
 +    // Fallout 3 has no iron sights (its aim only zooms the view): the crosshair stays there.
-+    let fo3 = std::env::var("NVPORT_GAME").is_ok_and(|v| v.trim().eq_ignore_ascii_case("fo3"));
-+    let sighting = !fo3 && !third && aim.as_ref().is_some_and(|a| a.share() > 0.05);
++    // Both games: aiming in first person looks down the sights (true iron sights, Fallout 3
++    // too), the crosshair gone.
++    let sighting = !third && aim.as_ref().is_some_and(|a| a.share() > 0.05);
 +    let view_hidden = sighting || tweaks.as_ref().is_some_and(|t| if third { t.hide_crosshair_third } else { t.hide_crosshair_first });
      let gap = spread.max(CROSS_REST);
      for (b, mut v, mut node, mut image) in &mut bars {
@@ -1347,6 +1361,119 @@ index 74c2936..063c304 100644
              AmbientLight { color: Color::WHITE, brightness: 120.0, ..default() },
              Transform::from_translation(to(eye)).looking_at(to(aim), Vec3::Y),
              layer.clone(),
+diff --git a/engine/nvforever/src/decals.rs b/engine/nvforever/src/decals.rs
+index f9dd8cb..994cb29 100644
+--- a/engine/nvforever/src/decals.rs
++++ b/engine/nvforever/src/decals.rs
+@@ -91,9 +91,17 @@ const MISSES_LOGGED: u32 = 8;
+ #[derive(Component)]
+ struct Decal {
+     age: f32,
+-    material: Handle<ForwardDecalMaterial<StandardMaterial>>,
++    material: Option<Handle<ForwardDecalMaterial<StandardMaterial>>>,
++    /// [nvport] Android: the decal as a flat quad on the surface (its material).
++    flat: Option<Handle<StandardMaterial>>,
+ }
+ 
++/// [nvport] Android draws decals as flat quads lifted off the surface: a forward decal reads
++/// the depth it is drawn against, and the phones' drivers showed none of them.
++const FLAT_DECALS: bool = cfg!(target_os = "android");
++/// How far a flat decal lies off its surface, in game units.
++const FLAT_LIFT: f32 = 0.4;
++
+ /// A live decal: its entity, texture set and where it was put (game space).
+ struct Live {
+     entity: Entity,
+@@ -193,6 +201,7 @@ fn place(
+     sfx: Option<Res<Sfx>>,
+     mut models: ModelCtx,
+     mut materials: ResMut<Assets<ForwardDecalMaterial<StandardMaterial>>>,
++    (mut meshes, mut flat_materials, mut quad): (ResMut<Assets<Mesh>>, ResMut<Assets<StandardMaterial>>, Local<Option<Handle<Mesh>>>),
+     mut st: ResMut<Decals>,
+     root: Query<(Entity, &GlobalTransform), With<WorldRoot>>,
+     (rigs, nodes): (Query<&ActorRig>, Query<&GlobalTransform>),
+@@ -340,8 +349,7 @@ fn place(
+             _ => (0.0, false),
+         };
+         let [r, g, b] = data.color;
+-        let material = materials.add(ForwardDecalMaterial {
+-            base: StandardMaterial {
++        let base_material = StandardMaterial {
+                 base_color: Color::srgb_u8(r, g, b),
+                 base_color_texture: Some(base),
+                 specular_texture: normal.clone().filter(|_| masked),
+@@ -354,15 +362,23 @@ fn place(
+                 uv_transform: quarter((st.rng.next_f32() * 4.0) as u32),
+                 alpha_mode: AlphaMode::Blend,
+                 ..default()
+-            },
+-            extension: ForwardDecalMaterialExt { depth_fade_factor: if hit.actor.is_some() { data.depth.clamp(1.0, ACTOR_DEPTH) } else { data.depth.max(MIN_DEPTH) } },
+-        });
++            };
++        let (material, flat) = if FLAT_DECALS {
++            let m = StandardMaterial { depth_bias: 8.0, ..base_material };
++            (None, Some(flat_materials.add(m)))
++        } else {
++            (Some(materials.add(ForwardDecalMaterial {
++                base: base_material,
++                extension: ForwardDecalMaterialExt { depth_fade_factor: if hit.actor.is_some() { data.depth.clamp(1.0, ACTOR_DEPTH) } else { data.depth.max(MIN_DEPTH) } },
++            })), None)
++        };
+         let side = data.side(st.rng.next_f32());
+         let side = if hit.actor.is_some() { side.min(ACTOR_MAX_SIDE) } else { side };
+         let normal_dir = normal_game.normalize_or(Vec3::Z);
+         let spin = st.rng.next_f32() * std::f32::consts::TAU;
+         // The decal's quad lies in its xz plane, facing +y.
+-        let game_place = Transform { translation: point, rotation: Quat::from_rotation_arc(Vec3::Y, normal_dir) * Quat::from_rotation_y(spin), scale: Vec3::new(side, 1.0, side) };
++        let lifted = if FLAT_DECALS { point + normal_dir * FLAT_LIFT } else { point };
++        let game_place = Transform { translation: lifted, rotation: Quat::from_rotation_arc(Vec3::Y, normal_dir) * Quat::from_rotation_y(spin), scale: Vec3::new(side, 1.0, side) };
+         let (parent, place) = match bone {
+             None => match cell {
+                 Some((e, origin)) => (e, Transform { translation: point - origin, ..game_place }),
+@@ -373,9 +389,18 @@ fn place(
+                 (e, Transform::from_matrix(Mat4::from(g.affine().inverse() * world)))
+             }
+         };
+-        let entity = commands
+-            .spawn((ForwardDecal, MeshMaterial3d(material.clone()), place, Visibility::default(), RenderLayers::layer(DECAL_LAYER), Decal { age: 0.0, material }, ChildOf(parent)))
+-            .id();
++        let entity = match (&material, &flat) {
++            (Some(m), _) => commands
++                .spawn((ForwardDecal, MeshMaterial3d(m.clone()), place, Visibility::default(), RenderLayers::layer(DECAL_LAYER), Decal { age: 0.0, material: material.clone(), flat: None }, ChildOf(parent)))
++                .id(),
++            (None, Some(f)) => {
++                let mesh = quad.get_or_insert_with(|| meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(0.5)))).clone();
++                commands
++                    .spawn((Mesh3d(mesh), MeshMaterial3d(f.clone()), place, Visibility::default(), RenderLayers::layer(DECAL_LAYER), bevy::light::NotShadowCaster, Decal { age: 0.0, material: None, flat: flat.clone() }, ChildOf(parent)))
++                    .id()
++            }
++            (None, None) => continue,
++        };
+         if st.reported.insert(hit.impact) {
+             info!(
+                 "decals: {} leaves {} ({}) on {}: side {side:.0} of {:.0}-{:.0}, depth {:.0}",
+@@ -416,6 +441,7 @@ fn fade(
+     mut st: ResMut<Decals>,
+     mut decals: Query<(Entity, &mut Decal)>,
+     mut materials: ResMut<Assets<ForwardDecalMaterial<StandardMaterial>>>,
++    mut flat_materials: ResMut<Assets<StandardMaterial>>,
+ ) {
+     let dt = time.delta_secs();
+     st.clock += dt;
+@@ -429,9 +455,12 @@ fn fade(
+             commands.entity(e).try_despawn();
+             gone.push(e);
+         } else if left < DECAL_FADE {
+-            if let Some(mut m) = materials.get_mut(&d.material) {
++            if let Some(mut m) = d.material.as_ref().and_then(|h| materials.get_mut(h)) {
+                 m.base.base_color.set_alpha(left / DECAL_FADE);
+             }
++            if let Some(mut m) = d.flat.as_ref().and_then(|h| flat_materials.get_mut(h)) {
++                m.base_color.set_alpha(left / DECAL_FADE);
++            }
+         }
+     }
+     st.faded += gone.len() as u32;
 diff --git a/engine/nvforever/src/graphics.rs b/engine/nvforever/src/graphics.rs
 index d73236a..4c56cb6 100644
 --- a/engine/nvforever/src/graphics.rs
@@ -1942,7 +2069,7 @@ index 22ad677..df42c57 100644
                  warn!(
                      "Could not set cursor grab mode for window {}: {}",
 diff --git a/lang/ru.toml b/lang/ru.toml
-index 69dc72c..d2e5966 100644
+index 69dc72c..c9f3866 100644
 --- a/lang/ru.toml
 +++ b/lang/ru.toml
 @@ -6,6 +6,13 @@
@@ -1959,7 +2086,49 @@ index 69dc72c..d2e5966 100644
  # [design, #2200; engine/nvf-play/src/pause.rs] NVForever's device selection.
  "Automatic Input Switching" = "Автоматическая смена устройства ввода"
  "On: a controller button, stick or trigger selects Controller; a key or mouse click selects Keyboard and Mouse (mouse motion does not). Off: choose Input Device yourself." = "Вкл.: кнопка, стик или курок геймпада выбирает геймпад; клавиша или щелчок мыши — клавиатуру и мышь (движение мыши — нет). Выкл.: выбирайте устройство сами."
-@@ -550,3 +557,180 @@ name = "Русский"
+@@ -44,7 +51,7 @@ name = "Русский"
+ "Detached third-person camera" = "Свободная камера от третьего лица"
+ "On: in third person with your weapon away the mouse turns the camera around you and you run whichever way you push. Off: the camera stays behind you." = "Вкл.: от третьего лица с убранным оружием мышь вращает камеру вокруг вас, а вы бежите туда, куда толкаете. Выкл.: камера остаётся за спиной."
+ "Language" = "Язык"
+-"The language of NVForever's own words (menus, messages). The game's own text is the install's." = "Язык собственных слов NVForever (меню, сообщения). Текст самой игры берётся из установленной игры."
++"The language of NVForever's own words (menus, messages). The game's own text is the install's." = "Язык собственных слов Fallout Droid (меню, сообщения). Текст самой игры берётся из установленной игры."
+ "Interface" = "Интерфейс"
+ "Reverb" = "Реверберация"
+ "World sounds echo as the place you are in does (a cave, a hall, a small room). Off: they do not." = "Звуки мира отражаются так, как в месте, где вы находитесь (пещера, зал, маленькая комната). Выкл.: без отражений."
+@@ -345,7 +352,7 @@ name = "Русский"
+ "Downloading DLSS… {percent}%" = "Загрузка DLSS… {percent}%"
+ "Upscaling by NVIDIA Corporation, through NVIDIA Streamline" = "Масштабирование: NVIDIA Corporation, через NVIDIA Streamline"
+ "Download DLSS" = "Скачать DLSS"
+-"NVForever fetches eight files for DLSS upscaling and frame generation from NVIDIA's Streamline 2.14.16 release on GitHub: sl.interposer.dll, sl.common.dll, sl.dlss.dll, sl.dlss_g.dll, sl.reflex.dll and sl.pcl.dll, under Streamline's MIT licence, and nvngx_dlss.dll and nvngx_dlssg.dll, under NVIDIA's RTX SDKs licence below. Nothing is downloaded unless you accept it." = "NVForever загружает восемь файлов для масштабирования DLSS и генерации кадров из выпуска NVIDIA Streamline 2.14.16 на GitHub: sl.interposer.dll, sl.common.dll, sl.dlss.dll, sl.dlss_g.dll, sl.reflex.dll и sl.pcl.dll по лицензии MIT Streamline, а также nvngx_dlss.dll и nvngx_dlssg.dll по лицензии NVIDIA RTX SDK, приведённой ниже. Без вашего согласия ничего не загружается."
++"NVForever fetches eight files for DLSS upscaling and frame generation from NVIDIA's Streamline 2.14.16 release on GitHub: sl.interposer.dll, sl.common.dll, sl.dlss.dll, sl.dlss_g.dll, sl.reflex.dll and sl.pcl.dll, under Streamline's MIT licence, and nvngx_dlss.dll and nvngx_dlssg.dll, under NVIDIA's RTX SDKs licence below. Nothing is downloaded unless you accept it." = "Fallout Droid загружает восемь файлов для масштабирования DLSS и генерации кадров из выпуска NVIDIA Streamline 2.14.16 на GitHub: sl.interposer.dll, sl.common.dll, sl.dlss.dll, sl.dlss_g.dll, sl.reflex.dll и sl.pcl.dll по лицензии MIT Streamline, а также nvngx_dlss.dll и nvngx_dlssg.dll по лицензии NVIDIA RTX SDK, приведённой ниже. Без вашего согласия ничего не загружается."
+ "NVIDIA's RTX SDKs licence for nvngx_dlss.dll and nvngx_dlssg.dll" = "Лицензия NVIDIA RTX SDK для nvngx_dlss.dll и nvngx_dlssg.dll"
+ "Lines {first} to {last} of {total}. PgUp, PgDn, the arrow keys or the mouse wheel scroll." = "Строки {first}-{last} из {total}. Прокрутка: PgUp, PgDn, стрелки или колесо мыши."
+ "I accept starts the download; the game goes on meanwhile." = "«Принимаю» начинает загрузку; игра тем временем продолжается."
+@@ -362,7 +369,7 @@ name = "Русский"
+ "Hide" = "Скрыть"
+ "Cancel download" = "Прервать загрузку"
+ "Download finished" = "Загрузка завершена"
+-"DLSS is ready: restart NVForever to use it." = "DLSS готов: перезапустите NVForever, чтобы им пользоваться."
++"DLSS is ready: restart NVForever to use it." = "DLSS готов: перезапустите Fallout Droid, чтобы им пользоваться."
+ "Installed in {folder}." = "Установлено в {folder}."
+ "Close" = "Закрыть"
+ "DLSS was not downloaded" = "DLSS не скачан"
+@@ -537,16 +544,193 @@ name = "Русский"
+ "How far the world slows while you choose targets in Classic: 100% stops it, 50% runs at half speed, 0% not at all. Enemies attack at anything less than a stop." = "Насколько замедляется мир, пока вы выбираете цели в классическом режиме: 100% — останавливается, 50% — идёт вполовину, 0% — не замедляется. Если мир не стоит, враги атакуют."
+ "Reports already sent" = "Уже отправленные отчёты"
+ "Delete them now asks the server to delete every report this PC sent (within 7 days) and drops unsent ones; later reports get a new ID." = "«Удалить сейчас» просит сервер удалить все отчёты с этого ПК (за 7 дней) и стирает неотправленные; новые отчёты получат новый ID."
+-"Send reports to help fix NVForever" = "Отправлять отчёты, чтобы помочь исправить NVForever"
++"Send reports to help fix NVForever" = "Отправлять отчёты, чтобы помочь исправить Fallout Droid"
+ "Terrain wireframe" = "Сетка рельефа"
+ "Counter: last figure" = "Счётчик: последнее число"
+ "The frame rate row's last figure, over 10 seconds: 1% low (the mean of the slowest hundredth of frames) or the slowest frame." = "Последнее число строки частоты кадров за 10 секунд: 1% низких (среднее самой медленной сотой доли кадров) или самый медленный кадр."
+ "How far from you the sun casts shadows, as a part of the farthest shadow distance; 0%: none." = "На каком расстоянии от вас солнце отбрасывает тени, как доля наибольшей дальности теней; 0% — нигде."
+ "FSR library" = "Библиотека FSR"
+-"What FSR upscales with: NVForever's built-in FSR 3.1, or a FidelityFX library in the game's folder (for tools that replace the upscaler)." = "Чем FSR масштабирует: встроенный в NVForever FSR 3.1 или библиотека FidelityFX в папке игры (для программ, подменяющих масштабирование)."
++"What FSR upscales with: NVForever's built-in FSR 3.1, or a FidelityFX library in the game's folder (for tools that replace the upscaler)." = "Чем FSR масштабирует: встроенный в Fallout Droid FSR 3.1 или библиотека FidelityFX в папке игры (для программ, подменяющих масштабирование)."
+ "How edges are smoothed: multisampling 2x, 4x or 8x (dearer at each step) or FXAA, SMAA or TAA afterwards. Shown while no upscaler is chosen." = "Как сглаживаются края: мультисэмплинг 2x, 4x или 8x (каждый шаг дороже) или FXAA, SMAA или TAA после отрисовки. Показано, пока масштабирование не выбрано."
+ "Latency reduction" = "Снижение задержки"
+ "The graphics driver keeps the game from preparing frames ahead (AMD Anti-Lag, NVIDIA low latency), meant to show what you do sooner. Not in the original." = "Драйвер видеокарты не даёт игре готовить кадры заранее (AMD Anti-Lag, NVIDIA low latency), чтобы ваши действия появлялись на экране раньше. Нет в оригинале."
  # [design; engine/nvforever/src/heat_haze.rs] The Heat haze row (a prototype).
  "Heat haze (experimental)" = "Марево (экспериментально)"
  "On: the far ground near the horizon shimmers slightly on hot, clear days, by the sun and the weather. A prototype. Not in the original." = "Вкл.: дальняя земля у горизонта слегка дрожит в жаркие ясные дни, в зависимости от солнца и погоды. Прототип. Нет в оригинале."

@@ -616,7 +616,7 @@ public final class SettingsActivity extends Activity {
 
     private void engine() {
         LinearLayout linearLayoutGroup = group("Нативный движок");
-        info(linearLayoutGroup, R.drawable.ic_check, "NVForever (Rust, Vulkan/GLES) — встроен в приложение, ничего скачивать не нужно", Ui.FG);
+        info(linearLayoutGroup, R.drawable.ic_check, "Fallout Droid Engine (Rust, Vulkan/GLES) — встроен в приложение, ничего скачивать не нужно", Ui.FG);
         info(linearLayoutGroup, R.drawable.ic_info, "Без Proton, Wine и эмуляции x86: игра читает ESM/BSA напрямую", Ui.TEXT_DIM);
         info(linearLayoutGroup, R.drawable.ic_warning, "Сохранения движка (.nvfsave) несовместимы с .fos оригинальной игры", Ui.AMBER);
         action(linearLayoutGroup, R.drawable.ic_download, "Мастер подготовки", "Разрешения, батарея, папки игр", new View.OnClickListener() {
