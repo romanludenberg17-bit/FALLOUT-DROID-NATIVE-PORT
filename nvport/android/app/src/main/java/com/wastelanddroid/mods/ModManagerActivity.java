@@ -91,7 +91,7 @@ public final class ModManagerActivity extends Activity {
         LinearLayout linearLayoutColumn3 = Ui.column(this);
         this.modList = linearLayoutColumn3;
         linearLayoutCard2.addView(linearLayoutColumn3);
-        linearLayoutCard2.addView(Ui.hint(this, "Поддерживаются .zip. Архивы .7z/.rar сначала перепакуйте в .zip. Установщики FOMOD с выбором опций ставятся целиком — лишнее удалите вручную."));
+        linearLayoutCard2.addView(Ui.hint(this, "Поддерживаются .zip. Архивы .7z/.rar сначала перепакуйте в .zip. Установщики FOMOD ставятся автоматически: обязательные файлы и рекомендуемые автором варианты. Реплейсеры тел и одежды — на Snapdragon 7+ Gen 2 и мощнее."));
         linearLayoutCard2.addView(Ui.hint(this, "Мастер-файлы (.esm) всегда загружаются раньше плагинов (.esp); основная игра и официальные DLC закреплены вверху."));
         linearLayoutRow2.addView(scroll(linearLayoutCard2), new LinearLayout.LayoutParams(0, -1, 1.0f));
         LinearLayout.LayoutParams layoutParams = new LinearLayout.LayoutParams(-1, 0, 1.0f);

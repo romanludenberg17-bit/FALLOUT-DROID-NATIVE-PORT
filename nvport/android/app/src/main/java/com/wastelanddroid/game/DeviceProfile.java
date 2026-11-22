@@ -118,6 +118,15 @@ public final class DeviceProfile {
         return raw == null || raw.isEmpty() || raw.equals("unknown") ? Build.HARDWARE : raw;
     }
 
+    /**
+     * Body and clothing replacers (more polygons and larger skin textures on every actor):
+     * Snapdragon 7+ Gen 2 and stronger only.
+     */
+    public static boolean replacersAllowed() {
+        String key = ((Build.VERSION.SDK_INT >= 31 ? Build.SOC_MODEL : "") + " " + Build.HARDWARE + " " + Build.BOARD).toLowerCase(Locale.ROOT);
+        return key.matches(".*(sm7475|sm7550|sm7675|sm7750|sm8450|sm8475|sm8550|sm8635|sm8650|sm8735|sm8750|sm8845|sm8850).*");
+    }
+
     /** The GPU family of the chip, for the launcher. */
     public static String gpuName() {
         String c = chipName();

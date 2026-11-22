@@ -230,6 +230,18 @@ public final class ModManager {
         return i;
     }
 
+    /** Body, skeleton or worn-model files (meshes/textures of characters and armor). */
+    static boolean isBodyOrArmorReplacer(List<String> dataPaths) {
+        for (String p : dataPaths) {
+            String l = p.replace('\\', '/').toLowerCase(Locale.ROOT);
+            if (l.startsWith("meshes/characters/") || l.startsWith("meshes/armor/") || l.startsWith("meshes/clothes/")
+                    || l.startsWith("textures/characters/") || l.startsWith("textures/armor/") || l.startsWith("textures/clothes/")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean looksLikeData(String str) {
         String lowerCase = str.toLowerCase(Locale.ROOT);
         if (lowerCase.endsWith(".esp") || lowerCase.endsWith(".esm") || lowerCase.endsWith(".bsa")) {
@@ -272,6 +284,8 @@ public final class ModManager {
             fileOutputStream.close();
             try {
                 ArrayList arrayList = new ArrayList();
+                byte[] fomodXml = null;
+                String fomodBase = null;
                 ZipInputStream zipInputStream = new ZipInputStream(Files.newInputStream(file2.toPath(), new OpenOption[0]));
                 while (true) {
                     try {
@@ -280,7 +294,15 @@ public final class ModManager {
                             break;
                         }
                         if (!nextEntry.isDirectory()) {
-                            arrayList.add(nextEntry.getName().replace('\\', '/'));
+                            String name = nextEntry.getName().replace('\\', '/');
+                            arrayList.add(name);
+                            String low = name.toLowerCase(Locale.ROOT);
+                            if (fomodXml == null && (low.equals("fomod/moduleconfig.xml") || low.endsWith("/fomod/moduleconfig.xml"))) {
+                                java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+                                Files2.copy(zipInputStream, bo);
+                                fomodXml = bo.toByteArray();
+                                fomodBase = name.substring(0, low.length() - "fomod/moduleconfig.xml".length());
+                            }
                         }
                     } finally {
                     }
@@ -289,7 +311,34 @@ public final class ModManager {
                 if (arrayList.isEmpty()) {
                     throw new IOException("Архив пуст");
                 }
-                String strDetectRoot = detectRoot(arrayList);
+                // [nvport] A FOMOD installer: its default choices instead of every file.
+                java.util.Map<String, List<String>> plan = null;
+                if (fomodXml != null) {
+                    try {
+                        Fomod fm = Fomod.parse(fomodXml);
+                        plan = fm.plan(arrayList, fomodBase);
+                        if (plan.isEmpty()) plan = null;
+                        else android.util.Log.i("FalloutDroid", "fomod: options " + fm.chosen + ", " + plan.size() + " files");
+                    } catch (Exception e) {
+                        android.util.Log.w("FalloutDroid", "fomod: not read, installing every file", e);
+                        plan = null;
+                    }
+                }
+                // [nvport] Body and clothing replacers: only on chips that carry them.
+                List<String> dests = new ArrayList<>();
+                if (plan != null) {
+                    for (List<String> d : plan.values()) dests.addAll(d);
+                } else {
+                    String r = detectRoot(arrayList);
+                    for (Object o : arrayList) {
+                        String e = (String) o;
+                        if (e.startsWith(r)) dests.add(e.substring(r.length()));
+                    }
+                }
+                if (isBodyOrArmorReplacer(dests) && !com.wastelanddroid.game.DeviceProfile.replacersAllowed()) {
+                    throw new IOException("Реплейсеры тел и одежды доступны на Snapdragon 7+ Gen 2 и мощнее (ваш чип: " + com.wastelanddroid.game.DeviceProfile.chipName() + ")");
+                }
+                String strDetectRoot = plan != null ? "" : detectRoot(arrayList);
                 String strReplaceAll = str.replaceAll("[^\\p{L}\\p{N} ._-]", "_");
                 InstalledMod installedMod = new InstalledMod(strReplaceAll);
                 File file3 = new File(this.stateDir, strReplaceAll + ".bak");
@@ -301,7 +350,31 @@ public final class ModManager {
                         if (nextEntry2 == null) {
                             break;
                         }
-                        if (!nextEntry2.isDirectory()) {
+                        if (!nextEntry2.isDirectory() && plan != null) {
+                            List<String> targets = plan.get(nextEntry2.getName().replace('\\', '/'));
+                            if (targets != null) {
+                                byte[] data = null;
+                                for (String t : targets) {
+                                    File out = new File(this.dataDir, t);
+                                    if (!out.getCanonicalPath().startsWith(str2)) continue;
+                                    if (data == null) {
+                                        java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+                                        Files2.copy(zipInputStream, bo);
+                                        data = bo.toByteArray();
+                                    }
+                                    if (out.exists()) {
+                                        File bak = new File(file3, t);
+                                        if (!bak.exists()) Files2.copy(out, bak);
+                                    }
+                                    File parent = out.getParentFile();
+                                    if (parent != null) parent.mkdirs();
+                                    try (FileOutputStream fo = new FileOutputStream(out)) {
+                                        fo.write(data);
+                                    }
+                                    if (!installedMod.files.contains(t)) installedMod.files.add(t);
+                                }
+                            }
+                        } else if (!nextEntry2.isDirectory()) {
                             String strReplace = nextEntry2.getName().replace('\\', '/');
                             if (strReplace.startsWith(strDetectRoot)) {
                                 String strSubstring = strReplace.substring(strDetectRoot.length());
