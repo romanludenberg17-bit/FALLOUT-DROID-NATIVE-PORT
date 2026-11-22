@@ -33,6 +33,15 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
     @Override
     protected void onCreate(Bundle state) {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        // The loading screen's first frame behind everything at once: GameActivity's
+        // onCreate loads the 170 MB engine before any view can be shown.
+        try {
+            android.graphics.Rect b = getWindowManager().getCurrentWindowMetrics().getBounds();
+            int w = Math.max(b.width(), b.height()), h = Math.min(b.width(), b.height());
+            getWindow().setBackgroundDrawable(new android.graphics.drawable.BitmapDrawable(getResources(),
+                    LoadingOverlay.still(this, "fo3".equals(getIntent().getStringExtra("game")), w, h)));
+        } catch (RuntimeException ignored) {
+        }
         try {
             super.onCreate(state);
         } catch (Throwable t) {

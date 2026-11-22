@@ -56,7 +56,13 @@ public final class LoadingOverlay extends View {
         this.fo3 = fo3;
         this.accent = fo3 ? 0xFF1AFF80 : 0xFFFFB840;
         setClickable(true); // nothing reaches the game under it
-        picture = pick(c, fo3 ? "Fallout3LoadingScreen" : "FalloutNVLoadingScreen");
+        // One picture per run of the activity: the window's background (still) and this
+        // overlay show the same one.
+        if (shared == null || sharedFo3 != fo3) {
+            shared = pick(c, fo3 ? "Fallout3LoadingScreen" : "FalloutNVLoadingScreen");
+            sharedFo3 = fo3;
+        }
+        picture = shared;
         logo = load(c, fo3 ? "art/logo_fo3.png" : "art/logo_fnv.png");
         Typeface mono;
         try {
@@ -69,6 +75,22 @@ public final class LoadingOverlay extends View {
         small.setTypeface(mono);
         small.setColor(0xFFE8E2CC);
         scan.setColor(0x22000000);
+    }
+
+    private static Bitmap shared;
+    private static boolean sharedFo3;
+
+    /**
+     * The first frame of this screen as a picture, for the game window's background while
+     * GameActivity loads the engine (before any view can be shown).
+     */
+    public static Bitmap still(Context c, boolean fo3, int w, int h) {
+        LoadingOverlay o = new LoadingOverlay(c, fo3);
+        o.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY));
+        o.layout(0, 0, w, h);
+        Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.RGB_565);
+        o.draw(new Canvas(b));
+        return b;
     }
 
     private static Bitmap load(Context c, String path) {

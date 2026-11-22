@@ -74,7 +74,7 @@ public class ScreenKeysOverlay extends View {
     /** A menu, the Pip-Boy, a conversation...: the screen is a pointer, drags scroll. */
     private boolean menuMode;
     /** Container, barter, repair, lockpick, V.A.T.S. targets: Esc, E, R, Enter, V, Tab. */
-    private static final int[] OTHER_MENU_CODES = {1, 18, 19, 28, 47, 15};
+    private static final int[] OTHER_MENU_CODES = {1, 18, 19, 47, 15};
 
     private static boolean has(ScreenKey k, int code) {
         for (int c : k.codes) if (c == code) return true;
@@ -115,18 +115,14 @@ public class ScreenKeysOverlay extends View {
         invalidate();
     }
 
-    /** While playing: keys for what the player cannot do now go (a holstered weapon's fire
-     * and aim; what the story's scripts locked: fighting, sneaking, moving, the Pip-Boy). */
+    /** While playing: Enter is never shown (nothing in play needs it); E (activate / talk)
+     * only with something under the crosshair to use; in a scene the story holds the player
+     * in (movement taken) nothing else. */
     private boolean playKeyShown(ScreenKey k) {
-        boolean weapon = (playFlags & 1) != 0, fight = (playFlags & 2) != 0, sneak = (playFlags & 4) != 0,
-                move = (playFlags & 8) != 0, pip = (playFlags & 16) != 0;
-        if (fight && (has(k, 272) || has(k, 273) || has(k, 19) || has(k, 47))) return false;
-        if (!weapon && (has(k, 272) || has(k, 273))) return false;
-        if (sneak && has(k, 29)) return false;
-        // A scene the story holds the player in (movement taken: the opening at Doc
-        // Mitchell's, the vault's birthday): only the activate / talk key stays.
-        if (move) return has(k, 18);
-        if (pip && has(k, 15)) return false;
+        boolean move = (playFlags & 8) != 0, target = (playFlags & 64) != 0;
+        if (has(k, 28)) return false;
+        if (has(k, 18)) return target;
+        if (move) return false;
         return true;
     }
 

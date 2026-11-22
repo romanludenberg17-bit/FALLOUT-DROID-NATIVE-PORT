@@ -435,6 +435,39 @@ index 70bfca9..d0b27f7 100644
      } else if battle_loop {
          battle_set.map(wanted_battle)
      } else if recovering {
+diff --git a/engine/nvf-play/src/reticle.rs b/engine/nvf-play/src/reticle.rs
+index 4cf8199..5a4aac1 100644
+--- a/engine/nvf-play/src/reticle.rs
++++ b/engine/nvf-play/src/reticle.rs
+@@ -541,7 +541,7 @@ fn draw(
+     (combat, hostile, bar, camera, time, dynamic, control): (Option<Res<crate::combat::Combat>>, Option<Res<crate::hud_target::AimHostile>>, Option<Res<crate::hud_target::HudTarget>>, Query<&Projection, With<crate::PlayerCamera>>, Res<Time>, Option<Res<DynamicCrosshair>>, Option<Res<crate::control::PlayerControl>>),
+     mut spread: Local<f32>,
+     mut logged: Local<(bool, i32, bool, Option<String>, Option<bool>, Option<bool>, Option<CrosshairStyle>)>,
+-    (locks, bindings, creator, sights, scope, driven, kill_cam, tweaks, anim, vats): (
++    (locks, bindings, creator, sights, scope, driven, kill_cam, tweaks, anim, vats, aim): (
+         Option<Res<ControlLocks>>,
+         Option<Res<crate::bindings::Bindings>>,
+         Option<Res<crate::creator::CreatorMenu>>,
+@@ -552,6 +552,7 @@ fn draw(
+         Option<Res<crate::tweaks::TweakSettings>>,
+         Option<Res<crate::combat::WeaponAnim>>,
+         Option<Res<crate::vats_mode::VatsMode>>,
++        Option<Res<crate::aim_zoom::AimZoom>>,
+     ),
+     data: Option<Res<GameData>>,
+     mut images: ResMut<Assets<Image>>,
+@@ -666,7 +667,10 @@ fn draw(
+     // The player's tweaks: no crosshair in first or in third person (the prompt stays)
+     // [design: docs/design/tweaks.md].
+     let third = control.as_ref().is_some_and(|c| c.third_person_view());
+-    let view_hidden = tweaks.as_ref().is_some_and(|t| if third { t.hide_crosshair_third } else { t.hide_crosshair_first });
++    // [nvport] Down the sights in first person, as the original: no crosshair while the view
++    // zooms to the weapon's Sight FOV (the gun's own sights aim).
++    let sighting = !third && aim.as_ref().is_some_and(|a| a.share() > 0.05);
++    let view_hidden = sighting || tweaks.as_ref().is_some_and(|t| if third { t.hide_crosshair_third } else { t.hide_crosshair_first });
+     let gap = spread.max(CROSS_REST);
+     for (b, mut v, mut node, mut image) in &mut bars {
+         v.set_if_neq(show(!view_hidden && !locks.movement && !aimed && cross));
 diff --git a/engine/nvf-play/src/script.rs b/engine/nvf-play/src/script.rs
 index c1893ca..010b93b 100644
 --- a/engine/nvf-play/src/script.rs
@@ -661,10 +694,10 @@ index bbdb0c0..ab27c2a 100644
  libloading = "0.8.9"
 diff --git a/engine/nvforever/src/android_input.rs b/engine/nvforever/src/android_input.rs
 new file mode 100644
-index 0000000..7e6e30f
+index 0000000..fc97e01
 --- /dev/null
 +++ b/engine/nvforever/src/android_input.rs
-@@ -0,0 +1,365 @@
+@@ -0,0 +1,369 @@
 +//! [nvport] Input from the Android launcher (Fallout Droid): on-screen keys, touch look,
 +//! gamepads mapped to PC keys and physical keyboards/mice arrive through JNI
 +//! (`com.wastelanddroid.engine.NativeInput`) and are written as Bevy's own input messages,
@@ -799,7 +832,7 @@ index 0000000..7e6e30f
 +
 +/// What the player may do now, for the keys (`NativeInput.playFlags`): bit 0 a weapon is
 +/// drawn, bit 1 fighting is locked by scripts, bit 2 sneaking, bit 3 movement, bit 4 the
-+/// Pip-Boy, bit 5 the view (POV).
++/// Pip-Boy, bit 5 the view (POV), bit 6 something to activate under the crosshair.
 +static PLAY_FLAGS: AtomicI32 = AtomicI32::new(0);
 +
 +/// `NativeInput.playFlags()`: see [`PLAY_FLAGS`].
@@ -808,8 +841,12 @@ index 0000000..7e6e30f
 +    PLAY_FLAGS.load(Ordering::Relaxed)
 +}
 +
-+fn publish_play_flags(weapon: Option<Res<nvf_play::combat::WeaponAnim>>, locks: Option<Res<nvf_play::control::ControlLocks>>) {
++fn publish_play_flags(weapon: Option<Res<nvf_play::combat::WeaponAnim>>, locks: Option<Res<nvf_play::control::ControlLocks>>, target: Option<Res<nvf_play::activate::Target>>) {
 +    let mut f = 0;
++    // Bit 6: something under the crosshair the player can use or talk to (the prompt shows).
++    if target.is_some_and(|t| t.0.is_some()) {
++        f |= 64;
++    }
 +    if weapon.is_some_and(|w| w.ready) {
 +        f |= 1;
 +    }

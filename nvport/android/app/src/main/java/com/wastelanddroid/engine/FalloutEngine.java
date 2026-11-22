@@ -275,10 +275,11 @@ public final class FalloutEngine {
             boolean low = quality == com.wastelanddroid.game.DeviceProfile.Quality.LOW;
             // 5 x 5 cells only when asked for (view distance 9+): 3 x 3 keeps phones in budget.
             add(a, "--radius", vd >= 9 ? 2 : 1);
+            // The game's own distant LOD, as the original draws it (the generated terrain
+            // looked blurred and odd at a phone's settings and took memory).
+            a.add("--no-lodgen");
             if (low) {
-                // A low class (Mali-G57 and the like): no generated distant terrain, the
-                // game's own LOD only and not far.
-                a.add("--no-lodgen");
+                // A low class (Mali-G57 and the like): not far.
                 vd = Math.min(vd, 3);
             }
             add(a, "--lod-distance", 10000 + vd * 6000);
@@ -293,6 +294,9 @@ public final class FalloutEngine {
             // rate up to 160: CPU time the GPU-bound frame does not have).
             add(a, "--physics-hz", 60);
             add(a, "--fov", g.fov);
+            // The arms and the gun a little nearer than the default 55: on a wide phone
+            // screen the sights read clearly when aiming.
+            add(a, "--viewmodel-fov", 50);
             // The music under the voices and effects, as the original's defaults mix it.
             add(a, "--music-volume", 0.45f);
             if (g.grassDensity > 0) {
@@ -331,9 +335,16 @@ public final class FalloutEngine {
             // The engine's frame-rate counter (pref "fps_counter", on in the alpha builds to
             // measure the phone's frame rate).
             set.put("fps-counter", fpsCounter ? "1" : "0");
-            // As in the original: aiming holds the gun low with the crosshair (the engine's
-            // "true iron sights" moves it to the eye and away from the usual framing).
-            set.put("true-iron-sights", "0");
+            // Rows Android cannot read (CPU and GPU use): "not available" only.
+            set.put("fps-counter-cpu", "0");
+            set.put("fps-counter-gpu", "0");
+            // Aiming: the gun's own sights lined up with the eye, clear in the middle of the
+            // view, the crosshair gone (the shipped aim pose leaves them 60-85 px low).
+            set.put("true-iron-sights", "1");
+            // The fields of view come from the command line (a null value drops the row the
+            // engine's settings page kept, as a part of its slider).
+            set.put("field-of-view", null);
+            set.put("viewmodel-field-of-view", null);
             // The rows that stand for this command line's numbers: the engine's settings page
             // saved them all once and they override the launcher's profile (a "fps" physics
             // rate up to 160 Hz; draw distances as parts of the command line's distances).
@@ -386,7 +397,8 @@ public final class FalloutEngine {
                 String found = null;
                 for (String key : sections.get(current).keySet()) if (key.equalsIgnoreCase(k)) found = key;
                 if (found != null) {
-                    if (done.add(current + "/" + found)) out.append(found).append('=').append(sections.get(current).get(found)).append('\n');
+                    String v = sections.get(current).get(found);
+                    if (done.add(current + "/" + found) && v != null) out.append(found).append('=').append(v).append('\n');
                     continue;
                 }
             }
@@ -408,7 +420,7 @@ public final class FalloutEngine {
         String tail = out.substring(out.length() - blank);
         out.setLength(out.length() - blank);
         for (java.util.Map.Entry<String, String> e : set.entrySet()) {
-            if (done.add(section + "/" + e.getKey())) out.append(e.getKey()).append('=').append(e.getValue()).append('\n');
+            if (done.add(section + "/" + e.getKey()) && e.getValue() != null) out.append(e.getKey()).append('=').append(e.getValue()).append('\n');
         }
         out.append(tail);
     }
