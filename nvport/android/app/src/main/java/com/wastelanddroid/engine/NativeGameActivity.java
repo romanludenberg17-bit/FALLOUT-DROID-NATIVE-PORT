@@ -116,8 +116,10 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
             int cap = FalloutEngine.frameCap(this);
             android.view.Display d = getDisplay();
             if (d == null) return;
-            // The fastest mode at the screen's size not above the cap (no cap: the fastest).
-            float limit = cap <= 0 ? Float.MAX_VALUE : cap + 1f;
+            // The fastest mode at the screen's size up to 120 Hz, whatever the cap (the engine
+            // keeps the cap): at 60 Hz a frame a little over 16.7 ms waits for the next
+            // refresh and the game shows 30; at 90/120 Hz it shows 40-45.
+            float limit = cap > 120 || cap <= 0 ? Float.MAX_VALUE : 121f;
             android.view.Display.Mode cur = d.getMode(), best = null;
             for (android.view.Display.Mode m : d.getSupportedModes()) {
                 if (m.getPhysicalWidth() != cur.getPhysicalWidth() || m.getPhysicalHeight() != cur.getPhysicalHeight()) continue;

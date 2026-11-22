@@ -314,10 +314,14 @@ public final class FalloutEngine {
             // At least one level on every phone: the engine and the GPU share the RAM (the
             // logs: under 1 GB free of 7 GB with full-size textures).
             p.mipSkip = Math.min(3, Math.max(1, p.g.textureQuality + (p.quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? 0 : 1)));
-            // Targets: 30 FPS on a low class (Helio G99), 60 on a medium one, up to 120 on a
+            // Targets: 60 FPS on a low and a medium class (30 on the weakest), up to 120 on a
             // high one (Snapdragon 8 Gen 5 class: ~100). A chosen limit (the in-game panel,
             // "fps_lock": auto / 30 / 60 / 90 / 120 / off) wins.
-            int auto = p.quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? 120 : p.quality == com.wastelanddroid.game.DeviceProfile.Quality.MEDIUM ? 60 : 30;
+            // A low class was capped at 30, which testers' Mali phones reached exactly: 60
+            // now (the weakest chips keep 30); the frame log shows what each one reaches.
+            int auto = p.quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? 120
+                    : p.quality == com.wastelanddroid.game.DeviceProfile.Quality.MEDIUM ? 60
+                    : com.wastelanddroid.game.DeviceProfile.veryLow() ? 30 : 60;
             p.frameCap = fpsLock(context, auto);
             // Sun shadows cost the most and showed artefacts: only when chosen in the
             // graphics settings (a custom setup), never from a preset.
