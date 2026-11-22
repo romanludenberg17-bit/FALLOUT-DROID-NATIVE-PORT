@@ -160,7 +160,7 @@ index c93f468..1df07af 100644
      for (i, s) in [b"DNAM", b"CNAM", b"ANAM", b"BNAM"].iter().enumerate() {
          w.cloud_textures[i] = f.string(s).filter(|s| !s.is_empty());
 diff --git a/engine/Cargo.lock b/engine/Cargo.lock
-index 5cdaf9e..d8f5705 100644
+index 5cdaf9e..1ec9fec 100644
 --- a/engine/Cargo.lock
 +++ b/engine/Cargo.lock
 @@ -152,8 +152,6 @@ dependencies = [
@@ -189,7 +189,39 @@ index 5cdaf9e..d8f5705 100644
  [[package]]
  name = "cursor-icon"
  version = "1.2.0"
-@@ -4645,6 +4653,7 @@ name = "nvf-assets"
+@@ -4189,6 +4197,15 @@ version = "0.2.16"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
+ 
++[[package]]
++name = "libmimalloc-sys"
++version = "0.1.49"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6a45a52f43e1c16f667ccfe4dd8c85b7f7c204fd5e3bf46c5b0db9a5c3c0b8e9"
++dependencies = [
++ "cc",
++]
++
+ [[package]]
+ name = "libredox"
+ version = "0.1.25"
+@@ -4344,6 +4361,15 @@ dependencies = [
+  "libc",
+ ]
+ 
++[[package]]
++name = "mimalloc"
++version = "0.1.52"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "2d4139bb28d14ad1facf21d5eb8825051b326e172d216b39f6d31df53cc97862"
++dependencies = [
++ "libmimalloc-sys",
++]
++
+ [[package]]
+ name = "miniz_oxide"
+ version = "0.8.9"
+@@ -4645,6 +4671,7 @@ name = "nvf-assets"
  version = "0.8.1"
  dependencies = [
   "bevy",
@@ -197,7 +229,11 @@ index 5cdaf9e..d8f5705 100644
   "fnv-dds",
   "fnv-nif",
   "fnv-vfs",
-@@ -4762,6 +4771,7 @@ dependencies = [
+@@ -4759,9 +4786,11 @@ dependencies = [
+  "half",
+  "libc",
+  "libloading",
++ "mimalloc",
   "nvf-assets",
   "nvf-dlss-files",
   "nvf-play",
@@ -205,7 +241,7 @@ index 5cdaf9e..d8f5705 100644
   "png",
   "rfd",
   "serde_json",
-@@ -5199,6 +5209,15 @@ version = "0.2.2"
+@@ -5199,6 +5228,15 @@ version = "0.2.2"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "7e036b411754132fd6b74e94b74e9a13c5cf606fa93d1885c35860d3060820b1"
  
@@ -221,7 +257,7 @@ index 5cdaf9e..d8f5705 100644
  [[package]]
  name = "openssl-sys"
  version = "0.9.118"
-@@ -5207,6 +5226,7 @@ checksum = "19c413d6ec9ebaf5e1c829d355cb3e9f783778d700f135be0921d52fce3c60ae"
+@@ -5207,6 +5245,7 @@ checksum = "19c413d6ec9ebaf5e1c829d355cb3e9f783778d700f135be0921d52fce3c60ae"
  dependencies = [
   "cc",
   "libc",
@@ -229,7 +265,7 @@ index 5cdaf9e..d8f5705 100644
   "pkg-config",
   "vcpkg",
  ]
-@@ -5346,6 +5366,12 @@ dependencies = [
+@@ -5346,6 +5385,12 @@ dependencies = [
   "thiserror 2.0.21",
  ]
  
@@ -956,6 +992,55 @@ index 8c7cbf9..1266692 100644
      *drawn = now;
  }
  
+diff --git a/engine/nvf-play/src/radio.rs b/engine/nvf-play/src/radio.rs
+index ce7bea4..afa1f08 100644
+--- a/engine/nvf-play/src/radio.rs
++++ b/engine/nvf-play/src/radio.rs
+@@ -1253,6 +1253,7 @@ impl Plugin for RadioPlugin {
+             .add_systems(Update, (pipboy_controls, play).chain().after(crate::PlaySet::Scripts))
+             .add_systems(Last, (release_files, report));
+         crate::save::add_save_hook(app, RECEIVED_SAVE_HOOK);
++        crate::save::add_save_hook(app, PIPBOY_SAVE_HOOK);
+     }
+ }
+ 
+@@ -1274,6 +1275,36 @@ pub const RECEIVED_SAVE_HOOK: crate::save::SaveHook = crate::save::SaveHook {
+     }),
+ };
+ 
++/// [nvport] The Pip-Boy radio as the player left it (on, and the station's placed
++/// reference) in the save: loading a save brought it back off, and players turned it on
++/// again on every start.
++pub const PIPBOY_SAVE_HOOK: crate::save::SaveHook = crate::save::SaveHook {
++    key: "pipboy_radio",
++    save: |w| {
++        let script = w.get_resource::<ScriptState>()?;
++        let pip = &script.rt.as_ref()?.game.radio.pipboy;
++        Some(serde_json::json!({ "on": pip.on, "station": pip.station.map(|s| s.0) }))
++    },
++    load: |w, v| {
++        let on = v.get("on").and_then(serde_json::Value::as_bool).unwrap_or(false);
++        let station = v.get("station").and_then(serde_json::Value::as_u64).map(|n| FormId(n as u32));
++        if let Some(mut script) = w.get_resource_mut::<ScriptState>() {
++            if let Some(rt) = script.rt.as_mut() {
++                let pip = &mut rt.game.radio.pipboy;
++                pip.on = on;
++                if station.is_some() {
++                    pip.station = station;
++                }
++            }
++        }
++    },
++    remap: Some(|v, r| {
++        if let Some(n) = v.get("station").and_then(serde_json::Value::as_u64) {
++            v["station"] = r.map(n as u32).map_or(serde_json::Value::Null, serde_json::Value::from);
++        }
++    }),
++};
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
 diff --git a/engine/nvf-play/src/reticle.rs b/engine/nvf-play/src/reticle.rs
 index 4cf8199..9cd994b 100644
 --- a/engine/nvf-play/src/reticle.rs
@@ -1231,8 +1316,20 @@ index c1b5bc6..9a6a482 100644
      Subtitles { logged: subs.join("\n"), on_screen, wheel }
  }
  
+diff --git a/engine/nvf-play/src/settings_layout.rs b/engine/nvf-play/src/settings_layout.rs
+index 2695b68..61f6f33 100644
+--- a/engine/nvf-play/src/settings_layout.rs
++++ b/engine/nvf-play/src/settings_layout.rs
+@@ -421,6 +421,7 @@ mod tests {
+         ("neon-glow", "Graphics"),
+         ("sharpen", "Graphics"),
+         ("anisotropic", "Graphics"),
++        ("texture-quality", "Graphics"),
+         ("terrain-height-blend", "Graphics"),
+         ("terrain-anti-tiling", "Graphics"),
+         ("mesh-terrain-blend", "Graphics"),
 diff --git a/engine/nvforever/Cargo.toml b/engine/nvforever/Cargo.toml
-index bbdb0c0..ab27c2a 100644
+index bbdb0c0..c7e6d5b 100644
 --- a/engine/nvforever/Cargo.toml
 +++ b/engine/nvforever/Cargo.toml
 @@ -6,6 +6,12 @@ edition.workspace = true
@@ -1248,7 +1345,7 @@ index bbdb0c0..ab27c2a 100644
  [dependencies]
  bevy.workspace = true
  nvf-assets.workspace = true
-@@ -83,6 +89,12 @@ rfd = { version = "0.15", default-features = false, features = ["common-controls
+@@ -83,6 +89,16 @@ rfd = { version = "0.15", default-features = false, features = ["common-controls
  # MIT/Apache-2.0.
  windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_System_SystemInformation", "Win32_System_Performance", "Win32_System_ProcessStatus", "Win32_System_Diagnostics_Debug", "Win32_System_Kernel", "Win32_System_LibraryLoader", "Win32_Security_WinTrust", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Com"] }
  
@@ -1257,16 +1354,20 @@ index bbdb0c0..ab27c2a 100644
 +openssl = { version = "0.10", features = ["vendored"] }
 +# [nvport] stderr -> log file (android_entry in main.rs).
 +libc = "0.2"
++# [nvport] The engine's heap on Android: Scudo gives each size class a fixed region and one
++# full class failed every allocation of its size, the GPU driver's C++ ones too (bad_alloc
++# on an 8 GB phone with gigabytes free). Rust's allocations go to mimalloc instead.
++mimalloc = { version = "0.1.52", default-features = false }
 +
  [target.'cfg(target_os = "linux")'.dependencies]
  # [design, #2249] Optional NVML at runtime; reuse engine/Cargo.lock's libloading.
  libloading = "0.8.9"
 diff --git a/engine/nvforever/src/android_input.rs b/engine/nvforever/src/android_input.rs
 new file mode 100644
-index 0000000..83185b5
+index 0000000..c2feb33
 --- /dev/null
 +++ b/engine/nvforever/src/android_input.rs
-@@ -0,0 +1,548 @@
+@@ -0,0 +1,609 @@
 +//! [nvport] Input from the Android launcher (Fallout Droid): on-screen keys, touch look,
 +//! gamepads mapped to PC keys and physical keyboards/mice arrive through JNI
 +//! (`com.wastelanddroid.engine.NativeInput`) and are written as Bevy's own input messages,
@@ -1541,6 +1642,7 @@ index 0000000..83185b5
 +
 +impl Plugin for AndroidInputPlugin {
 +    fn build(&self, app: &mut App) {
++        texture_quality_row(app);
 +        app.add_systems(PreUpdate, drain.before(InputSystems)).add_systems(Last, (publish_ui_state, publish_play_flags)).add_systems(PostUpdate, creator_hides_actors).add_systems(PreUpdate, perf_overlay_out_of_menus).add_systems(Last, perf_overlay_out_of_menus).add_systems(PreUpdate, apply_frame_cap).add_systems(Last, frame_log);
 +    }
 +
@@ -1565,9 +1667,67 @@ index 0000000..83185b5
 +    "physics-rate", "fps-counter-cpu", "fps-counter-gpu", "fps-counter-vram", "fps-counter-upscaling",
 +];
 +
++/// [nvport] What a strong phone (the launcher's `NVPORT_FULL_GFX=1`: Snapdragon 7+ Gen 2
++/// and up) still does not get: the desktop-only upscalers, frame generation and latency
++/// rows, and the display sync the launcher owns.
++const STRONG_PHONE_HIDDEN: &[&str] = &[
++    "upscaler", "upscaler-quality", "dlss-model", "fsr-library", "frame-generation", "frame-generation-frames",
++    "latency-reduction", "display-sync", "physics-rate",
++];
++
++/// [nvport] The texture quality row: the mip levels the textures lose (High 0, Medium 1,
++/// Low 2), kept in `<home>/texture_quality.txt` for the launcher, which passes it as
++/// `NVF_TEX_MIP_SKIP` on the next start (textures are read once).
++static TEXTURE_QUALITY: AtomicI32 = AtomicI32::new(-1);
++
++fn texture_quality_file() -> Option<std::path::PathBuf> {
++    std::env::var_os("NVFOREVER_HOME").map(|h| std::path::PathBuf::from(h).join("texture_quality.txt"))
++}
++
++fn texture_quality() -> i32 {
++    let q = TEXTURE_QUALITY.load(Ordering::Relaxed);
++    if q >= 0 {
++        return q;
++    }
++    let from_file = texture_quality_file().and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| t.trim().parse::<i32>().ok());
++    let q = from_file.or_else(|| std::env::var("NVF_TEX_MIP_SKIP").ok().and_then(|v| v.trim().parse().ok())).unwrap_or(1).clamp(0, 2);
++    TEXTURE_QUALITY.store(q, Ordering::Relaxed);
++    q
++}
++
++fn texture_quality_row(app: &mut App) {
++    use nvf_play::settings::{add_setting, choice_index, choice_part, Setting, Slider};
++    add_setting(
++        app,
++        Setting::slider(
++            "texture-quality",
++            "Graphics",
++            "Texture Quality",
++            "The textures' detail: High keeps every level, Medium and Low drop one or two (less memory). Takes effect at the next start.",
++            Slider::choice(
++                3,
++                |_| choice_part(texture_quality() as usize, 3),
++                |_, v| {
++                    let q = choice_index(v, 3) as i32;
++                    if q != texture_quality() {
++                        TEXTURE_QUALITY.store(q, Ordering::Relaxed);
++                        if let Some(f) = texture_quality_file() {
++                            let _ = std::fs::write(f, q.to_string());
++                        }
++                        info!("android: texture quality {q} (mip levels dropped) from the next start");
++                    }
++                },
++                |v| ["High", "Medium", "Low"][choice_index(v, 3).min(2)].to_string(),
++            ),
++        ),
++    );
++}
++
 +fn phone_settings(app: &mut App) {
 +    use nvf_play::settings::{set_choice_unavailable, set_disabled_status, set_shown_when};
-+    for &key in PHONE_HIDDEN {
++    let strong = std::env::var("NVPORT_FULL_GFX").is_ok_and(|v| v == "1");
++    let hidden: &[&str] = if strong { STRONG_PHONE_HIDDEN } else { PHONE_HIDDEN };
++    for &key in hidden {
 +        set_shown_when(app, key, key, |_| false);
 +        set_disabled_status(app, key, |_| Some("Not available on a phone"));
 +    }
@@ -1576,9 +1736,11 @@ index 0000000..83185b5
 +    set_choice_unavailable(app, "shadow-filter", |_, name| {
 +        (name == "Temporal").then(|| "Shimmers at a phone's frame rate: Fast or Smooth".to_string())
 +    });
-+    set_choice_unavailable(app, "anti-aliasing", |_, name| {
-+        matches!(name, "4x" | "8x").then(|| "Too heavy for a phone: 2x, FXAA or SMAA".to_string())
-+    });
++    if !strong {
++        set_choice_unavailable(app, "anti-aliasing", |_, name| {
++            matches!(name, "4x" | "8x").then(|| "Too heavy for a phone: 2x, FXAA or SMAA".to_string())
++        });
++    }
 +}
 +
 +fn drain(
@@ -1829,20 +1991,28 @@ index 74c2936..063c304 100644
              Transform::from_translation(to(eye)).looking_at(to(aim), Vec3::Y),
              layer.clone(),
 diff --git a/engine/nvforever/src/crash.rs b/engine/nvforever/src/crash.rs
-index 012291e..47ddd4a 100644
+index 012291e..0734019 100644
 --- a/engine/nvforever/src/crash.rs
 +++ b/engine/nvforever/src/crash.rs
-@@ -304,18 +304,23 @@ static ALLOC_FAILS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32:
+@@ -304,41 +304,213 @@ static ALLOC_FAILS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32:
  /// Rust's own "memory allocation of N bytes failed" goes to the console only.
  pub struct SaysWhenEmpty;
  
 -// SAFETY: every call goes to the system allocator unchanged; a null answer is only noted.
++/// [nvport] The allocator under [`SaysWhenEmpty`]: mimalloc on Android (Cargo.toml says
++/// why), the system's elsewhere.
++#[cfg(target_os = "android")]
++static BASE: mimalloc::MiMalloc = mimalloc::MiMalloc;
++#[cfg(not(target_os = "android"))]
++static BASE: std::alloc::System = std::alloc::System;
++
 +// SAFETY: every call goes to the system allocator; a null answer is noted and, on Android,
 +// served from `spare` (blocks it gives out are only ever freed or grown by it).
  unsafe impl std::alloc::GlobalAlloc for SaysWhenEmpty {
      unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
          // SAFETY: the caller's contract is System's.
-         let p = unsafe { std::alloc::System.alloc(layout) };
+-        let p = unsafe { std::alloc::System.alloc(layout) };
++        let p = unsafe { BASE.alloc(layout) };
          if p.is_null() {
 -            alloc_failed(layout.size());
 +            return spare_or_fail(layout);
@@ -1856,11 +2026,14 @@ index 012291e..47ddd4a 100644
 +            return spare::free(ptr, layout);
 +        }
          // SAFETY: the caller's contract is System's.
-         unsafe { std::alloc::System.dealloc(ptr, layout) }
+-        unsafe { std::alloc::System.dealloc(ptr, layout) }
++        unsafe { BASE.dealloc(ptr, layout) }
      }
-@@ -324,21 +329,181 @@ unsafe impl std::alloc::GlobalAlloc for SaysWhenEmpty {
+ 
+     unsafe fn alloc_zeroed(&self, layout: std::alloc::Layout) -> *mut u8 {
          // SAFETY: the caller's contract is System's.
-         let p = unsafe { std::alloc::System.alloc_zeroed(layout) };
+-        let p = unsafe { std::alloc::System.alloc_zeroed(layout) };
++        let p = unsafe { BASE.alloc_zeroed(layout) };
          if p.is_null() {
 -            alloc_failed(layout.size());
 +            let q = spare_or_fail(layout);
@@ -1888,7 +2061,8 @@ index 012291e..47ddd4a 100644
 +            return q;
 +        }
          // SAFETY: the caller's contract is System's.
-         let p = unsafe { std::alloc::System.realloc(ptr, layout, new_size) };
+-        let p = unsafe { std::alloc::System.realloc(ptr, layout, new_size) };
++        let p = unsafe { BASE.realloc(ptr, layout, new_size) };
          if p.is_null() {
 -            alloc_failed(new_size);
 +            // SAFETY: the caller's layout and new size are valid (GlobalAlloc::realloc).
@@ -1898,7 +2072,7 @@ index 012291e..47ddd4a 100644
 +                // SAFETY: ptr is still valid (realloc failed), q is fresh.
 +                unsafe {
 +                    std::ptr::copy_nonoverlapping(ptr, q, layout.size().min(new_size));
-+                    std::alloc::System.dealloc(ptr, layout);
++                    BASE.dealloc(ptr, layout);
 +                }
 +            }
 +            return q;
@@ -2043,7 +2217,7 @@ index 012291e..47ddd4a 100644
  /// file. Nothing here allocates (there is no memory), and the log's lock is never waited on
  /// (the failing allocation can be the log's own).
 diff --git a/engine/nvforever/src/decals.rs b/engine/nvforever/src/decals.rs
-index f9dd8cb..5d99ee1 100644
+index f9dd8cb..c9b42dd 100644
 --- a/engine/nvforever/src/decals.rs
 +++ b/engine/nvforever/src/decals.rs
 @@ -91,9 +91,17 @@ const MISSES_LOGGED: u32 = 8;
@@ -2111,7 +2285,7 @@ index f9dd8cb..5d99ee1 100644
          let (parent, place) = match bone {
              None => match cell {
                  Some((e, origin)) => (e, Transform { translation: point - origin, ..game_place }),
-@@ -373,9 +389,18 @@ fn place(
+@@ -373,9 +389,26 @@ fn place(
                  (e, Transform::from_matrix(Mat4::from(g.affine().inverse() * world)))
              }
          };
@@ -2123,7 +2297,15 @@ index f9dd8cb..5d99ee1 100644
 +                .spawn((ForwardDecal, MeshMaterial3d(m.clone()), place, Visibility::default(), RenderLayers::layer(DECAL_LAYER), Decal { age: 0.0, material: material.clone(), flat: None }, ChildOf(parent)))
 +                .id(),
 +            (None, Some(f)) => {
-+                let mesh = quad.get_or_insert_with(|| models.meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(0.5)))).clone();
++                let mesh = quad
++                    .get_or_insert_with(|| {
++                        // Tangents: the decal sets' normal maps need them, and a mesh
++                        // without them is never drawn with a normal-mapped material.
++                        let m = Mesh::from(Plane3d::new(Vec3::Y, Vec2::splat(0.5)));
++                        let m = m.clone().with_generated_tangents().unwrap_or(m);
++                        models.meshes.add(m)
++                    })
++                    .clone();
 +                commands
 +                    .spawn((Mesh3d(mesh), MeshMaterial3d(f.clone()), place, Visibility::default(), RenderLayers::layer(DECAL_LAYER), bevy::light::NotShadowCaster, Decal { age: 0.0, material: None, flat: flat.clone() }, ChildOf(parent)))
 +                    .id()
@@ -2133,7 +2315,7 @@ index f9dd8cb..5d99ee1 100644
          if st.reported.insert(hit.impact) {
              info!(
                  "decals: {} leaves {} ({}) on {}: side {side:.0} of {:.0}-{:.0}, depth {:.0}",
-@@ -416,6 +441,7 @@ fn fade(
+@@ -416,6 +449,7 @@ fn fade(
      mut st: ResMut<Decals>,
      mut decals: Query<(Entity, &mut Decal)>,
      mut materials: ResMut<Assets<ForwardDecalMaterial<StandardMaterial>>>,
@@ -2141,7 +2323,7 @@ index f9dd8cb..5d99ee1 100644
  ) {
      let dt = time.delta_secs();
      st.clock += dt;
-@@ -429,9 +455,12 @@ fn fade(
+@@ -429,9 +463,12 @@ fn fade(
              commands.entity(e).try_despawn();
              gone.push(e);
          } else if left < DECAL_FADE {
@@ -2964,7 +3146,7 @@ index d428306..363f2ce 100644
      } else if staggered() {
          &STAGGERED_SCHEDULE
 diff --git a/engine/nvforever/src/sky.rs b/engine/nvforever/src/sky.rs
-index bd2755d..9e9e53d 100644
+index bd2755d..62cf56c 100644
 --- a/engine/nvforever/src/sky.rs
 +++ b/engine/nvforever/src/sky.rs
 @@ -981,6 +981,13 @@ impl SkyState {
@@ -3008,6 +3190,20 @@ index bd2755d..9e9e53d 100644
          let cur = at(&self.weather);
          let dimmer = match &self.prev {
              Some(p) => at(p) + (cur - at(p)) * self.fade,
+@@ -2157,7 +2167,12 @@ pub fn update_sky(
+     }
+     // The sun light turns with the game clock every frame, not with the sky's half-minute
+     // steps (`SkyState::sun_light_hour`); its colour still changes with the sky below.
+-    let light_dir = to_bevy.rotation * Vec3::from_array(sun_direction(c, sky.sun_light_hour(), SUN_SOUTH));
++    // [nvport] On a phone the light turns in steps of a game minute (0.25 degrees, about
++    // two seconds of play): a light that turns every frame moves the shadow maps' texel
++    // grid every frame, and every shadow edge crawled and shimmered (players' reports).
++    // Between the steps the shadows stand still.
++    let light_hour = if cfg!(target_os = "android") { (sky.sun_light_hour() * 60.0).floor() / 60.0 } else { sky.sun_light_hour() };
++    let light_dir = to_bevy.rotation * Vec3::from_array(sun_direction(c, light_hour, SUN_SOUTH));
+     if let Ok((mut light, mut t)) = sun.single_mut() {
+         aim_sun(&mut light, &mut t, light_dir, to_bevy.rotation * Vec3::Y, PI * unit * sky.sun_scale() * sun_mod);
+     }
 diff --git a/engine/nvforever/src/terminal_view.rs b/engine/nvforever/src/terminal_view.rs
 index 5a7c1e2..5f62ce4 100644
 --- a/engine/nvforever/src/terminal_view.rs
@@ -3021,6 +3217,81 @@ index 5a7c1e2..5f62ce4 100644
              AmbientLight { color: Color::WHITE, brightness: 150.0, ..default() },
              Transform::from_translation(to(eye)).looking_at(to(aim), Vec3::Y),
              layer.clone(),
+diff --git a/engine/nvforever/src/vats_highlight.rs b/engine/nvforever/src/vats_highlight.rs
+index 6d465f5..a11ab69 100644
+--- a/engine/nvforever/src/vats_highlight.rs
++++ b/engine/nvforever/src/vats_highlight.rs
+@@ -305,6 +305,24 @@ fn coats(materials: &mut Assets<StandardMaterial>, texture: Option<(Handle<Image
+     // the texture's (dark hair came out dark in the mask and was not lit), a light is
+     // not, and the texture still gives the alpha. Far more than the camera's exposure
+     // takes off, so it is white in the picture.
++    // [nvport] On a phone the part is lit in the world's own pass (no mask camera, no
++    // picture, no UI shader: entering and leaving VATS lost the GPU on Adreno and Mali,
++    // players' reports 2026-11-22): the part drawn once more over itself in the HUD's
++    // colour, added to the picture.
++    if cfg!(target_os = "android") {
++        let [r, g, b] = nvf_play::interface::hud_rgb();
++        let white = StandardMaterial {
++            base_color: Color::srgba_u8(r, g, b, 110),
++            base_color_texture: image,
++            unlit: true,
++            alpha_mode: AlphaMode::Add,
++            depth_bias: 64.0,
++            cull_mode: None,
++            fog_enabled: false,
++            ..default()
++        };
++        return [materials.add(black), materials.add(white)];
++    }
+     let white = StandardMaterial { base_color: Color::BLACK, base_color_texture: image, emissive: LinearRgba::rgb(MASK_LIGHT, MASK_LIGHT, MASK_LIGHT), alpha_mode: AlphaMode::Blend, ..default() };
+     [materials.add(black), materials.add(white)]
+ }
+@@ -356,7 +374,10 @@ fn glow(
+         let n = rig.skel.by_name.get(bone).copied().or_else(|| rig.skel.names.iter().position(|x| x.as_deref().is_some_and(|x| x.eq_ignore_ascii_case(bone))))?;
+         own.get(n).copied().flatten()
+     };
+-    let layer = RenderLayers::layer(MASK_LAYER);
++    // [nvport] A phone draws the lit part in the world's view (layer 0), without the black
++    // copies the mask needs.
++    let phone = cfg!(target_os = "android");
++    let layer = if phone { RenderLayers::layer(0) } else { RenderLayers::layer(MASK_LAYER) };
+     let (mut triangles, mut covered) = (0, 0);
+     for (e, r, shape, skin, own_material, drawn) in &shapes {
+         if r.0 != actor || shape.cap {
+@@ -375,7 +396,7 @@ fn glow(
+             x
+         };
+         // The shape as it is drawn, in black: the target hides its own parts.
+-        if let Some(d) = drawn {
++        if let Some(d) = drawn.filter(|_| !phone) {
+             let x = put(&mut commands, d.0.clone(), black);
+             st.overlays.push(x);
+         }
+@@ -434,7 +455,12 @@ fn glow(
+         }
+         let cover = own_material.and_then(|m| own_materials.get(&m.0)).map_or(Cover::Plain, cover_of);
+         let Some([black, white]) = st.coats_for(&mut materials, cover) else { continue };
+-        let layers = if weapon_lit && !on_back { vec![black, white] } else { vec![black] };
++        let layers = match (weapon_lit && !on_back, phone) {
++            (true, true) => vec![white],
++            (false, true) => vec![],
++            (true, false) => vec![black, white],
++            (false, false) => vec![black],
++        };
+         covered += usize::from(layers.len() == 2);
+         for material in layers {
+             let x = commands.spawn((Mesh3d(drawn.0.clone()), MeshMaterial3d(material), Transform::IDENTITY, PartGlow, layer.clone(), NoFrustumCulling, bevy::light::NotShadowCaster)).id();
+@@ -500,6 +526,10 @@ fn view(
+     real: Res<Time<Real>>,
+     (style, phys, who): (Option<Res<nvf_play::vats_classic::VatsStyle>>, Option<Res<nvf_play::phys::PhysState>>, Option<Res<nvf_play::player::Player>>),
+ ) {
++    // [nvport] No mask camera or picture on a phone (`coats`).
++    if cfg!(target_os = "android") {
++        return;
++    }
+     let on = st.on.is_some();
+     let pulse = nvf_play::hud::sight_alpha(real.elapsed_secs());
+     let (Ok(window), Ok((eye, projection))) = (windows.single(), player.single()) else { return };
 diff --git a/engine/nvforever/src/vats_mask.wesl b/engine/nvforever/src/vats_mask.wesl
 index a2bbfd6..42c79bb 100644
 --- a/engine/nvforever/src/vats_mask.wesl
@@ -3185,13 +3456,15 @@ index 5961c3c..3f0f658 100644
          bucket.available_sets -= 1;
          bucket.allocated_sets += 1;
 diff --git a/lang/ru.toml b/lang/ru.toml
-index 69dc72c..344513a 100644
+index 69dc72c..b8bb821 100644
 --- a/lang/ru.toml
 +++ b/lang/ru.toml
-@@ -6,6 +6,557 @@
+@@ -6,6 +6,559 @@
  name = "Русский"
  
  [words]
++"The textures' detail: High keeps every level, Medium and Low drop one or two (less memory). Takes effect at the next start." = "Детализация текстур: Высокое — все уровни, Среднее и Низкое отбрасывают один или два (меньше памяти). Действует со следующего запуска."
++"Texture Quality" = "Качество текстур"
 +# [nvport] The pause menu's save page (pause.rs): saving over a save.
 +"New Save" = "Новое сохранение"
 +"Overwrite this save?" = "Перезаписать сохранение?"
@@ -3746,7 +4019,7 @@ index 69dc72c..344513a 100644
  # [design, #2200; engine/nvf-play/src/pause.rs] NVForever's device selection.
  "Automatic Input Switching" = "Автоматическая смена устройства ввода"
  "On: a controller button, stick or trigger selects Controller; a key or mouse click selects Keyboard and Mouse (mouse motion does not). Off: choose Input Device yourself." = "Вкл.: кнопка, стик или курок геймпада выбирает геймпад; клавиша или щелчок мыши — клавиатуру и мышь (движение мыши — нет). Выкл.: выбирайте устройство сами."
-@@ -18,7 +569,7 @@ name = "Русский"
+@@ -18,7 +571,7 @@ name = "Русский"
  "Close In on the Speaker" = "Приближение к говорящему"
  "On: in a conversation the view closes in on the speaker, the background out of focus; the mouse moves only the cursor. Off: you can look around." = "Вкл.: в разговоре взгляд приближается к говорящему, фон размыт; мышь двигает только курсор. Выкл.: можно осматриваться."
  "Goodbye hint" = "Подсказка «Goodbye»"
@@ -3755,7 +4028,7 @@ index 69dc72c..344513a 100644
  "Aim assist" = "Помощь в прицеливании"
  "Controller only. On: the right stick turns slower over a nearby hostile, and aiming down the sights pulls the view onto one near the crosshair." = "Только для геймпада. Вкл.: правый стик поворачивает медленнее над ближним врагом, а прицеливание наводит взгляд на врага рядом с перекрестием."
  "Controller" = "Геймпад"
-@@ -31,20 +582,20 @@ name = "Русский"
+@@ -31,20 +584,20 @@ name = "Русский"
  "Kill camera" = "Камера убийства"
  "When a VATS shot kills its last mark, a camera shows the kill. Last enemy: only when no other enemy still fights you. Every kill: always. Off: never." = "Когда выстрел в VATS убивает последнюю цель, камера показывает убийство. Последний враг: только когда с вами больше никто не сражается. Каждое убийство: всегда. Выкл.: никогда."
  "V.A.T.S. style" = "Стиль V.A.T.S."
@@ -3781,7 +4054,7 @@ index 69dc72c..344513a 100644
  "Interface" = "Интерфейс"
  "Reverb" = "Реверберация"
  "World sounds echo as the place you are in does (a cave, a hall, a small room). Off: they do not." = "Звуки мира отражаются так, как в месте, где вы находитесь (пещера, зал, маленькая комната). Выкл.: без отражений."
-@@ -62,11 +613,11 @@ name = "Русский"
+@@ -62,11 +615,11 @@ name = "Русский"
  "Effects" = "Эффекты"
  "Every other sound: weapons, impacts, menus, doors and the sounds of places." = "Все прочие звуки: оружие, удары, меню, двери и звуки мест."
  "Radio" = "Радио"
@@ -3796,7 +4069,7 @@ index 69dc72c..344513a 100644
  "Audio" = "Звук"
  "Tweaks" = "Твики"
  "Game" = "Общие"
-@@ -79,9 +630,9 @@ name = "Русский"
+@@ -79,9 +632,9 @@ name = "Русский"
  "Keyboard search" = "Поиск с клавиатуры"
  "No settings here." = "Здесь нет настроек."
  "No results." = "Ничего не найдено."
@@ -3808,7 +4081,7 @@ index 69dc72c..344513a 100644
  "Button style" = "Вид кнопок"
  "The names and pictures of the controller's buttons in prompts and hints. Auto: a PlayStation's when the controller says it is one, else an Xbox's." = "Названия и значки кнопок геймпада в подсказках. Авто: как у PlayStation, когда геймпад сообщает, что он такой, иначе как у Xbox."
  "Light and noise gauges while sneaking" = "Шкалы света и шума в скрытности"
-@@ -100,13 +651,13 @@ name = "Русский"
+@@ -100,13 +653,13 @@ name = "Русский"
  "Hardcore mode" = "Режим хардкор"
  "On: you need water, food and sleep, stimpaks heal over time, ammo has weight, crippled limbs need a doctor's bag or a doctor. Off: none of that." = "Вкл.: нужны вода, еда и сон, стимуляторы лечат постепенно, патроны имеют вес, покалеченным конечностям нужна докторская сумка или доктор. Выкл.: ничего этого нет."
  "HUD red" = "HUD: красный"
@@ -3825,7 +4098,7 @@ index 69dc72c..344513a 100644
  "HUD scale" = "Масштаб HUD"
  "Size of the in-game HUD, independent of menu scale. Takes effect at the next start." = "Размер HUD в игре, не зависящий от масштаба меню. Вступает в силу при следующем запуске."
  "Menu scale" = "Масштаб меню"
-@@ -128,58 +679,58 @@ name = "Русский"
+@@ -128,58 +681,58 @@ name = "Русский"
  "Monitor" = "Монитор"
  "The display the game opens on in full screen (the first display until you pick one)." = "Экран, на котором игра открывается в полноэкранном режиме (первый экран, пока вы не выберете другой)."
  "Body in first person" = "Тело от первого лица"
@@ -3897,7 +4170,7 @@ index 69dc72c..344513a 100644
  "DLSS model" = "Модель DLSS"
  "Which DLSS model rebuilds the picture (NVIDIA calls them presets). Default, recommended: NVIDIA picks per mode. Only while DLSS draws." = "Какая модель DLSS восстанавливает картинку (NVIDIA называет их пресетами). По умолчанию, рекомендуется: NVIDIA выбирает по режиму. Только пока рисует DLSS."
  "Default" = "По умолчанию"
-@@ -206,42 +757,42 @@ name = "Русский"
+@@ -206,42 +759,42 @@ name = "Русский"
  "How far from you items lying in the world are drawn, as a part of the farthest the loaded cells reach." = "Как далеко от вас рисуются предметы, лежащие в мире, как доля самой большой дальности загруженных ячеек."
  "Shadow distance" = "Дальность теней"
  "Grass distance" = "Дальность травы"
@@ -3951,7 +4224,7 @@ index 69dc72c..344513a 100644
  "Off (upscaling active)" = "Выкл. (работает масштабирование)"
  "DLSS (restart)" = "DLSS (перезапуск)"
  "Needs an upscaler" = "Нужно масштабирование"
-@@ -249,7 +800,7 @@ name = "Русский"
+@@ -249,7 +802,7 @@ name = "Русский"
  "DLSS needs Windows" = "DLSS работает только в Windows"
  "DLSS needs the Vulkan renderer" = "Для DLSS нужна отрисовка через Vulkan"
  "DLSS files missing: choose Download DLSS… in this list, or put them in the dlss folder beside nvforever.exe, then restart" = "Нет файлов DLSS: выберите «Скачать DLSS…» в этом списке или положите их в папку dlss рядом с nvforever.exe и перезапустите"
@@ -3960,7 +4233,7 @@ index 69dc72c..344513a 100644
  "A file in the dlss folder is not from the tested NVIDIA release (Streamline 2.14.16)" = "Файл в папке dlss не из проверенного выпуска NVIDIA (Streamline 2.14.16)"
  "DLSS did not start (the log says why)" = "DLSS не запустился (причина в журнале)"
  "A graphics card the game may use cannot run DLSS" = "Видеокарта, которую может выбрать игра, не поддерживает DLSS"
-@@ -267,7 +818,7 @@ name = "Русский"
+@@ -267,7 +820,7 @@ name = "Русский"
  "Needs vsync off" = "Нужна выключенная вертикальная синхронизация"
  "Needs DLSS frame generation" = "Нужна генерация кадров DLSS"
  "Frames made between the real ones: smoother motion, input a little later. FSR 3.1 needs FSR upscaling; DLSS an RTX 40 or newer. Not in the original." = "Кадры между настоящими: движение плавнее, отклик чуть позже. FSR 3.1 нужно масштабирование FSR, DLSS — RTX 40 или новее. Нет в оригинале."
@@ -3969,7 +4242,7 @@ index 69dc72c..344513a 100644
  "{choice} at a limit of {limit}: {real} real frames a second, which can feel choppy. Fewer generated frames, or a limit up to the display's refresh rate, give more." = "{choice} при пределе {limit}: {real} настоящих кадров в секунду, это может выглядеть рывками. Меньше сгенерированных кадров или предел до частоты экрана дадут больше."
  "Controls" = "Управление"
  "HUD colour" = "Цвет HUD"
-@@ -296,7 +847,7 @@ name = "Русский"
+@@ -296,7 +849,7 @@ name = "Русский"
  "Back" = "Назад"
  "Defaults" = "По умолчанию"
  "Warning" = "Внимание"
@@ -3978,7 +4251,7 @@ index 69dc72c..344513a 100644
  "Are you sure you want to quit?" = "Вы действительно хотите выйти?"
  "Main Menu" = "Главное меню"
  "Exit Game" = "Выйти из игры"
-@@ -318,7 +869,7 @@ name = "Русский"
+@@ -318,7 +871,7 @@ name = "Русский"
  "Cross" = "Крест"
  "Arrows" = "Стрелки"
  "Amber" = "Янтарный"
@@ -3987,7 +4260,7 @@ index 69dc72c..344513a 100644
  "Blue" = "Синий"
  "White" = "Белый"
  "Custom" = "Свой"
-@@ -345,7 +896,7 @@ name = "Русский"
+@@ -345,7 +898,7 @@ name = "Русский"
  "Downloading DLSS… {percent}%" = "Загрузка DLSS… {percent}%"
  "Upscaling by NVIDIA Corporation, through NVIDIA Streamline" = "Масштабирование: NVIDIA Corporation, через NVIDIA Streamline"
  "Download DLSS" = "Скачать DLSS"
@@ -3996,7 +4269,7 @@ index 69dc72c..344513a 100644
  "NVIDIA's RTX SDKs licence for nvngx_dlss.dll and nvngx_dlssg.dll" = "Лицензия NVIDIA RTX SDK для nvngx_dlss.dll и nvngx_dlssg.dll"
  "Lines {first} to {last} of {total}. PgUp, PgDn, the arrow keys or the mouse wheel scroll." = "Строки {first}-{last} из {total}. Прокрутка: PgUp, PgDn, стрелки или колесо мыши."
  "I accept starts the download; the game goes on meanwhile." = "«Принимаю» начинает загрузку; игра тем временем продолжается."
-@@ -358,11 +909,11 @@ name = "Русский"
+@@ -358,11 +911,11 @@ name = "Русский"
  "Checking the files..." = "Проверка файлов..."
  "Putting the files in the dlss folder..." = "Файлы кладутся в папку dlss..."
  "{fetched} MB of {total} MB" = "{fetched} МБ из {total} МБ"
@@ -4010,7 +4283,7 @@ index 69dc72c..344513a 100644
  "Installed in {folder}." = "Установлено в {folder}."
  "Close" = "Закрыть"
  "DLSS was not downloaded" = "DLSS не скачан"
-@@ -370,7 +921,7 @@ name = "Русский"
+@@ -370,7 +923,7 @@ name = "Русский"
  "GitHub answered with an error (HTTP {status})." = "GitHub ответил ошибкой (HTTP {status})."
  "What GitHub sent was not NVIDIA's expected archive; nothing was kept." = "GitHub прислал не тот архив NVIDIA, что ожидался; ничего не сохранено."
  "{name} did not match the tested release; nothing was kept." = "{name} не совпал с проверенным выпуском; ничего не сохранено."
@@ -4019,7 +4292,7 @@ index 69dc72c..344513a 100644
  "The dlss folder already holds {name}, which was left as it is: remove it, or copy the files by hand." = "В папке dlss уже есть {name}, он оставлен как есть: удалите его или скопируйте файлы вручную."
  "The files could not be written to the dlss folder." = "Не удалось записать файлы в папку dlss."
  "The download stopped on an internal error; the log says more." = "Загрузка остановилась из-за внутренней ошибки; подробности в журнале."
-@@ -406,7 +957,7 @@ name = "Русский"
+@@ -406,7 +959,7 @@ name = "Русский"
  # [design, the menu overhaul (docs/design/settings-page.md); engine/nvf-play/src/settings_layout.rs,
  # pause.rs] The settings page's categories, the Tweaks tab's groups and categories, the page's
  # own words and the Menu font row (owner 2026-11-16: the page read in English and as ? in Russian).
@@ -4028,7 +4301,7 @@ index 69dc72c..344513a 100644
  "Frame Rate" = "Частота кадров"
  "Upscaling and Anti-Aliasing" = "Масштабирование и сглаживание"
  "Frame Generation and Latency" = "Генерация кадров и задержка"
-@@ -431,22 +982,22 @@ name = "Русский"
+@@ -431,22 +984,22 @@ name = "Русский"
  "World Interaction" = "Взаимодействие с миром"
  "Quick Loot" = "Быстрый лут"
  "Enabled" = "Включено"
@@ -4056,7 +4329,7 @@ index 69dc72c..344513a 100644
  "Search (a body or container)" = "Обыскать"
  "Empty" = "Пусто"
  "ITEM" = "ПРЕДМЕТ"
-@@ -457,7 +1008,7 @@ name = "Русский"
+@@ -457,7 +1010,7 @@ name = "Русский"
  "Report a Bug" = "Сообщить об ошибке"
  "Previous Category" = "Предыдущая категория"
  "Next Category" = "Следующая категория"
@@ -4065,7 +4338,7 @@ index 69dc72c..344513a 100644
  "Which group of tweaks the list shows: Enter or a click opens the groups, Left and Right step. The search finds every tweak." = "Какую группу твиков показывает список: Enter или щелчок открывает группы, Влево и Вправо листают. Поиск находит любой твик."
  "Category" = "Категория"
  "Press a key..." = "Нажмите клавишу..."
-@@ -470,9 +1021,9 @@ name = "Русский"
+@@ -470,9 +1023,9 @@ name = "Русский"
  "Vertical Sensitivity" = "Вертикальная чувствительность"
  "Aim Sensitivity" = "Чувствительность при прицеливании"
  "Menu font" = "Шрифт меню"
@@ -4077,7 +4350,7 @@ index 69dc72c..344513a 100644
  "Quality of Life" = "Удобство"
  "Menus" = "Меню"
  "Cheats" = "Читы"
-@@ -530,23 +1081,200 @@ name = "Русский"
+@@ -530,23 +1083,200 @@ name = "Русский"
  # [design, #2014, #2317, #2662, #2688, #2149, #2169, #2403] Rows main registers without a Russian line.
  "On: when choices appear the view returns to the speaker (with the close-up off). Needs \"Turn to Each Other\"." = "Вкл.: когда появляются варианты ответа, вид возвращается к собеседнику (при выключенном приближении). Нужен «Поворот друг к другу в диалоге»."
  "Grass fires" = "Пожары в траве"

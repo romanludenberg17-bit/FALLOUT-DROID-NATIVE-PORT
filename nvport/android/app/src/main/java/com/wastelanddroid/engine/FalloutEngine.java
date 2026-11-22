@@ -171,7 +171,17 @@ public final class FalloutEngine {
             ed.commit();
         }
         Profile profile = Profile.of(context);
-        args.add("env:NVF_TEX_MIP_SKIP=" + profile.mipSkip);
+        // The engine's own Texture Quality row (android_input.rs) wins once the player set it.
+        int mip = profile.mipSkip;
+        try {
+            java.io.File tq = new java.io.File(homeDir(context, game.id), "texture_quality.txt");
+            if (tq.isFile()) mip = Math.max(0, Math.min(2, Integer.parseInt(readText(tq).trim())));
+        } catch (Exception ignored) {
+        }
+        args.add("env:NVF_TEX_MIP_SKIP=" + mip);
+        // Snapdragon 7+ Gen 2 and up, and every high class chip: the engine's settings page
+        // shows the graphics rows again and the player's choices there stand.
+        if (strongGraphics(context)) args.add("env:NVPORT_FULL_GFX=1");
         profile.addArgs(args);
         java.util.Map<String, java.util.Map<String, String>> ini = new java.util.LinkedHashMap<>();
         ini.put("Settings", profile.iniSettings());
@@ -304,6 +314,8 @@ public final class FalloutEngine {
         boolean custom, fpsCounter;
         boolean fxTerrain, fxShafts, fxAo, fxClouds, fxHaze, fxWater;
         int safe;
+        /** FalloutEngine.strongGraphics: the engine's settings page owns the graphics rows. */
+        boolean strong;
 
         static Profile of(Context context) {
             Profile p = new Profile();
@@ -332,9 +344,15 @@ public final class FalloutEngine {
             if (!p.custom) p.g.shadows = p.quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? 2 : 0;
             if (p.quality == com.wastelanddroid.game.DeviceProfile.Quality.LOW) {
                 if (!p.custom) p.g.grassDensity = 0;
-                p.mipSkip = Math.max(p.mipSkip, 2);
+                // Two levels dropped (a quarter of the detail) left the textures blurred on an
+                // 8 GB 778G; with ETC2 (nvf-assets texture.rs) one is enough there.
+                p.mipSkip = Math.max(p.mipSkip, com.wastelanddroid.game.DeviceProfile.totalRamMb(context) >= 7000 ? 1 : 2);
             }
+            // A strong chip keeps the player's graphics after a crash (the recovery reloads the
+            // save instead); a safe level set by an older build is dropped.
+            if (!mayDegrade(context, p.quality)) Prefs.get(context).edit().remove(GPU_SAFE).apply();
             p.safe = Prefs.get(context).getInt(GPU_SAFE, 0);
+            p.strong = strongGraphics(context);
             SharedPreferences fx = Prefs.get(context);
             p.fxTerrain = fx.getBoolean("fx_terrain", false);
             p.fxShafts = fx.getBoolean("fx_shafts", false);
@@ -474,6 +492,17 @@ public final class FalloutEngine {
             set.put("smooth-terrain", "Off");
             set.put("frame-generation", "Off");
             set.put("display-sync", null);
+            // A strong chip (strongGraphics): the rows its settings page shows again are the
+            // player's; the launcher's values are first values only there.
+            if (strong) {
+                for (String k : new String[]{"shadow-resolution", "fine-shadows", "sharpen", "mesh-terrain-blend", "terrain-shadows",
+                        "terrain-height-blend", "terrain-anti-tiling", "light-shafts", "ambient-occlusion", "cloud-shadows",
+                        "heat-haze", "desert-haze", "water-effects", "water-reflections", "water-mirror", "smooth-terrain",
+                        "anti-aliasing", "sun-shadows", "grass"}) {
+                    String v = set.get(k);
+                    if (v != null && !v.startsWith("?")) set.put(k, "?" + v);
+                }
+            }
             return set;
         }
 
@@ -840,6 +869,19 @@ public final class FalloutEngine {
      * report, the run log cut off): the next start takes one more GPU_SAFE level. True when
      * it did.
      */
+    /**
+     * Whether a crash may lower this phone's graphics: never on a high class chip or one of
+     * Snapdragon 7+ Gen 2 and up (their players keep the graphics they chose).
+     */
+    /** Snapdragon 7+ Gen 2 and up, or a high class chip: the full graphics settings. */
+    public static boolean strongGraphics(Context context) {
+        return quality(context) == com.wastelanddroid.game.DeviceProfile.Quality.HIGH || com.wastelanddroid.game.DeviceProfile.replacersAllowed();
+    }
+
+    public static boolean mayDegrade(Context context, com.wastelanddroid.game.DeviceProfile.Quality q) {
+        return q != com.wastelanddroid.game.DeviceProfile.Quality.HIGH && !com.wastelanddroid.game.DeviceProfile.replacersAllowed();
+    }
+
     public static boolean lighterAfterDeath(Context context) {
         if (android.os.Build.VERSION.SDK_INT < 30) return false;
         SharedPreferences prefs = Prefs.get(context);
@@ -875,7 +917,7 @@ public final class FalloutEngine {
         }
         SharedPreferences.Editor ed = prefs.edit().putLong("game_death_seen", newest).putLong("gpu_report_seen", reportNewest);
         boolean first = seen == 0 && reportSeen == 0;
-        if (bad && !first) ed.putInt(GPU_SAFE, Math.min(2, prefs.getInt(GPU_SAFE, 0) + 1));
+        if (bad && !first && mayDegrade(context, quality(context))) ed.putInt(GPU_SAFE, Math.min(2, prefs.getInt(GPU_SAFE, 0) + 1));
         ed.commit();
         return bad && !first;
     }

@@ -141,7 +141,7 @@ public final class DeviceProfile {
         return Build.VERSION.SDK_INT >= 31 ? Build.SOC_MANUFACTURER + " " + Build.SOC_MODEL : Build.HARDWARE;
     }
 
-    static long totalRamMb(Context context) {
+    public static long totalRamMb(Context context) {
         ActivityManager activityManager = (ActivityManager) context.getSystemService("activity");
         ActivityManager.MemoryInfo memoryInfo = new ActivityManager.MemoryInfo();
         activityManager.getMemoryInfo(memoryInfo);

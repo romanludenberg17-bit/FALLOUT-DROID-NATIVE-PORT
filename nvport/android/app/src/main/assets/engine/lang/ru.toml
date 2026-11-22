@@ -6,6 +6,8 @@
 name = "Русский"
 
 [words]
+"The textures' detail: High keeps every level, Medium and Low drop one or two (less memory). Takes effect at the next start." = "Детализация текстур: Высокое — все уровни, Среднее и Низкое отбрасывают один или два (меньше памяти). Действует со следующего запуска."
+"Texture Quality" = "Качество текстур"
 # [nvport] The pause menu's save page (pause.rs): saving over a save.
 "New Save" = "Новое сохранение"
 "Overwrite this save?" = "Перезаписать сохранение?"

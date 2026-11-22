@@ -352,8 +352,9 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
             // A lighter picture from now on (FalloutEngine.GPU_SAFE: 1 no sun shadows, MSAA,
             // grass; 2 also a lower resolution and smaller textures), and the command line
             // made again from the profile, ending in the save (or the main menu).
-            int level = Math.min(2, prefs.getInt(FalloutEngine.GPU_SAFE, 0) + 1);
-            prefs.edit().putInt(FalloutEngine.GPU_SAFE, level).commit();
+            boolean degrade = FalloutEngine.mayDegrade(this, FalloutEngine.quality(this));
+            int level = degrade ? Math.min(2, prefs.getInt(FalloutEngine.GPU_SAFE, 0) + 1) : 0;
+            if (degrade) prefs.edit().putInt(FalloutEngine.GPU_SAFE, level).commit();
             safeLevel = level;
             if (save != null) prefs.edit().putString(FalloutEngine.PENDING_LOAD + game, save.getAbsolutePath()).commit();
             com.wastelanddroid.game.GameDef def = com.wastelanddroid.game.GameDef.byId(game);
@@ -367,7 +368,7 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
             return false;
         }
         android.util.Log.i("NVForever", "graphics device lost: starting again from " + (save == null ? "the main menu" : save));
-        android.widget.Toast.makeText(this, (save == null ? "Сбой видеодрайвера — перезапуск игры" : "Сбой видеодрайвера — перезапуск с последнего сохранения") + (safeLevel >= 2 ? "; графика снижена (разрешение, текстуры, тени)" : "; тени, MSAA и трава выключены"), android.widget.Toast.LENGTH_LONG).show();
+        android.widget.Toast.makeText(this, (save == null ? "Сбой видеодрайвера — перезапуск игры" : "Сбой видеодрайвера — перезапуск с последнего сохранения") + (safeLevel == 0 ? "" : safeLevel >= 2 ? "; графика снижена (разрешение, текстуры, тени)" : "; тени, MSAA и трава выключены"), android.widget.Toast.LENGTH_LONG).show();
         restartGame();
         return true;
     }
