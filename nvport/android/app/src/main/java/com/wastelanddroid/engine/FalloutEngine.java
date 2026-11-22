@@ -164,7 +164,14 @@ public final class FalloutEngine {
         // version): the effects off and the picture rows set from the class, over the
         // player's earlier choices.
         SharedPreferences ap = Prefs.get(context);
-        boolean auto = ap.getBoolean("gfx_auto", false) || !ap.getBoolean("gfx_auto_v26", false);
+        // The flagship profile is put in once (its values replace the player's then), after
+        // which the engine's settings page owns them.
+        boolean flagshipFirst = com.wastelanddroid.game.DeviceProfile.flagshipProfile() && !ap.getBoolean("flagship_v1", false);
+        if (flagshipFirst) {
+            ap.edit().putBoolean("flagship_v1", true).commit();
+            new java.io.File(homeDir(context, game.id), "texture_quality.txt").delete();
+        }
+        boolean auto = flagshipFirst || ap.getBoolean("gfx_auto", false) || !ap.getBoolean("gfx_auto_v26", false);
         if (auto) {
             SharedPreferences.Editor ed = ap.edit().putBoolean("gfx_auto", false).putBoolean("gfx_auto_v25", true).putBoolean("gfx_auto_v26", true).putBoolean("gfx_custom", false).remove(GPU_SAFE);
             for (String k : new String[]{"terrain", "shafts", "ao", "clouds", "haze", "water"}) ed.putBoolean("fx_" + k, false);
@@ -316,6 +323,8 @@ public final class FalloutEngine {
         int safe;
         /** FalloutEngine.strongGraphics: the engine's settings page owns the graphics rows. */
         boolean strong;
+        /** DeviceProfile.flagshipProfile. */
+        boolean flagship;
 
         static Profile of(Context context) {
             Profile p = new Profile();
@@ -365,6 +374,17 @@ public final class FalloutEngine {
                 p.g.grassDensity = 0;
             }
             if (p.safe >= 2) p.mipSkip = Math.min(3, Math.max(p.mipSkip, 2));
+            // The flagship profile (DeviceProfile.flagshipProfile): every level of every
+            // texture, the sun's shadows at Quality, all of the engine's effects.
+            p.flagship = com.wastelanddroid.game.DeviceProfile.flagshipProfile();
+            if (p.flagship) {
+                p.mipSkip = 0;
+                p.g.shadows = 3;
+                p.g.bloom = true;
+                p.g.anisotropy = 16;
+                if (p.g.grassDensity <= 0) p.g.grassDensity = 1;
+                p.fxTerrain = p.fxShafts = p.fxAo = p.fxClouds = p.fxHaze = p.fxWater = true;
+            }
             return p;
         }
 
@@ -430,7 +450,7 @@ public final class FalloutEngine {
             // otherwise shimmer: cheap on tile-based mobile GPUs, resolved in tile memory.
             // The picture rows the player sets in the game's own settings page: the launcher
             // gives a first value only ("?"), except in the GPU safe mode.
-            set.put("anti-aliasing", safe > 0 ? "FXAA" : quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? "?2x" : "?FXAA");
+            set.put("anti-aliasing", flagship ? "?4x" : safe > 0 ? "FXAA" : quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? "?2x" : "?FXAA");
             // No upscaler on a phone: FSR 3.1's compute passes at full precision (the
             // Adreno driver reports no 16-bit floats) are heavier than the pixels they save.
             set.put("upscaler", "Off");
@@ -467,7 +487,7 @@ public final class FalloutEngine {
             // and cloud/terrain shadows, light shafts, water effects, the mesh/terrain blend
             // (a 1536² rgba16f atlas), anti-tiling, hazes; sun shadow maps at 2048, not 4096.
             boolean highClass = quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH;
-            set.put("shadow-resolution", "2048");
+            set.put("shadow-resolution", flagship ? "4096" : "2048");
             for (String k : new String[]{"fine-shadows", "sharpen", "mesh-terrain-blend", "terrain-shadows"}) {
                 set.put(k, "0");
             }
@@ -641,7 +661,8 @@ public final class FalloutEngine {
             }
         }
         com.wastelanddroid.game.DeviceProfile.Quality q = quality(context);
-        int base = q == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? 810
+        int base = com.wastelanddroid.game.DeviceProfile.flagshipProfile() ? 1080
+                : q == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? 810
                 : q == com.wastelanddroid.game.DeviceProfile.Quality.MEDIUM ? 660
                 : com.wastelanddroid.game.DeviceProfile.veryLow() ? 360 : 480;
         int scale = Math.max(50, Math.min(100, prefs.getInt(Prefs.RES_SCALE, 100)));

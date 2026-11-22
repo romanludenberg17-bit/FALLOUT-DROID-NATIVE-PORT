@@ -5870,6 +5870,10 @@ window.__fdExternalModStart = function() {
 
 window.__fdExternalModDone = function(res) {
   fdInstallingId = null;
+  if (res === 'OK_TEX') {
+    res = 'OK';
+    setTimeout(function(){ if (typeof showToast === 'function') showToast('Реплейсер тела установлен, но текстур тела в Data нет: поставьте и текстуры тела (для Type 6 — текстуры Type3), иначе тело выглядит со складками.'); }, 2500);
+  }
   if (res === 'OK') {
     setModStoreProgress(true, 100, 'Мод распакован в нужные папки и подключён в Менеджере модов!');
     if (typeof showToast === 'function') showToast('Мод установлен! Плагины .esm/.esp добавлены в Менеджер модов.');

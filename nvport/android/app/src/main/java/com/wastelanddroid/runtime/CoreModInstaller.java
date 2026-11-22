@@ -114,6 +114,8 @@ public class CoreModInstaller {
                 ensurePlugin(gameDir, f);
             }
         }
+        // A body replacer without the body's textures: installed, with a word on what to add.
+        if ("OK".equals(r.code) && r.needsBodyTextures) return "OK_TEX";
         return r.code;
     }
 

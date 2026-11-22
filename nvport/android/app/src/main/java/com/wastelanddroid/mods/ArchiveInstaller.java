@@ -33,6 +33,22 @@ public final class ArchiveInstaller {
         public String code = ERR;
         public String detail = "";
         public final List<String> files = new ArrayList<>();
+        /** A body mesh came without the body's skin textures, none loose in Data either. */
+        public boolean needsBodyTextures;
+    }
+
+    /** Body meshes installed with no body skin texture in Data (Type 6 needs Type3's). */
+    static boolean missingBodyTextures(List<String> files, File dataDir) {
+        boolean female = false, male = false;
+        for (String f : files) {
+            String l = f.replace('\\', '/').toLowerCase(Locale.ROOT);
+            if (l.endsWith("femaleupperbody.nif")) female = true;
+            else if (l.endsWith("/upperbody.nif") && l.contains("characters/_male")) male = true;
+        }
+        if (female && !new File(dataDir, "textures/characters/female/upperbodyfemale.dds").exists()
+                && !com.wastelanddroid.util.Files2Exists.ci(dataDir, "textures/characters/female/upperbodyfemale.dds")) return true;
+        return male && !new File(dataDir, "textures/characters/male/upperbodymale.dds").exists()
+                && !com.wastelanddroid.util.Files2Exists.ci(dataDir, "textures/characters/male/upperbodymale.dds");
     }
 
     private interface Visitor {
@@ -299,6 +315,7 @@ public final class ArchiveInstaller {
                 }
             });
             r.code = r.files.isEmpty() ? ERR_EMPTY : OK;
+            if (!r.files.isEmpty()) r.needsBodyTextures = missingBodyTextures(r.files, dataDir);
             return r;
         } catch (Throwable t) {
             r.code = ERR;

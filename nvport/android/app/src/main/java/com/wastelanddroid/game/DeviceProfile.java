@@ -127,6 +127,15 @@ public final class DeviceProfile {
         return key.matches(".*(sm7475|sm7550|sm7675|sm7750|sm8450|sm8475|sm8550|sm8635|sm8650|sm8735|sm8750|sm8845|sm8850).*");
     }
 
+    /**
+     * The Galaxy S25 Ultra (SM-S938*, Snapdragon 8 Elite, 12 GB): the owner's flagship
+     * profile, every effect on at 1080p (FalloutEngine.Profile).
+     */
+    public static boolean flagshipProfile() {
+        String m = Build.MODEL == null ? "" : Build.MODEL.toUpperCase(Locale.ROOT);
+        return m.startsWith("SM-S938");
+    }
+
     /** The GPU family of the chip, for the launcher. */
     public static String gpuName() {
         String c = chipName();
