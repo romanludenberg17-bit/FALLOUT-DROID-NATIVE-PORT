@@ -317,6 +317,10 @@ public class PipBoyBridge extends WebViewClient {
             Prefs.get(mainActivity).edit().putString("touch_mode", "trackpad").commit();
             return true;
         }
+        if (strSubstring.equals("smart_hide_on") || strSubstring.equals("smart_hide_off")) {
+            Prefs.get(mainActivity).edit().putBoolean("smart_hide", strSubstring.endsWith("_on")).commit();
+            return true;
+        }
         if (strSubstring.equals("mouse_auto")) {
             Prefs.get(mainActivity).edit().putString("touch_mode", "auto").commit();
             return true;

@@ -3604,6 +3604,16 @@ body.gamepad-connected-mode #ingame-controls-layer {
               </div>
               <div class="setting-row">
                 <div>
+                  <div class="setting-name">Умное скрытие кнопок</div>
+                  <div class="setting-hint">В диалогах, Пип-Бое, меню паузы и окнах сообщений остаются только кнопки меню (Esc, Tab, E, R, Enter); экран работает как мышь</div>
+                </div>
+                <div class="seg-group">
+                  <button class="seg-btn active" id="smart-hide-on" onclick="setSmartHide(true)">Вкл</button>
+                  <button class="seg-btn" id="smart-hide-off" onclick="setSmartHide(false)">Выкл</button>
+                </div>
+              </div>
+              <div class="setting-row">
+                <div>
                   <div class="setting-name">Поддержка контроллера (Bluetooth / USB XInput)</div>
                   <div class="setting-hint">Полностью автоматическое переключение между экранными кнопками и геймпадом при нажатии любой кнопки</div>
                 </div>
@@ -4476,6 +4486,7 @@ function refreshHeroGameStatus() {
 window.__fdInitialChecked = false;
 window.__fdSyncNative = function(d) {
   if (!d) return;
+  if ('smartHide' in d && typeof setSmartHide === 'function') setSmartHide(!!d.smartHide, true);
   window.__nativeInstallPct = d.installPct || 0;
   window.__nativeInstallState = d.installState || 0;
   window.__nativeInstallState = d.installState || 0;
@@ -4909,6 +4920,14 @@ function setFpsLimit(fps) {
   });
   const qfps = document.getElementById('qspec-fps');
   if (qfps) qfps.textContent = fps + ' FPS (Havok OK)';
+}
+
+function setSmartHide(on, fromNative) {
+  const a = document.getElementById('smart-hide-on');
+  const b = document.getElementById('smart-hide-off');
+  if (a) a.classList.toggle('active', !!on);
+  if (b) b.classList.toggle('active', !on);
+  if (!fromNative) triggerNativeScheme('falloutpicker://smart_hide_' + (on ? 'on' : 'off'));
 }
 
 function setFalloutDroidMouseMode(mode) {

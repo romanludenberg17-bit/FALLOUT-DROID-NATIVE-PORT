@@ -63,6 +63,40 @@ public class ScreenKeysOverlay extends View {
     private boolean invertY, haptics, tapFires;
     private String mode;
 
+    // ---- smart hiding: in menus only the menu keys stay and the screen is a pointer
+    private boolean smartHide = true;
+    private boolean menuMode;
+    /**
+     * Keys that stay in menus: Esc (pause), Tab (Pip-Boy), Enter, E (accept / take), R (take
+     * all), Q, Space, V (V.A.T.S.: its target screen frees the pointer), right mouse button.
+     */
+    private static final int[] MENU_CODES = {1, 15, 28, 18, 19, 16, 57, 47, 273};
+
+    private boolean menuKey(ScreenKey k) {
+        for (int c : k.codes) for (int m : MENU_CODES) if (c == m) return true;
+        return false;
+    }
+
+    /** Hidden now (smart hiding in a menu, or a hidden key). */
+    private boolean hiddenNow(ScreenKey k) {
+        return k.shape == 10 || (menuMode && !editing && !menuKey(k));
+    }
+
+    /** The engine says a menu, the Pip-Boy, a conversation or the pause menu is up. */
+    public void setMenuMode(boolean on) {
+        on = on && smartHide;
+        if (on == menuMode) return;
+        // Held keys (a stick, a pressed key) let go; latched toggles (sneak) stay on.
+        for (List<Integer> c : held.values()) press(c, false);
+        for (Integer k : pressed.values()) if (k != null && k < keys.size() && !latched.contains(k)) press(keys.get(k).codes, false);
+        held.clear();
+        pressed.clear();
+        armed.clear();
+        lookId = -1;
+        menuMode = on;
+        invalidate();
+    }
+
     // ---- editor mode (ControlsEditorActivity)
     private boolean editing;
     private int dragKey = -1;
@@ -99,6 +133,7 @@ public class ScreenKeysOverlay extends View {
         haptics = FalloutInput.haptics(c);
         tapFires = FalloutInput.tapFires(c);
         mode = Prefs.get(c).getString("touch_mode", "auto");
+        smartHide = Prefs.get(c).getBoolean("smart_hide", true);
         invalidate();
     }
 
@@ -117,7 +152,7 @@ public class ScreenKeysOverlay extends View {
         int w = getWidth(), h = getHeight();
         for (int i = 0; i < keys.size(); i++) {
             ScreenKey k = keys.get(i);
-            if (k.shape == 10) continue;
+            if (hiddenNow(k)) continue;
             float cx = k.x * w, cy = k.y * h, hh = dp(k.size) / 2f, hw = half(k);
             boolean down = pressed.containsValue(i) || latched.contains(i) || armed.containsKey(i);
             int a = Math.round(255 * Math.max(0.1f, Math.min(1f, k.opacity)) * (down ? 1f : 0.75f));
@@ -207,6 +242,7 @@ public class ScreenKeysOverlay extends View {
         int w = getWidth(), h = getHeight();
         for (int i = keys.size() - 1; i >= 0; i--) {
             ScreenKey k = keys.get(i);
+            if (menuMode && !editing && !menuKey(k)) continue;
             float cx = k.x * w, cy = k.y * h, hh = dp(k.size) / 2f + dp(6), hw = half(k) + dp(6);
             if (Math.abs(x - cx) <= hw && Math.abs(y - cy) <= hh) return i;
         }
@@ -281,7 +317,7 @@ public class ScreenKeysOverlay extends View {
                 lastY = downY = y;
                 downAt = t;
                 lookMoved = false;
-                if ("direct".equals(mode)) NativeInput.cursorTo(x, y);
+                if (direct()) NativeInput.pointTo(x, y);
             }
             return;
         }
@@ -304,14 +340,19 @@ public class ScreenKeysOverlay extends View {
         invalidate();
     }
 
+    /** The finger is the pointer: "direct" mode, or any menu. */
+    private boolean direct() {
+        return menuMode || "direct".equals(mode);
+    }
+
     private void pointerMove(int id, float x, float y) {
         if (id == lookId) {
             float dx = x - lastX, dy = y - lastY;
             lastX = x;
             lastY = y;
             if (Math.hypot(x - downX, y - downY) > dp(TAP_SLOP_DP)) lookMoved = true;
-            if ("direct".equals(mode)) {
-                NativeInput.cursorTo(x, y);
+            if (direct()) {
+                NativeInput.pointTo(x, y);
             } else if (dx != 0 || dy != 0) {
                 NativeInput.mouseMove(dx * sens, (invertY ? -dy : dy) * sens);
             }
@@ -338,8 +379,8 @@ public class ScreenKeysOverlay extends View {
         if (id == lookId) {
             lookId = -1;
             boolean tap = !lookMoved && t >= 0 && t - downAt <= TAP_MS;
-            if (tap && (tapFires || !"trackpad".equals(mode))) {
-                if (!"trackpad".equals(mode)) NativeInput.cursorTo(x, y);
+            if (tap && (tapFires || menuMode || !"trackpad".equals(mode))) {
+                if (menuMode || !"trackpad".equals(mode)) NativeInput.pointTo(x, y);
                 NativeInput.key(272, true);
                 NativeInput.key(272, false);
             }

@@ -27,9 +27,27 @@ public final class DeviceProfile {
         this.soc = str;
     }
 
+    /**
+     * The device's class for the native engine, by SoC (GPU power), RAM second:
+     * HIGH: Snapdragon 8 Gen 3 / 8s Gen 3 / 8 Elite / 8 Gen 5 / 8 Elite Gen 5, Dimensity 9300+,
+     * Exynos 2500; MEDIUM: Snapdragon 8 Gen 1..2, 8+ Gen 1, 888, 7+ Gen 3, Dimensity 8200..8400,
+     * Exynos 2400, Tensor G3..G5; LOW: the rest (Helio G99, Snapdragon 6/7 Gen x, Dimensity 7xxx).
+     */
     public static Quality autoQuality(Context context) {
-        String lowerCase = socModel().toLowerCase(Locale.ROOT);
-        return (lowerCase.matches(".*sm8[6-9]\\d0.*") || lowerCase.contains("8 elite")) ? totalRamMb(context) >= 11000 ? Quality.HIGH : Quality.MEDIUM : lowerCase.matches(".*sm8(4|5)\\d0.*") ? Quality.MEDIUM : Quality.LOW;
+        String soc = (socModel() + " " + Build.HARDWARE + " " + Build.BOARD).toLowerCase(Locale.ROOT);
+        long ram = totalRamMb(context);
+        Quality q;
+        if (soc.matches(".*(sm8[6-9][0-9]{2}|sm8635|sm8735|mt699[0-9]|mt6989|s5e9955|8 elite).*")) {
+            q = Quality.HIGH;
+        } else if (soc.matches(".*(sm8[3-5][0-9]{2}|sm7675|sm7750|mt689[6-9]|s5e9945|zuma|laguna|tensor g[3-5]).*")) {
+            q = Quality.MEDIUM;
+        } else {
+            q = Quality.LOW;
+        }
+        // The engine and the GPU share the RAM: less than 8 GB holds a class back.
+        if (q == Quality.HIGH && ram < 7000) q = Quality.MEDIUM;
+        if (q == Quality.MEDIUM && ram < 5500) q = Quality.LOW;
+        return q;
     }
 
     public static DeviceProfile create(Context context, Quality quality, int i) {

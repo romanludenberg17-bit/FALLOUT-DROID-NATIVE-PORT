@@ -219,7 +219,8 @@ public class MainActivityTelegram implements FalloutEngine.Progress, Runnable, C
         String strAccent = Ui.accent(mainActivity);
         sb.append(",theme:'");
         sb.append(strAccent);
-        String string = sharedPreferences.getString(Prefs.QUALITY, "medium");
+        String string = sharedPreferences.getString(Prefs.QUALITY, "auto");
+        if ("auto".equals(string)) string = FalloutEngine.quality(mainActivity).name().toLowerCase(java.util.Locale.ROOT);
         sb.append("',preset:'");
         sb.append(string);
         String string2 = sharedPreferences.getString("resolution", "1280x720");
@@ -231,6 +232,8 @@ public class MainActivityTelegram implements FalloutEngine.Progress, Runnable, C
         int i3 = sharedPreferences.getInt(FalloutInput.LOOK_SENS, 115);
         sb.append(",mouseSpeed:");
         sb.append(i3);
+        sb.append(",smartHide:");
+        sb.append(sharedPreferences.getBoolean("smart_hide", true) ? 1 : 0);
         String strListMods = ModManager.listMods(gameDef.gameDir(mainActivity));
         sb.append(",fnvAllMods:'");
         sb.append(jsEsc(strListMods));

@@ -49,7 +49,50 @@ public class NativeGameActivity extends GameActivity {
         }
         gamepad = new GamepadInput(new InputBridge(), mapping);
         gamepad.start();
+        applyRenderScale();
+        ui.postDelayed(pollUi, 500);
     }
+
+    // ---- render scale: the surface is drawn at the launcher's resolution and scaled up by
+    // the display hardware (Settings / Pip-Boy "Разрешение"); the cursor follows the scale.
+    private void applyRenderScale() {
+        if (mSurfaceView == null) return;
+        mSurfaceView.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> fitSurface(r - l, b - t));
+    }
+
+    private int fixedW, fixedH;
+
+    private void fitSurface(int vw, int vh) {
+        if (vw <= 0 || vh <= 0) return;
+        int target = FalloutEngine.renderHeight(this);
+        int th = Math.min(vh, target <= 0 ? vh : target);
+        int tw = Math.round(th * (float) vw / vh);
+        tw &= ~1;
+        th &= ~1;
+        if (tw != fixedW || th != fixedH) {
+            fixedW = tw;
+            fixedH = th;
+            if (th < vh) mSurfaceView.getHolder().setFixedSize(tw, th);
+            else mSurfaceView.getHolder().setSizeFromLayout();
+            android.util.Log.i("NVForever", "render surface " + tw + "x" + th + " on a " + vw + "x" + vh + " view");
+        }
+        NativeInput.setViewToSurface(fixedW / (float) vw, fixedH / (float) vh);
+    }
+
+    // ---- smart hiding of the on-screen keys: the engine says when a menu is up
+    private final android.os.Handler ui = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable pollUi = new Runnable() {
+        @Override
+        public void run() {
+            int state = 0;
+            try {
+                state = NativeInput.uiState();
+            } catch (UnsatisfiedLinkError ignored) {
+            }
+            if (overlay != null) overlay.setMenuMode(state >= 2);
+            ui.postDelayed(this, 120);
+        }
+    };
 
     @Override
     protected void onResume() {
@@ -67,6 +110,7 @@ public class NativeGameActivity extends GameActivity {
 
     @Override
     protected void onDestroy() {
+        ui.removeCallbacks(pollUi);
         if (gamepad != null) gamepad.stop();
         boolean ending = isFinishing();
         super.onDestroy();
@@ -142,7 +186,7 @@ public class NativeGameActivity extends GameActivity {
         if (captured) {
             NativeInput.mouseMove(e.getX(), e.getY());
         } else {
-            NativeInput.cursorTo(e.getX(), e.getY());
+            NativeInput.pointTo(e.getX(), e.getY());
         }
         if (e.getActionMasked() == MotionEvent.ACTION_SCROLL) {
             NativeInput.scroll(e.getAxisValue(MotionEvent.AXIS_VSCROLL));

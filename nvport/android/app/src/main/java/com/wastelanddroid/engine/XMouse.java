@@ -24,7 +24,7 @@ public final class XMouse {
     }
 
     public static void moveTo(Context context, int x, int y) {
-        NativeInput.cursorTo(x, y);
+        NativeInput.pointTo(x, y);
     }
 
     /** @param button X11 button: 1 left, 2 middle, 3 right. */

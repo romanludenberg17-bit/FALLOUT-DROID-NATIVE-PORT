@@ -13,8 +13,27 @@ public final class NativeInput {
     /** Relative mouse motion in pixels (look). */
     public static native void mouseMove(float dx, float dy);
 
-    /** Absolute cursor position in surface pixels (menus, Pip-Boy). */
-    public static native void cursorTo(float x, float y);
+    /** Absolute cursor position in surface pixels (menus, Pip-Boy). Use {@link #pointTo}. */
+    private static native void cursorTo(float x, float y);
+
+    /**
+     * What the game shows: 0 not known yet, 1 playing, 2 a menu / Pip-Boy / conversation /
+     * message box / pause menu (the pointer is free), 3 a film or a scene (no pointer).
+     */
+    public static native int uiState();
+
+    /** View pixels -> surface pixels (the surface is drawn smaller and scaled up: render scale). */
+    private static volatile float scaleX = 1f, scaleY = 1f;
+
+    public static void setViewToSurface(float sx, float sy) {
+        scaleX = sx;
+        scaleY = sy;
+    }
+
+    /** Absolute cursor position in view (screen) pixels. */
+    public static void pointTo(float x, float y) {
+        cursorTo(x * scaleX, y * scaleY);
+    }
 
     /** Wheel, in lines (positive = up). */
     public static native void scroll(float lines);

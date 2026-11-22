@@ -1,3 +1,71 @@
+diff --git a/crates/fnv-install/src/lib.rs b/crates/fnv-install/src/lib.rs
+index bf36d9e..5968bf0 100644
+--- a/crates/fnv-install/src/lib.rs
++++ b/crates/fnv-install/src/lib.rs
+@@ -48,6 +48,35 @@ pub const REQUIRED_DATA_FILES: [&str; 8] = [
+     "Update.bsa",
+ ];
+ 
++/// [nvport] Fallout 3 on its own (`NVPORT_GAME=fo3`, set by the Android launcher): its
++/// master and archives take the place of New Vegas's in the install check.
++pub const FO3_REQUIRED_DATA_FILES: [&str; 6] = [
++    "Fallout3.esm",
++    "Fallout - Textures.bsa",
++    "Fallout - Meshes.bsa",
++    "Fallout - Voices.bsa",
++    "Fallout - Sound.bsa",
++    "Fallout - Misc.bsa",
++];
++
++/// [nvport] Fallout 3's add-on masters.
++pub const FO3_ADDON_MASTERS: [&str; 5] = ["Anchorage.esm", "ThePitt.esm", "BrokenSteel.esm", "PointLookout.esm", "Zeta.esm"];
++
++/// [nvport] Whether this run plays Fallout 3 on its own (`NVPORT_GAME=fo3`).
++pub fn is_fo3() -> bool {
++    std::env::var("NVPORT_GAME").is_ok_and(|v| v.trim().eq_ignore_ascii_case("fo3"))
++}
++
++/// The files this run's game must have in Data (New Vegas's, or Fallout 3's).
++pub fn required_data_files() -> &'static [&'static str] {
++    if is_fo3() { &FO3_REQUIRED_DATA_FILES } else { &REQUIRED_DATA_FILES }
++}
++
++/// The master this run's game is built on.
++pub fn game_master() -> &'static str {
++    required_data_files()[0]
++}
++
+ /// The add-on masters NVForever loads when they are present (`fnv_vfs::DEFAULT_PLUGINS`
+ /// after `FalloutNV.esm`).
+ pub const ADDON_MASTERS: [&str; 9] = [
+@@ -92,7 +121,7 @@ impl GameInstall {
+     /// case-sensitive file system may name them (`data/falloutnv.esm`; #995).
+     pub fn open(path: impl AsRef<Path>) -> Result<GameInstall, InstallError> {
+         let p = canonical(path.as_ref())?;
+-        let has_master = |d: &Path| child_ci(d, "FalloutNV.esm").is_some_and(|f| f.is_file());
++        let has_master = |d: &Path| child_ci(d, game_master()).is_some_and(|f| f.is_file());
+         let (root, data) = match child_ci(&p, "Data").filter(|d| d.is_dir() && has_master(d)) {
+             Some(d) => (p.clone(), d),
+             None if has_master(&p) => (p.parent().map(Path::to_path_buf).unwrap_or_else(|| p.clone()), p.clone()),
+@@ -113,7 +142,7 @@ impl GameInstall {
+ 
+     /// The [`REQUIRED_DATA_FILES`] that are absent or empty, in that list's order.
+     pub fn missing_files(&self) -> Vec<String> {
+-        REQUIRED_DATA_FILES
++        required_data_files()
+             .iter()
+             .filter(|n| self.data_file(n).and_then(|p| p.metadata().ok()).is_none_or(|m| m.len() == 0))
+             .map(|n| n.to_string())
+@@ -132,7 +161,8 @@ impl GameInstall {
+ 
+     /// The [`ADDON_MASTERS`] present in `Data`.
+     pub fn addon_masters(&self) -> Vec<&'static str> {
+-        ADDON_MASTERS.into_iter().filter(|n| self.data_file(n).is_some()).collect()
++        let addons: &[&'static str] = if is_fo3() { &FO3_ADDON_MASTERS } else { &ADDON_MASTERS };
++        addons.iter().copied().filter(|n| self.data_file(n).is_some()).collect()
+     }
+ }
+ 
 diff --git a/engine/Cargo.lock b/engine/Cargo.lock
 index 5cdaf9e..0715284 100644
 --- a/engine/Cargo.lock
@@ -34,6 +102,235 @@ index 5cdaf9e..0715284 100644
   "pkg-config",
   "vcpkg",
  ]
+diff --git a/engine/nvf-assets/src/texture.rs b/engine/nvf-assets/src/texture.rs
+index 4f6f70c..c60af4c 100644
+--- a/engine/nvf-assets/src/texture.rs
++++ b/engine/nvf-assets/src/texture.rs
+@@ -128,7 +128,7 @@ pub(crate) fn worker_texture(
+     }
+     workers.load_once(key, images, |path| {
+         let bytes = data.read(path).ok_or_else(|| "not in any archive".to_string())?;
+-        let mut decoded = dds_texture(&bytes, usage, bc_supported, false)?;
++        let mut decoded = dds_texture_skip(&bytes, usage, bc_supported, false, mip_skip_for(path))?;
+         decoded.image.texture_descriptor.label = Some(folder_label(path));
+         Ok(decoded)
+     })
+@@ -232,34 +232,68 @@ pub fn dds_image_top(bytes: &[u8], srgb: bool, bc_supported: bool) -> Result<Ima
+ }
+ 
+ fn dds_texture(bytes: &[u8], usage: TextureUsage, bc_supported: bool, top_only: bool) -> Result<DecodedTexture, String> {
+-    crate::guard::guarded(|| dds_image_unguarded(bytes, usage, bc_supported, top_only))
++    dds_texture_skip(bytes, usage, bc_supported, top_only, 0)
+ }
+ 
+-fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, top_only: bool) -> Result<DecodedTexture, String> {
++fn dds_texture_skip(bytes: &[u8], usage: TextureUsage, bc_supported: bool, top_only: bool, skip: u32) -> Result<DecodedTexture, String> {
++    crate::guard::guarded(|| dds_image_unguarded(bytes, usage, bc_supported, top_only, skip))
++}
++
++/// [nvport] Mip levels a world texture loses on a phone (`NVF_TEX_MIP_SKIP`, 0 to 3; the
++/// original's iTexMipMapSkip): each level quarters the texture's memory. Interface
++/// textures keep every level (menus cut pictures out of them by pixel rectangles).
++pub fn mip_skip_for(path: &str) -> u32 {
++    static SKIP: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
++    let skip = *SKIP.get_or_init(|| std::env::var("NVF_TEX_MIP_SKIP").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(0).min(3));
++    if skip == 0 {
++        return 0;
++    }
++    let p = path.to_ascii_lowercase();
++    if p.contains("interface\\") || p.contains("interface/") || p.contains("menus") || p.contains("fonts") {
++        return 0;
++    }
++    skip
++}
++
++fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, top_only: bool, skip: u32) -> Result<DecodedTexture, String> {
+     let srgb = usage == TextureUsage::Color;
+     let dds = Dds::parse(bytes).map_err(|e| e.to_string())?;
+     if dds.header.is_cubemap() {
+         return Err("cube map (not used by the viewer)".into());
+     }
+-    let (w, h) = (dds.header.width, dds.header.height);
+-    let levels = if top_only { &dds.levels[0][..1] } else { &dds.levels[0][..] };
++    // [nvport] Skipped levels: only while the texture keeps at least 64 texels a side
++    // and a smaller level is stored.
++    // [nvport] A GPU without BC formats (Mali) gets DXT decoded to RGBA8 here: 4 to 8 times
++    // the bytes, so a phone drops one more level for it.
++    let cpu_dxt = !bc_supported && matches!(dds.format, Format::Dxt1 | Format::Dxt3 | Format::Dxt5);
++    let skip = if cpu_dxt && cfg!(target_os = "android") && !top_only { (skip + 1).min(3) } else { skip };
++    let mut base = 0u32;
++    if !top_only {
++        while base < skip && (base as usize + 1) < dds.levels[0].len() {
++            let (nw, nh) = dds.header.level_dims(base + 1);
++            if nw < 64 || nh < 64 || nw % 4 != 0 || nh % 4 != 0 {
++                break;
++            }
++            base += 1;
++        }
++    }
++    let (w, h) = if base == 0 { (dds.header.width, dds.header.height) } else { dds.header.level_dims(base) };
++    let levels = if top_only { &dds.levels[0][..1] } else { &dds.levels[0][base as usize..] };
+     // The GPU takes block formats only when the top level's sides are multiples of 4.
+     let aligned = w % 4 == 0 && h % 4 == 0;
+     // The colour space follows the role, never a DX10 header's `_SRGB` code (#2981,
+     // dds.md §6): legacy files state none, and the hint is only reported.
+     let (format, data) = match dds.format {
+         Format::Dxt1 | Format::Dxt3 | Format::Dxt5 => {
+-            if !aligned {
++            if !aligned || !bc_supported {
+                 // Such a texture (a mod's 179×196 DXT5, dds.md §3) is decoded here
+-                // instead [#2164].
++                // instead [#2164]; [nvport] so is every DXT texture on a GPU without BC.
+                 let mut out = Vec::new();
+                 for (m, l) in levels.iter().enumerate() {
+-                    let (lw, lh) = dds.header.level_dims(m as u32);
++                    let (lw, lh) = dds.header.level_dims(base + m as u32);
+                     out.extend(fnv_dds::decode_blocks(dds.format, lw, lh, l).ok_or("block data too short")?);
+                 }
+                 (if srgb { TextureFormat::Rgba8UnormSrgb } else { TextureFormat::Rgba8Unorm }, out)
+-            } else if !bc_supported {
+-                return Err("GPU lacks BC texture support".into());
+             } else {
+                 let f = match (dds.format, srgb) {
+                     (Format::Dxt1, true) => TextureFormat::Bc1RgbaUnormSrgb,
+@@ -293,7 +327,7 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
+             } else {
+                 let mut out = Vec::new();
+                 for (m, level) in levels.iter().enumerate() {
+-                    let (lw, lh) = dds.header.level_dims(m as u32);
++                    let (lw, lh) = dds.header.level_dims(base + m as u32);
+                     let values = fnv_dds::decode_bc4(dds.format, lw, lh, level).ok_or("invalid BC4 block data")?;
+                     if signed {
+                         out.extend(values.into_iter().map(|v| (v * 127.0).round() as i8 as u8));
+@@ -314,7 +348,7 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
+             } else {
+                 let mut out = Vec::new();
+                 for (m, level) in levels.iter().enumerate() {
+-                    let (lw, lh) = dds.header.level_dims(m as u32);
++                    let (lw, lh) = dds.header.level_dims(base + m as u32);
+                     let pixels = fnv_dds::decode_bc5(dds.format, lw, lh, level).ok_or("invalid BC5 block data")?;
+                     for [r, g] in pixels {
+                         if usage == TextureUsage::Normal {
+@@ -634,7 +668,7 @@ impl TextureCache {
+         let decode_span = bevy::log::info_span!("texture::decode").entered();
+         let result = match read {
+             None => Err("not in any archive".to_string()),
+-            Some(bytes) => dds_texture(&bytes, usage, bc, false),
++            Some(bytes) => dds_texture_skip(&bytes, usage, bc, false, mip_skip_for(&path)),
+         };
+         drop(decode_span);
+         let handle = match result {
+diff --git a/engine/nvf-play/src/script.rs b/engine/nvf-play/src/script.rs
+index c1893ca..dd73720 100644
+--- a/engine/nvf-play/src/script.rs
++++ b/engine/nvf-play/src/script.rs
+@@ -196,6 +196,106 @@ pub struct NewGameStart {
+ /// The new game's start: the marker the opening moves the player to
+ /// (`fnv_game::runner::NEW_GAME_START`) in [`NEW_GAME_CELL`].
+ pub fn new_game_start(lo: &fnv_esm::LoadOrder, schema: &fnv_esm::Schema, index: &WorldIndex) -> Result<NewGameStart, String> {
++    let fnv = fnv_new_game_start(lo, schema, index);
++    if fnv.is_ok() {
++        return fnv;
++    }
++    // [nvport] Another master (Fallout 3 on its own): the start comes from the data.
++    match other_new_game_start(lo, schema, index) {
++        Ok(s) => Ok(s),
++        Err(e) => Err(format!("{}; {e}", fnv.unwrap_err())),
++    }
++}
++
++/// [nvport] The new game's start without Doc Mitchell's house (Fallout3.esm alone):
++/// `NVF_NEW_GAME_MARKER` (a placed reference's Editor ID), else the first marker in an
++/// interior that the start quest refers to (`NVF_CHARGEN_QUEST`, default `MQ01`, Fallout 3's
++/// opening): its stage results and its script name the reference the opening moves the
++/// player to [hypothesis: as VCG00 stage 0 names VCG01PlayerStartMarkerREF], else any
++/// interior reference it names, else the middle of `NVF_NEW_GAME_CELL`.
++fn other_new_game_start(lo: &fnv_esm::LoadOrder, schema: &fnv_esm::Schema, index: &WorldIndex) -> Result<NewGameStart, String> {
++    let interior_of = |r: u32| index.refs.get(&r).and_then(|e| index.cells.get(&e.cell)).filter(|c| c.world.is_none()).map(|c| c.form_id);
++    let start_at = |r: u32, cell: u32| -> Option<NewGameStart> {
++        let p = fnv_world::placed::placement(lo, schema, r)?;
++        Some(NewGameStart { interior: cell, feet: p.position, heading_deg: outcome::heading_deg(p.rotation) })
++    };
++    let edid_of = |rec: &fnv_esm::raw::Record| -> Option<String> {
++        let subs = rec.subrecords().ok()?;
++        let e = subs.iter().find(|s| &s.sig == b"EDID")?;
++        Some(String::from_utf8_lossy(e.data.split(|&b| b == 0).next().unwrap_or(&[])).into_owned())
++    };
++    let find = |sig: &[u8; 4], name: &str| -> Option<(usize, &fnv_esm::raw::Record)> {
++        for (pi, recs) in lo.records.iter().enumerate().rev() {
++            for rec in recs.iter() {
++                if &rec.header.sig == sig && edid_of(rec).is_some_and(|e| e.eq_ignore_ascii_case(name)) {
++                    return Some((pi, *rec));
++                }
++            }
++        }
++        None
++    };
++    if let Ok(name) = std::env::var("NVF_NEW_GAME_MARKER") {
++        for sig in [b"REFR", b"ACHR"] {
++            if let Some((pi, rec)) = find(sig, name.trim()) {
++                if let Some(g) = fnv_world::fields::global(lo, pi, rec.header.form_id) {
++                    if let Some(s) = interior_of(g).and_then(|c| start_at(g, c)) {
++                        info!("new game: marker {name} (NVF_NEW_GAME_MARKER)");
++                        return Ok(s);
++                    }
++                }
++            }
++        }
++    }
++    let quest = std::env::var("NVF_CHARGEN_QUEST").ok().filter(|q| !q.trim().is_empty()).unwrap_or_else(|| "MQ01".to_string());
++    if let Some((pi, qrec)) = find(b"QUST", quest.trim()) {
++        // Every reference the quest's stage results and its script name, in record order.
++        let mut named: Vec<u32> = Vec::new();
++        let mut collect = |pi: usize, rec: &fnv_esm::raw::Record, named: &mut Vec<u32>| {
++            if let Ok(subs) = rec.subrecords() {
++                for sub in subs.iter().filter(|s| &s.sig == b"SCRO" && s.data.len() >= 4) {
++                    let local = u32::from_le_bytes([sub.data[0], sub.data[1], sub.data[2], sub.data[3]]);
++                    if let Some(g) = fnv_world::fields::global(lo, pi, local) {
++                        if !named.contains(&g) {
++                            named.push(g);
++                        }
++                    }
++                }
++            }
++        };
++        collect(pi, qrec, &mut named);
++        if let Ok(subs) = qrec.subrecords() {
++            if let Some(scri) = subs.iter().find(|s| &s.sig == b"SCRI" && s.data.len() >= 4) {
++                let local = u32::from_le_bytes([scri.data[0], scri.data[1], scri.data[2], scri.data[3]]);
++                if let Some((spi, srec)) = fnv_world::fields::global(lo, pi, local).and_then(|g| fnv_world::fields::winner(lo, g)) {
++                    collect(spi, srec, &mut named);
++                }
++            }
++        }
++        // XMarkerHeading (0x34) and XMarker (0x3B) are where scripts move the player.
++        let is_marker = |r: u32| fnv_world::placed::placement(lo, schema, r).and_then(|p| p.base).is_some_and(|b| b == 0x34 || b == 0x3B);
++        let in_interiors: Vec<(u32, u32)> = named.iter().filter_map(|&r| interior_of(r).map(|c| (r, c))).collect();
++        let pick = in_interiors.iter().find(|&&(r, _)| is_marker(r)).or_else(|| in_interiors.first());
++        if let Some(&(r, c)) = pick {
++            if let Some(s) = start_at(r, c) {
++                info!("new game: {quest} names reference {r:08X} in interior {c:08X}: the start");
++                return Ok(s);
++            }
++        }
++    }
++    if let Ok(cell_name) = std::env::var("NVF_NEW_GAME_CELL") {
++        if let Some(c) = index.cell_by_name(cell_name.trim()).filter(|c| c.world.is_none()) {
++            let ps: Vec<[f32; 3]> = c.refs.iter().filter_map(|&r| fnv_world::placed::placement(lo, schema, r)).map(|p| p.position).collect();
++            if !ps.is_empty() {
++                let n = ps.len() as f32;
++                let mid = ps.iter().fold([0.0f32; 3], |a, p| [a[0] + p[0] / n, a[1] + p[1] / n, a[2] + p[2] / n]);
++                return Ok(NewGameStart { interior: c.form_id, feet: mid, heading_deg: 0.0 });
++            }
++        }
++    }
++    Err(format!("no start found for quest {quest} (set NVF_NEW_GAME_MARKER or NVF_NEW_GAME_CELL)"))
++}
++
++fn fnv_new_game_start(lo: &fnv_esm::LoadOrder, schema: &fnv_esm::Schema, index: &WorldIndex) -> Result<NewGameStart, String> {
+     let cell = index.cell_by_name(NEW_GAME_CELL).filter(|c| c.world.is_none()).ok_or_else(|| format!("no interior cell {NEW_GAME_CELL}"))?;
+     for &r in &cell.refs {
+         let Some((pi, rec)) = fnv_world::fields::winner(lo, r) else { continue };
 diff --git a/engine/nvforever/Cargo.toml b/engine/nvforever/Cargo.toml
 index bbdb0c0..ab27c2a 100644
 --- a/engine/nvforever/Cargo.toml
@@ -66,10 +363,10 @@ index bbdb0c0..ab27c2a 100644
  libloading = "0.8.9"
 diff --git a/engine/nvforever/src/android_input.rs b/engine/nvforever/src/android_input.rs
 new file mode 100644
-index 0000000..222aa92
+index 0000000..12cc350
 --- /dev/null
 +++ b/engine/nvforever/src/android_input.rs
-@@ -0,0 +1,152 @@
+@@ -0,0 +1,179 @@
 +//! [nvport] Input from the Android launcher (Fallout Droid): on-screen keys, touch look,
 +//! gamepads mapped to PC keys and physical keyboards/mice arrive through JNI
 +//! (`com.wastelanddroid.engine.NativeInput`) and are written as Bevy's own input messages,
@@ -85,7 +382,14 @@ index 0000000..222aa92
 +use bevy::input::mouse::{MouseButton, MouseButtonInput, MouseMotion, MouseScrollUnit, MouseWheel};
 +use bevy::input::{ButtonState, InputSystems};
 +use bevy::prelude::*;
-+use bevy::window::{CursorMoved, PrimaryWindow};
++use bevy::window::{CursorGrabMode, CursorMoved, CursorOptions, PrimaryWindow};
++use std::sync::atomic::{AtomicI32, Ordering};
++
++/// What the game shows, for the launcher's on-screen keys (`NativeInput.uiState`):
++/// 0 not known yet, 1 playing (the pointer is grabbed: all keys), 2 a menu, the Pip-Boy, a
++/// conversation, a message box or the pause menu (the pointer is free: menu keys only),
++/// 3 neither grabbed nor shown (a film, a scene that drives the view).
++static UI_STATE: AtomicI32 = AtomicI32::new(0);
 +
 +enum Ev {
 +    Key(i32, bool),
@@ -132,11 +436,17 @@ index 0000000..222aa92
 +    push(Ev::CursorTo(x, y));
 +}
 +
++/// `NativeInput.uiState()`: see [`UI_STATE`].
++#[unsafe(no_mangle)]
++pub extern "C" fn Java_com_wastelanddroid_engine_NativeInput_uiState(_e: JEnv, _c: JClass) -> i32 {
++    UI_STATE.load(Ordering::Relaxed)
++}
++
 +pub struct AndroidInputPlugin;
 +
 +impl Plugin for AndroidInputPlugin {
 +    fn build(&self, app: &mut App) {
-+        app.add_systems(PreUpdate, drain.before(InputSystems));
++        app.add_systems(PreUpdate, drain.before(InputSystems)).add_systems(Last, publish_ui_state);
 +    }
 +}
 +
@@ -184,6 +494,20 @@ index 0000000..222aa92
 +            }
 +        }
 +    }
++}
++
++/// The game's own pointer rules (nvf_play::player::grab_cursor) say what is on screen.
++fn publish_ui_state(windows: Query<(&Window, &CursorOptions), With<PrimaryWindow>>) {
++    let Ok((window, cursor)) = windows.single() else { return };
++    let state = if !window.focused || cursor.grab_mode != CursorGrabMode::None {
++        // Out of focus the game frees the pointer whatever it shows: keep every key then.
++        1
++    } else if cursor.visible {
++        2
++    } else {
++        3
++    };
++    UI_STATE.store(state, Ordering::Relaxed);
 +}
 +
 +fn mouse_button(code: i32) -> Option<MouseButton> {
@@ -422,3 +746,63 @@ index a6cf138..b455711 100644
      let exit = app.run();
      // The app and its renderer are gone; Streamline shut down before the device and instance it
      // used (dlss/, "Shutdown"). Nothing when Streamline was not loaded.
+diff --git a/engine/nvforever/src/memory_budget.rs b/engine/nvforever/src/memory_budget.rs
+index 0d206a3..29f7260 100644
+--- a/engine/nvforever/src/memory_budget.rs
++++ b/engine/nvforever/src/memory_budget.rs
+@@ -82,7 +82,12 @@ pub const GPU_PRESSURE: (f64, f64) = (0.85, 0.75);
+ /// caches, under `.1` lets go [design: what the machine has free is what paging follows;
+ /// the game's own commit (about 5 GB in a soak) on an 8 GB machine leaves about a quarter
+ /// free, which is not pressed].
++#[cfg(not(target_os = "android"))]
+ pub const RAM_PRESSURE: (f64, f64) = (0.90, 0.80);
++/// [nvport] A phone shares its RAM with the GPU and Android kills a game that leaves too
++/// little free: the caches are pressed much earlier.
++#[cfg(target_os = "android")]
++pub const RAM_PRESSURE: (f64, f64) = (0.72, 0.62);
+ /// The keep limits while pressed: the least the budgets scale to [design: 10 s and 32
+ /// entries were tried first; on a tour slice capped at a 2 GB card they pressed at 77 s
+ /// and never let go (the allocator keeps emptied blocks, #898, so dropping assets does not
+@@ -90,7 +95,11 @@ pub const RAM_PRESSURE: (f64, f64) = (0.90, 0.80);
+ /// 95 ms; streaming-hitches.md §5].
+ pub const PRESSED: KeepLimits = MIN_LIMITS;
+ /// The least the scaled limits go to [design].
++#[cfg(not(target_os = "android"))]
+ const MIN_LIMITS: KeepLimits = KeepLimits { secs: 30.0, max: 128 };
++/// [nvport] Phones: unused assets go after 10 s, at most 48 kept per cache.
++#[cfg(target_os = "android")]
++const MIN_LIMITS: KeepLimits = KeepLimits { secs: 10.0, max: 48 };
+ 
+ /// A GPU budget under this (or not known yet) takes the allocator's small blocks [design:
+ /// the 4 GB card in #2754 reached 0.95 of its budget; a 6 GB card reads a budget under
+@@ -211,6 +220,9 @@ impl Plugin for MemoryBudgetPlugin {
+ pub fn limits_for(ram_mb: Option<u64>, vram_mb: Option<u64>) -> KeepLimits {
+     let share = |have: Option<u64>, full: u64| have.map_or(1.0, |h| (h as f64 / full as f64).min(1.0));
+     let s = share(ram_mb, FULL_RAM_MB).min(share(vram_mb, FULL_VRAM_MB));
++    // [nvport] Android: always the least (the RAM is the GPU's too).
++    #[cfg(target_os = "android")]
++    let s = { let _ = s; 0.0 };
+     let full = KeepLimits::default();
+     KeepLimits { secs: (full.secs * s).round().max(MIN_LIMITS.secs), max: ((full.max as f64 * s).round() as usize).max(MIN_LIMITS.max) }
+ }
+diff --git a/engine/vendor/bevy_winit/src/system.rs b/engine/vendor/bevy_winit/src/system.rs
+index 22ad677..cd70569 100644
+--- a/engine/vendor/bevy_winit/src/system.rs
++++ b/engine/vendor/bevy_winit/src/system.rs
+@@ -619,8 +619,14 @@ pub(crate) fn changed_cursor_options(
+                 continue;
+             };
+             // Don't check the cache for the grab mode. It can change through external means, leaving the cache outdated.
+-            if let Err(err) =
+-                crate::winit_windows::attempt_grab(winit_window, cursor_options.grab_mode)
++            // [nvport] Android has no pointer to grab (touch and the launcher's relative
++            // mouse feed the game): the mode is kept as the game set it, not reverted and
++            // warned about every frame.
++            #[cfg(target_os = "android")]
++            let grab_result: Result<(), winit::error::ExternalError> = { let _ = winit_window; Ok(()) };
++            #[cfg(not(target_os = "android"))]
++            let grab_result = crate::winit_windows::attempt_grab(winit_window, cursor_options.grab_mode);
++            if let Err(err) = grab_result
+             {
+                 warn!(
+                     "Could not set cursor grab mode for window {}: {}",

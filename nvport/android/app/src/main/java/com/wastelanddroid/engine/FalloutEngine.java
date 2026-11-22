@@ -106,7 +106,7 @@ public final class FalloutEngine {
 
     /** Whether the bundled engine can run this game yet. */
     public static boolean supports(GameDef game) {
-        return game == GameDef.FNV;
+        return game == GameDef.FNV || game == GameDef.FO3;
     }
 
     public static Prepared prepare(Context context, GameDef game, File gameDir) {
@@ -121,7 +121,7 @@ public final class FalloutEngine {
             return new Prepared.Error("Не удалось распаковать данные движка: " + e.getMessage());
         }
         File data = findDataDir(gameDir);
-        if (data == null) {
+        if (data == null || findChild(data, masterOf(game)) == null) {
             return new Prepared.Error("В папке " + gameDir + " нет Data/" + masterOf(game));
         }
         File schemas = new File(engineDataDir(context), "schemas");
@@ -137,6 +137,26 @@ public final class FalloutEngine {
         args.add("--nif-schema");
         args.add(new File(schemas, "nif").getAbsolutePath());
         args.add("--window=borderless");
+        Profile profile = Profile.of(context);
+        args.add("env:NVF_TEX_MIP_SKIP=" + profile.mipSkip);
+        profile.addArgs(args);
+        java.util.Map<String, java.util.Map<String, String>> ini = new java.util.LinkedHashMap<>();
+        ini.put("Settings", profile.iniSettings());
+        if (game == GameDef.FO3) {
+            args.add("env:NVF_CHARGEN_QUEST=" + FO3_CHARGEN_QUEST);
+            java.util.Map<String, String> general = new java.util.LinkedHashMap<>();
+            general.put("sCharGenQuest", FO3_CHARGEN_QUEST);
+            general.put("sIntroMovie", findChild(new File(data, "Video"), FO3_INTRO) != null ? FO3_INTRO : "");
+            ini.put("General", general);
+            java.util.Map<String, String> archive = new java.util.LinkedHashMap<>();
+            archive.put("SArchiveList", existingArchives(data, FO3_ARCHIVES));
+            ini.put("Archive", archive);
+        }
+        try {
+            mergeIni(new File(homeDir(context, game.id), "NVForever.ini"), ini);
+        } catch (IOException e) {
+            android.util.Log.w("NVForever", "NVForever.ini: " + e);
+        }
         if (game == GameDef.FO3) {
             args.add("--world");
             args.add("Wasteland");
@@ -166,6 +186,193 @@ public final class FalloutEngine {
         activity.startActivity(intent);
     }
 
+    // ---------------------------------------------------------------- mobile profile
+    /** The launcher's quality (Pip-Boy / Настройки графики) as the engine's numbers. */
+    static final class Profile {
+        com.wastelanddroid.game.DeviceProfile.Quality quality;
+        com.wastelanddroid.game.GraphicsSettings g;
+        int mipSkip, frameCap;
+        boolean custom, fpsCounter;
+
+        static Profile of(Context context) {
+            Profile p = new Profile();
+            p.quality = quality(context);
+            p.g = com.wastelanddroid.game.GraphicsSettings.load(context, p.quality);
+            // textureQuality 0 high, 1 medium, 2 low -> levels skipped; phones always lose one
+            // level below High (FNV's 1024/2048 textures on a 8 GB phone).
+            p.mipSkip = Math.min(3, p.g.textureQuality + (p.quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? 0 : 1));
+            int lock = 0;
+            try {
+                lock = Integer.parseInt(Prefs.get(context).getString(Prefs.FPS_LOCK, "0").replaceAll("[^0-9]", ""));
+            } catch (RuntimeException ignored) {
+            }
+            // Targets: 30 FPS on a low class (Helio G99), 60 on a medium one, up to 120 on a
+            // high one (Snapdragon 8 Gen 5 class: ~100). A chosen lock wins.
+            p.frameCap = lock > 0 ? (lock <= 30 ? 30 : lock <= 60 ? 60 : lock <= 90 ? 90 : 120)
+                    : p.quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? 120 : p.quality == com.wastelanddroid.game.DeviceProfile.Quality.MEDIUM ? 60 : 30;
+            // Sun shadows cost the most and showed artefacts: only when chosen in the
+            // graphics settings (a custom setup), never from a preset.
+            p.custom = Prefs.get(context).getBoolean("gfx_custom", false);
+            p.fpsCounter = Prefs.get(context).getBoolean("fps_counter", true);
+            if (!p.custom) p.g.shadows = 0;
+            if (p.quality == com.wastelanddroid.game.DeviceProfile.Quality.LOW) {
+                if (!p.custom) p.g.grassDensity = 0;
+                p.mipSkip = Math.max(p.mipSkip, 2);
+            }
+            return p;
+        }
+
+        void addArgs(List<String> a) {
+            int vd = Math.max(1, g.viewDistance); // 4 low, 6 medium, 8 high (1..10)
+            boolean high = quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH;
+            boolean low = quality == com.wastelanddroid.game.DeviceProfile.Quality.LOW;
+            // 5 x 5 cells only when asked for (view distance 9+): 3 x 3 keeps phones in budget.
+            add(a, "--radius", vd >= 9 ? 2 : 1);
+            if (low) {
+                // A low class (Mali-G57 and the like): no generated distant terrain, fixed
+                // 60 Hz physics, the game's own LOD only and not far.
+                a.add("--no-lodgen");
+                add(a, "--physics-hz", 60);
+                vd = Math.min(vd, 3);
+            }
+            add(a, "--lod-distance", 10000 + vd * 6000);
+            add(a, "--lod-near-distance", 5000 + vd * 2500);
+            add(a, "--tree-distance", low ? 0 : vd * 2500);
+            add(a, "--lodgen-radius", vd >= 9 ? 3 : vd >= 6 ? 2 : 1);
+            add(a, "--lodgen-res", g.textureQuality == 0 && high ? 512 : 256);
+            add(a, "--lodgen-step", high ? 4 : 8);
+            add(a, "--cell-fade", 0.5f);
+            add(a, "--msaa", 1);
+            add(a, "--fov", g.fov);
+            if (g.grassDensity > 0) {
+                add(a, "--grass-distance", 1000 + g.grassDensity * 1000);
+                add(a, "--grass-density", Math.min(1f, 0.25f + g.grassDensity * 0.2f));
+            }
+            if (g.shadows > 0) {
+                a.add(g.shadows >= 3 ? "--sun-shadows=quality" : "--sun-shadows=performance");
+                add(a, "--shadow-distance", 1500 + g.shadows * 1500);
+            } else {
+                a.add("--no-sun-shadows");
+            }
+            List<String> extra = new ArrayList<>();
+            if (g.bloom) extra.add("bloom");
+            if (g.anisotropy >= 8) extra.add("anisotropic");
+            if (g.waterReflections && high) extra.add("water-reflections");
+            if (extra.isEmpty()) {
+                a.add("--graphics");
+                a.add("vanilla");
+            } else {
+                a.add("--graphics-only");
+                a.add(android.text.TextUtils.join(",", extra));
+            }
+        }
+
+        /** The switches NVForever.ini keeps win over the command line: the launcher's go there too. */
+        java.util.Map<String, String> iniSettings() {
+            java.util.LinkedHashMap<String, String> set = new java.util.LinkedHashMap<>();
+            set.put("frame-cap", String.valueOf(frameCap));
+            set.put("anti-aliasing", quality == com.wastelanddroid.game.DeviceProfile.Quality.LOW ? "Off" : "FXAA");
+            set.put("sun-shadows", g.shadows <= 0 ? "Off" : g.shadows >= 3 ? "Quality" : "Performance");
+            set.put("grass", g.grassDensity > 0 ? "1" : "0");
+            set.put("distant-lod", "1");
+            // The engine's frame-rate counter (pref "fps_counter", on in the alpha builds to
+            // measure the phone's frame rate).
+            set.put("fps-counter", fpsCounter ? "1" : "0");
+            return set;
+        }
+
+        private static void add(List<String> a, String flag, Object v) {
+            a.add(flag);
+            a.add(String.valueOf(v));
+        }
+    }
+
+    /**
+     * Sets `key=value` lines in the INI's sections (made where missing), keeping every other
+     * line: the engine's own settings page writes the same file.
+     */
+    static void mergeIni(File ini, java.util.Map<String, java.util.Map<String, String>> sections) throws IOException {
+        String text = ini.isFile() ? readText(ini) : "; NVForever settings.\n";
+        StringBuilder out = new StringBuilder();
+        String current = null;
+        java.util.Set<String> done = new java.util.HashSet<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (String line : text.split("\\r?\\n", -1)) {
+            String t = line.trim();
+            if (t.startsWith("[") && t.endsWith("]")) {
+                if (current != null) appendMissing(out, current, sections.get(current), done);
+                current = null;
+                for (String sec : sections.keySet()) if (t.equalsIgnoreCase("[" + sec + "]")) current = sec;
+                if (current != null) seen.add(current);
+            } else if (current != null && t.contains("=") && !t.startsWith(";")) {
+                String k = t.substring(0, t.indexOf('=')).trim();
+                String found = null;
+                for (String key : sections.get(current).keySet()) if (key.equalsIgnoreCase(k)) found = key;
+                if (found != null) {
+                    if (done.add(current + "/" + found)) out.append(found).append('=').append(sections.get(current).get(found)).append('\n');
+                    continue;
+                }
+            }
+            out.append(line).append('\n');
+        }
+        if (current != null) appendMissing(out, current, sections.get(current), done);
+        for (java.util.Map.Entry<String, java.util.Map<String, String>> e : sections.entrySet()) {
+            if (seen.contains(e.getKey())) continue;
+            out.append('[').append(e.getKey()).append("]\n");
+            appendMissing(out, e.getKey(), e.getValue(), done);
+        }
+        writeText(ini, out.toString().replaceAll("\n{3,}", "\n\n"));
+    }
+
+    private static void appendMissing(StringBuilder out, String section, java.util.Map<String, String> set, java.util.Set<String> done) {
+        // Inside the section: before the blank lines that end it.
+        int blank = 0;
+        while (out.length() - blank >= 2 && out.charAt(out.length() - 1 - blank) == '\n' && out.charAt(out.length() - 2 - blank) == '\n') blank++;
+        String tail = out.substring(out.length() - blank);
+        out.setLength(out.length() - blank);
+        for (java.util.Map.Entry<String, String> e : set.entrySet()) {
+            if (done.add(section + "/" + e.getKey())) out.append(e.getKey()).append('=').append(e.getValue()).append('\n');
+        }
+        out.append(tail);
+    }
+
+    /** Fallout 3's opening quest, film and archives (the engine's FNV defaults otherwise). */
+    static final String FO3_CHARGEN_QUEST = "MQ01";
+    static final String FO3_INTRO = "Fallout INTRO Vsk.bik";
+    static final String FO3_ARCHIVES = "Fallout - Textures.bsa, Fallout - Meshes.bsa, Fallout - Voices.bsa, "
+            + "Fallout - Sound.bsa, Fallout - MenuVoices.bsa, Fallout - Misc.bsa";
+
+    public static com.wastelanddroid.game.DeviceProfile.Quality quality(Context context) {
+        String q = Prefs.get(context).getString(Prefs.QUALITY, "auto");
+        try {
+            return "auto".equals(q) ? com.wastelanddroid.game.DeviceProfile.autoQuality(context)
+                    : com.wastelanddroid.game.DeviceProfile.Quality.valueOf(q.toUpperCase(java.util.Locale.ROOT));
+        } catch (RuntimeException e) {
+            return com.wastelanddroid.game.DeviceProfile.Quality.LOW;
+        }
+    }
+
+    /**
+     * Height of the surface the engine draws (scaled up to the screen by the display
+     * hardware): the chosen resolution, else by quality (540 / 720 / 900) and the
+     * resolution scale slider.
+     */
+    public static int renderHeight(Context context) {
+        SharedPreferences prefs = Prefs.get(context);
+        String res = prefs.getString("resolution", null);
+        if (res != null && res.contains("x")) {
+            try {
+                return Integer.parseInt(res.substring(res.indexOf('x') + 1).trim());
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        com.wastelanddroid.game.DeviceProfile.Quality q = quality(context);
+        int base = q == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? 900
+                : q == com.wastelanddroid.game.DeviceProfile.Quality.MEDIUM ? 720 : 480;
+        int scale = Math.max(50, Math.min(100, prefs.getInt(Prefs.RES_SCALE, 100)));
+        return Math.max(360, base * scale / 100);
+    }
+
     private static final String[] FNV_MASTERS = {"FalloutNV.esm", "DeadMoney.esm", "HonestHearts.esm",
             "OldWorldBlues.esm", "LonesomeRoad.esm", "GunRunnersArsenal.esm", "ClassicPack.esm",
             "MercenaryPack.esm", "TribalPack.esm", "CaravanPack.esm"};
@@ -187,7 +394,6 @@ public final class FalloutEngine {
                 seen.add(f.getName().toLowerCase(java.util.Locale.ROOT));
             }
         }
-        int masters = out.size();
         File txt = findChild(data, "plugins.txt");
         if (txt != null) {
             try {
@@ -207,7 +413,20 @@ public final class FalloutEngine {
             } catch (IOException ignored) {
             }
         }
-        return out.size() > masters ? out : new ArrayList<>();
+        // Always named: the engine's own default is New Vegas's masters.
+        return out;
+    }
+
+    /** The names of `list` (comma-separated) that are in Data, in that order. */
+    static String existingArchives(File data, String list) {
+        StringBuilder sb = new StringBuilder();
+        for (String n : list.split(",")) {
+            File f = findChild(data, n.trim());
+            if (f == null) continue;
+            if (sb.length() > 0) sb.append(", ");
+            sb.append(f.getName());
+        }
+        return sb.toString();
     }
 
     private static File findChild(File dir, String name) {
