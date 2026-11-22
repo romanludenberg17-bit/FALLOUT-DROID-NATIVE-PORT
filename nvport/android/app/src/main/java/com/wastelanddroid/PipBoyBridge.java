@@ -159,11 +159,15 @@ public class PipBoyBridge extends WebViewClient {
             return true;
         }
         if (strSubstring.startsWith("install_url_")) {
-            NexusInAppBrowser.startDirectDownload(mainActivity, webView, GameDef.FNV.gameDir(mainActivity), Uri.decode(strSubstring.substring(12)));
+            String rest = strSubstring.substring(12);
+            GameDef g = storeGame(rest);
+            NexusInAppBrowser.startDirectDownload(mainActivity, webView, g.gameDir(mainActivity), Uri.decode(stripGame(rest)));
             return true;
         }
         if (strSubstring.startsWith("nexus_open_")) {
-            NexusInAppBrowser.open(mainActivity, webView, GameDef.FNV.gameDir(mainActivity), Uri.decode(strSubstring.substring(11)));
+            String rest = strSubstring.substring(11);
+            Prefs.get(mainActivity).edit().putString("store_game", storeGame(rest).id).apply();
+            NexusInAppBrowser.open(mainActivity, webView, storeGame(rest).gameDir(mainActivity), Uri.decode(stripGame(rest)));
             return true;
         }
         if (strSubstring.startsWith("list_dir_")) {
@@ -171,7 +175,8 @@ public class PipBoyBridge extends WebViewClient {
             return true;
         }
         if (strSubstring.startsWith("import_zip_")) {
-            NexusInAppBrowser.startLocalZipInstall(mainActivity, webView, GameDef.FNV.gameDir(mainActivity), Uri.decode(strSubstring.substring(11)));
+            String rest = strSubstring.substring(11);
+            NexusInAppBrowser.startLocalZipInstall(mainActivity, webView, storeGame(rest).gameDir(mainActivity), Uri.decode(stripGame(rest)));
             return true;
         }
         if (strSubstring.equals("list_plugins_fnv")) {
@@ -371,5 +376,14 @@ public class PipBoyBridge extends WebViewClient {
             android.widget.Toast.makeText(this.activity, "Ошибка: " + e.getMessage(), android.widget.Toast.LENGTH_LONG).show();
             return true;
         }
+    }
+
+    /** The mod store's game: a "fo3_" or "fnv_" prefix on the scheme's argument (FNV without). */
+    private static GameDef storeGame(String rest) {
+        return rest.startsWith("fo3_") ? GameDef.FO3 : GameDef.FNV;
+    }
+
+    private static String stripGame(String rest) {
+        return rest.startsWith("fo3_") || rest.startsWith("fnv_") ? rest.substring(4) : rest;
     }
 }

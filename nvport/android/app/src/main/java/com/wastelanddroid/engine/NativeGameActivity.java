@@ -60,11 +60,7 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
         crt = new CrtOverlay(this);
         addContentView(crt, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        pages = new PipBoyPages(this, fo3);
-        addContentView(pages, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT, android.view.Gravity.START));
         overlay.bringToFront();
-        pages.bringToFront();
         panel = new QuickPanel(this, this);
         addContentView(panel, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -212,7 +208,6 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
             }
             // Fallout 3's main menu is on a CRT, as in the original.
             if (crt != null) crt.setOn(fo3 && state == ScreenKeysOverlay.UI_MAIN_MENU);
-            if (pages != null) pages.setOn(state == ScreenKeysOverlay.UI_PIPBOY || state == ScreenKeysOverlay.UI_PIPBOY_MAP);
             ui.postDelayed(this, 120);
         }
     };
@@ -249,7 +244,6 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
     // the next command line; the launcher (its own process) starts this activity again
     // once this process has ended.
     private boolean restarting;
-    private PipBoyPages pages;
 
     private void restartGame() {
         restarting = true;

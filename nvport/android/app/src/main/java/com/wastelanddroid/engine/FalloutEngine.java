@@ -123,6 +123,7 @@ public final class FalloutEngine {
                     + "профиль Fallout 3 (Fallout3.esm без FalloutNV.esm) ещё в разработке. "
                     + "Папку игры можно выбрать заранее — моды и проверка файлов уже работают.");
         }
+        if (lighterAfterDeath(context)) android.util.Log.w("NVForever", "the last run died for memory or in native code: GPU_SAFE " + Prefs.get(context).getInt(GPU_SAFE, 0));
         try {
             ensureEngineData(context);
         } catch (IOException e) {
@@ -354,12 +355,14 @@ public final class FalloutEngine {
             set.put("frame-cap", frameCap <= 0 ? "Off" : String.valueOf(frameCap));
             // Multisampling also smooths alpha-tested cut-outs (grates, plants, fences), which
             // otherwise shimmer: cheap on tile-based mobile GPUs, resolved in tile memory.
-            set.put("anti-aliasing", quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH && safe == 0 ? "2x" : "FXAA");
+            // The picture rows the player sets in the game's own settings page: the launcher
+            // gives a first value only ("?"), except in the GPU safe mode.
+            set.put("anti-aliasing", safe > 0 ? "FXAA" : quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? "?2x" : "?FXAA");
             // No upscaler on a phone: FSR 3.1's compute passes at full precision (the
             // Adreno driver reports no 16-bit floats) are heavier than the pixels they save.
             set.put("upscaler", "Off");
-            set.put("sun-shadows", g.shadows <= 0 ? "Off" : g.shadows >= 3 ? "Quality" : "Performance");
-            set.put("grass", g.grassDensity > 0 ? "1" : "0");
+            set.put("sun-shadows", safe > 0 ? "Off" : g.shadows <= 0 ? "?Off" : g.shadows >= 3 ? "?Quality" : "?Performance");
+            set.put("grass", safe > 0 ? "0" : g.grassDensity > 0 ? "?1" : "?0");
             set.put("distant-lod", "1");
             // The engine's frame-rate counter (pref "fps_counter", on in the alpha builds to
             // measure the phone's frame rate).
@@ -395,8 +398,8 @@ public final class FalloutEngine {
                     "terrain-height-blend", "terrain-anti-tiling", "cloud-shadows", "terrain-shadows", "heat-haze", "desert-haze"}) {
                 set.put(k, "0");
             }
-            set.put("bloom", g.bloom ? "1" : "0");
-            set.put("anisotropic", g.anisotropy >= 8 ? "1" : "0");
+            set.put("bloom", g.bloom ? "?1" : "?0");
+            set.put("anisotropic", g.anisotropy >= 8 ? "?1" : "?0");
             set.put("water-reflections", "0");
             return set;
         }
@@ -430,6 +433,11 @@ public final class FalloutEngine {
                 for (String key : sections.get(current).keySet()) if (key.equalsIgnoreCase(k)) found = key;
                 if (found != null) {
                     String v = sections.get(current).get(found);
+                    if (v != null && v.startsWith("?")) {
+                        // A default only: the row the player (the engine's settings page) set stays.
+                        if (done.add(current + "/" + found)) out.append(line).append('\n');
+                        continue;
+                    }
                     if (done.add(current + "/" + found) && v != null) out.append(found).append('=').append(v).append('\n');
                     continue;
                 }
@@ -452,7 +460,9 @@ public final class FalloutEngine {
         String tail = out.substring(out.length() - blank);
         out.setLength(out.length() - blank);
         for (java.util.Map.Entry<String, String> e : set.entrySet()) {
-            if (done.add(section + "/" + e.getKey()) && e.getValue() != null) out.append(e.getKey()).append('=').append(e.getValue()).append('\n');
+            String v = e.getValue();
+            if (v != null && v.startsWith("?")) v = v.substring(1);
+            if (done.add(section + "/" + e.getKey()) && v != null) out.append(e.getKey()).append('=').append(v).append('\n');
         }
         out.append(tail);
     }
@@ -634,6 +644,7 @@ public final class FalloutEngine {
                 .append(", Android ").append(android.os.Build.VERSION.RELEASE).append(" (API ").append(android.os.Build.VERSION.SDK_INT).append(")\n");
         sb.append("Exit: ").append(exitStatus(context)).append(gameProcessAlive(context) ? " (game process alive)" : "").append("\n");
         section(sb, "command line", new File(base, "nvport_args.txt"), 16 * 1024);
+        sb.append("\n===== how the game process ended (Android) =====\n").append(exitReasons(context, 6)).append('\n');
         section(sb, LOG_FILE, log, 96 * 1024);
         // Both games, the last played first: a crash while loading a save is followed by
         // the restart's own run, so the last three runs and crash reports of each go in.
@@ -657,6 +668,80 @@ public final class FalloutEngine {
             return log.isFile() ? log : null;
         }
         return report;
+    }
+
+    /** The system's record of how the game's process ended, the newest first. */
+    public static String exitReasons(Context context, int max) {
+        if (android.os.Build.VERSION.SDK_INT < 30) return "(Android 11+)";
+        StringBuilder sb = new StringBuilder();
+        try {
+            android.app.ActivityManager am = (android.app.ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+            String game = context.getPackageName() + GAME_PROCESS_SUFFIX;
+            int n = 0;
+            for (android.app.ApplicationExitInfo e : am.getHistoricalProcessExitReasons(context.getPackageName(), 0, 30)) {
+                if (!game.equals(e.getProcessName())) continue;
+                sb.append(new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.ROOT).format(new java.util.Date(e.getTimestamp())))
+                        .append(" pid ").append(e.getPid()).append(": ").append(reasonName(e.getReason()))
+                        .append(" status ").append(e.getStatus())
+                        .append(", pss ").append(e.getPss() / 1024).append(" MB, rss ").append(e.getRss() / 1024).append(" MB")
+                        .append(e.getDescription() == null ? "" : ", " + e.getDescription()).append('\n');
+                if (++n >= max) break;
+            }
+        } catch (Exception e) {
+            sb.append(e).append('\n');
+        }
+        return sb.length() == 0 ? "(no record)" : sb.toString();
+    }
+
+    private static String reasonName(int r) {
+        switch (r) {
+            case 1: return "EXIT_SELF";
+            case 2: return "SIGNALED";
+            case 3: return "LOW_MEMORY (killed by the system for memory)";
+            case 4: return "CRASH (java)";
+            case 5: return "CRASH_NATIVE";
+            case 6: return "ANR";
+            case 7: return "INITIALIZATION_FAILURE";
+            case 8: return "PERMISSION_CHANGE";
+            case 9: return "EXCESSIVE_RESOURCE_USAGE";
+            case 10: return "USER_REQUESTED";
+            case 11: return "USER_STOPPED";
+            case 12: return "DEPENDENCY_DIED";
+            case 13: return "OTHER";
+            case 14: return "FREEZER";
+            case 15: return "PACKAGE_STATE_CHANGE";
+            case 16: return "PACKAGE_UPDATED";
+            default: return "UNKNOWN(" + r + ")";
+        }
+    }
+
+    /**
+     * The game's process died since the last start for memory or in native code (no crash
+     * report, the run log cut off): the next start takes one more GPU_SAFE level. True when
+     * it did.
+     */
+    public static boolean lighterAfterDeath(Context context) {
+        if (android.os.Build.VERSION.SDK_INT < 30) return false;
+        SharedPreferences prefs = Prefs.get(context);
+        long seen = prefs.getLong("game_death_seen", 0);
+        long newest = seen;
+        boolean bad = false;
+        try {
+            android.app.ActivityManager am = (android.app.ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+            String game = context.getPackageName() + GAME_PROCESS_SUFFIX;
+            for (android.app.ApplicationExitInfo e : am.getHistoricalProcessExitReasons(context.getPackageName(), 0, 10)) {
+                if (!game.equals(e.getProcessName()) || e.getTimestamp() <= seen) continue;
+                newest = Math.max(newest, e.getTimestamp());
+                int r = e.getReason();
+                if (r == android.app.ApplicationExitInfo.REASON_LOW_MEMORY || r == android.app.ApplicationExitInfo.REASON_CRASH_NATIVE) bad = true;
+            }
+        } catch (Exception e) {
+            return false;
+        }
+        SharedPreferences.Editor ed = prefs.edit().putLong("game_death_seen", newest);
+        if (bad && seen != 0) ed.putInt(GPU_SAFE, Math.min(2, prefs.getInt(GPU_SAFE, 0) + 1));
+        ed.commit();
+        return bad && seen != 0;
     }
 
     /** What nvforever.exit says ("" when there is none). */

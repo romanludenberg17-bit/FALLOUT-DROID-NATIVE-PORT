@@ -3519,52 +3519,13 @@ body.gamepad-connected-mode #ingame-controls-layer {
       <section class="tab-pane" id="pane-settings">
         <div class="settings-layout">
           <aside class="settings-sidebar">
-            <button class="subnav-btn active" data-sub="graphics" onclick="switchSettingsSub('graphics')"><span>Графика и GPU</span><span>›</span></button>
             <button class="subnav-btn" data-sub="frames" onclick="switchSettingsSub('frames')"><span>Кадры и Лимит</span><span>›</span></button>
-            <button class="subnav-btn" data-sub="controls" onclick="switchSettingsSub('controls')"><span>Управление и Геймпад</span><span>›</span></button>
+            <button class="subnav-btn active" data-sub="controls" onclick="switchSettingsSub('controls')"><span>Управление и Геймпад</span><span>›</span></button>
             <button class="subnav-btn" data-sub="audio_ui" onclick="switchSettingsSub('audio_ui')"><span>Фон, Масштаб и Звук</span><span>›</span></button>
             <button class="subnav-btn" data-sub="service" onclick="switchSettingsSub('service')"><span>Контейнер FalloutDroid</span><span>›</span></button>
           </aside>
 
           <div class="settings-panel-body">
-            <!-- SUB 1: GRAPHICS -->
-            <div class="settings-section active" id="set-sec-graphics">
-              <div class="sec-group-title">Профиль GPU и транслятор Vulkan (FalloutDroid)</div>
-              <div class="setting-row">
-                <div>
-                  <div class="setting-name">Аппаратный пресет GPU</div>
-                  <div class="setting-hint">Автоопределение GPU: системный драйвер Vulkan / OpenGL ES устройства</div>
-                </div>
-                <div class="seg-group">
-                  <button class="seg-btn active" id="gpu-btn-adreno" onclick="setGpuPreset('adreno')">Snapdragon</button>
-                  <button class="seg-btn" id="gpu-btn-exynos" onclick="setGpuPreset('exynos')">Exynos</button>
-                  <button class="seg-btn" id="gpu-btn-mali" onclick="setGpuPreset('mali')">Mali / G99</button>
-                </div>
-              </div>
-              <div class="setting-row">
-                <div>
-                  <div class="setting-name">Профиль «Слабое устройство» (iShadowMapResolution=512)</div>
-                  <div class="setting-hint">Снижает разрешение карт теней до 512 для стабильного фреймрейта</div>
-                </div>
-                <div class="seg-group">
-                  <button class="seg-btn active" id="lowspec-btn-off" onclick="setLowSpecMode(false)">1024 (Стандарт)</button>
-                  <button class="seg-btn" id="lowspec-btn-on" onclick="setLowSpecMode(true)">512 (Макс. FPS)</button>
-                </div>
-              </div>
-              <div class="setting-row">
-                <div>
-                  <div class="setting-name">Анизотропная фильтрация и дальность прорисовки</div>
-                  <div class="setting-hint">Управляет чёткостью текстур и дальностью прорисовки объектов</div>
-                </div>
-                <div class="seg-group">
-                  <button class="seg-btn" id="q-btn-low" onclick="selectSegGroup(this, 'Графика: НИЗКИЕ (720p)'); triggerNativeScheme('falloutpicker://quality_low')">НИЗКИЕ</button>
-                  <button class="seg-btn" id="q-btn-medium" onclick="selectSegGroup(this, 'Графика: СРЕДНИЕ (900p)'); triggerNativeScheme('falloutpicker://quality_medium')">СРЕДНИЕ</button>
-                  <button class="seg-btn active" id="q-btn-high" onclick="selectSegGroup(this, 'Графика: ВЫСОКИЕ (1080p)'); triggerNativeScheme('falloutpicker://quality_high')">ВЫСОКИЕ</button>
-                  <button class="seg-btn" onclick="triggerNativeScheme('falloutpicker://native_graphics')">Настройки графики ⚙</button>
-                </div>
-              </div>
-            </div>
-
             <!-- SUB 2: FRAMES -->
             <div class="settings-section" id="set-sec-frames">
               <div class="sec-group-title">Лимит кадров движка Gamebryo / Havok</div>
@@ -3589,7 +3550,7 @@ body.gamepad-connected-mode #ingame-controls-layer {
             </div>
 
             <!-- SUB 3: CONTROLS & AUTOMATIC GAMEPAD -->
-            <div class="settings-section" id="set-sec-controls">
+            <div class="settings-section active" id="set-sec-controls">
               <div class="sec-group-title">Сенсорное управление и Автоопределение геймпада</div>
               <div class="setting-row">
                 <div>
@@ -3845,33 +3806,6 @@ body.gamepad-connected-mode #ingame-controls-layer {
             <svg class="fluent-ico" viewBox="0 0 24 24"><path d="M6 2a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6H6Zm7 1.5L18.5 9H13V3.5Z"/></svg>
             <span>.exe</span>
           </button>
-        </div>
-      </div>
-
-      <!-- 2. Per-Game Resolution -->
-      <div class="setting-row">
-        <div>
-          <div class="setting-name">Разрешение рендеринга контейнера</div>
-          <div class="setting-hint">Записывается в iSize W / iSize H файла FalloutPrefs.ini перед запуском</div>
-        </div>
-        <div class="seg-group" id="pg-res-group">
-          <button class="seg-btn" onclick="setPerGameResolution('1280×720', this)">1280×720</button>
-          <button class="seg-btn active" onclick="setPerGameResolution('1600×900', this)">1600×900</button>
-          <button class="seg-btn" onclick="setPerGameResolution('1920×1080', this)">1920×1080</button>
-          <button class="seg-btn" onclick="setPerGameResolution('2400×1080', this)">2400×1080</button>
-        </div>
-      </div>
-
-      <!-- 3. Per-Game Graphics & Container Layer -->
-      <div class="setting-row">
-        <div>
-          <div class="setting-name">Графика движка</div>
-          <div class="setting-hint">Индивидуальный пресет графики и компиляции шейдеров для выбранной игры</div>
-        </div>
-        <div class="seg-group">
-          <button class="seg-btn" onclick="selectSegGroup(this, 'Пресет игры: Производительность'); triggerNativeScheme('falloutpicker://quality_low')">Производительность</button>
-          <button class="seg-btn active" onclick="selectSegGroup(this, 'Пресет игры: Баланс'); triggerNativeScheme('falloutpicker://quality_medium')">Баланс</button>
-          <button class="seg-btn" onclick="selectSegGroup(this, 'Пресет игры: Ультра (AF 16x)'); triggerNativeScheme('falloutpicker://quality_high')">Ультра</button>
         </div>
       </div>
 
@@ -4601,6 +4535,7 @@ function switchSettingsSub(subId) {
 
 function selectGame(gameKey) {
   currentGame = gameKey;
+  try { if (typeof renderModStore === 'function') renderModStore(); } catch (e) {}
   document.getElementById('gcard-fnv').classList.toggle('active', gameKey === 'fnv');
   document.getElementById('gcard-fo3').classList.toggle('active', gameKey === 'fo3');
   const logo = document.getElementById('hero-active-logo');
@@ -4643,7 +4578,7 @@ function openPerGameSettingsModal() {
 
   if (currentGame === 'fnv') {
     if (title) title.textContent = 'НАСТРОЙКИ ИГРЫ: FALLOUT: NEW VEGAS';
-    const mmb = document.getElementById('pg-modmgr-btn'); if (mmb) mmb.style.display = 'none';
+    const mmb = document.getElementById('pg-modmgr-btn'); if (mmb) mmb.style.display = '';
     if (exeHint) exeHint.textContent = 'FalloutNV.exe и папка Data/';
     if (modsLbl) modsLbl.textContent = 'Fallout: New Vegas';
     if (esmLbl) esmLbl.textContent = 'FalloutNV.esm + Все официальные DLC (Dead Money, Honest Hearts, OWB, Lonesome Road)';
@@ -4905,8 +4840,9 @@ function setGpuPreset(preset) {
 }
 
 function setLowSpecMode(on) {
-  document.getElementById('lowspec-btn-off').classList.toggle('active', !on);
-  document.getElementById('lowspec-btn-on').classList.toggle('active', on);
+  const a = document.getElementById('lowspec-btn-off'), b = document.getElementById('lowspec-btn-on');
+  if (a) a.classList.toggle('active', !on);
+  if (b) b.classList.toggle('active', on);
   triggerNativeScheme(on ? 'falloutpicker://quality_low' : 'falloutpicker://quality_high');
 }
 
@@ -5648,6 +5584,24 @@ const FD_NEXUS_CATALOG = [
   { nexusId: 42028, name: 'POCO BUENO Texture Pack', cat: 'gfx', catLabel: 'Графика', req: '4GB Patch', desc: 'Оптимизированный под мобильные GPU пак HD-текстур окружения, дорог и объектов без просадок FPS.' }
 ];
 
+const FD_NEXUS_CATALOG_FO3 = [
+  { q: 'Unofficial Fallout 3 Patch', name: 'Unofficial Fallout 3 Patch', cat: 'base', catLabel: 'Патчи', req: 'База FO3', desc: 'Тысячи исправлений квестов, диалогов, предметов и мира Fallout 3 и всех DLC.' },
+  { q: 'NMC Texture Pack', name: "NMC's Texture Pack", cat: 'gfx', catLabel: 'Графика', req: 'База FO3', desc: 'Классический пак текстур окружения высокого разрешения (на телефоне берите Small/Medium).' },
+  { q: 'Fellout', name: 'Fellout', cat: 'gfx', catLabel: 'Графика', req: 'База FO3', desc: 'Убирает зелёный фильтр, новая погода и освещение Пустоши.' },
+  { q: 'Enhanced Weather', name: 'Enhanced Weather', cat: 'gfx', catLabel: 'Графика', req: 'База FO3', desc: 'Дождь, грозы и разнообразная погода в Столичной Пустоши.' },
+  { q: 'Fallout 3 Re-Animated', name: 'Fallout 3 Re-Animated', cat: 'anims', catLabel: 'Анимации', req: 'База FO3', desc: 'Новые анимации оружия от первого лица для ванильного арсенала.' },
+  { q: 'Weapon Mod Kits', name: 'Weapon Mod Kits', cat: 'gameplay', catLabel: 'Геймплей', req: 'База FO3', desc: 'Модификации оружия (прицелы, глушители, магазины), как в New Vegas.' },
+  { q: 'Alternative Start', name: 'Alternative Start', cat: 'gameplay', catLabel: 'Геймплей', req: 'База FO3', desc: 'Начать игру сразу в Пустоши, пропустив Убежище 101.' },
+  { q: 'Darnified UI F3', name: 'DarNified UI F3', cat: 'ui', catLabel: 'Интерфейс', req: 'База FO3', desc: 'Компактный интерфейс с мелким шрифтом и расширенными списками.' },
+  { q: 'Mart\'s Mutant Mod', name: "Mart's Mutant Mod", cat: 'gameplay', catLabel: 'Геймплей', req: 'База FO3', desc: 'Больше врагов, новые виды мутантов и усложнённые бои.' }
+];
+function fdStoreGame() { return (typeof currentGame !== 'undefined' && currentGame === 'fo3') ? 'fo3' : 'fnv'; }
+function fdCatalog() { return fdStoreGame() === 'fo3' ? FD_NEXUS_CATALOG_FO3 : FD_NEXUS_CATALOG; }
+function fdModUrl(m) {
+  return m.q ? 'https://www.nexusmods.com/fallout3/search/?gsearch=' + encodeURIComponent(m.q) + '&gtype=1'
+             : 'https://www.nexusmods.com/newvegas/mods/' + m.nexusId + '?tab=files';
+}
+
 let fdCoreInstalled = {};
 let fdCoreCheckedOnce = false;
 let fdInstallQueue = [];
@@ -5671,7 +5625,7 @@ function setModStoreProgress(visible, pct, label) {
 
 function openNexusInApp(url) {
   if (typeof triggerNativeScheme === 'function') {
-    triggerNativeScheme('falloutpicker://nexus_open_' + encodeURIComponent(url));
+    triggerNativeScheme('falloutpicker://nexus_open_' + fdStoreGame() + '_' + encodeURIComponent(url));
   }
 }
 
@@ -5711,9 +5665,11 @@ function renderModStore() {
     + '<div class="modstore-card" style="grid-column:1/-1;"><div class="modstore-card-top"><div class="modstore-card-name">Совместимость ваших модов</div><span class="modstore-card-tag">по логу движка</span></div>'
     + '<div class="modstore-card-desc">' + FD_NOT_SUPPORTED + '</div>' + fdModReportHtml() + '</div>';
 
-  if (badge) badge.textContent = 'Nexus Mods (' + FD_NEXUS_CATALOG.length + ' модов FNV)';
+  if (badge) badge.textContent = 'Nexus Mods (' + fdCatalog().length + (fdStoreGame() === 'fo3' ? ' модов Fallout 3)' : ' модов FNV)');
+  const htitle = document.querySelector('.modstore-header-title');
+  if (htitle) htitle.textContent = 'МАГАЗИН МОДОВ — ' + (fdStoreGame() === 'fo3' ? 'FALLOUT 3' : 'FALLOUT: NEW VEGAS');
 
-  const items = FD_NEXUS_CATALOG.filter(m => {
+  const items = fdCatalog().filter(m => {
     if (fdStoreCat !== 'all' && m.cat !== fdStoreCat) return false;
     if (fdStoreSearch && !(m.name.toLowerCase().includes(fdStoreSearch) || m.desc.toLowerCase().includes(fdStoreSearch) || m.req.toLowerCase().includes(fdStoreSearch))) return false;
     return true;
@@ -5724,12 +5680,12 @@ function renderModStore() {
     + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">'
     + '<button class="modstore-btn primary" onclick="openNexusInApp(\'https://users.nexusmods.com/auth/sign_in\')">Войти в Nexus Mods</button>'
     + '<button class="modstore-btn" onclick="openPipBoyZipImporter()"' + (fdInstallingId ? ' disabled' : '') + '>📦 Импорт ZIP с телефона</button>'
-    + '<button class="modstore-btn" onclick="openModManagerModal()">⚙ Менеджер модов FNV</button>'
+    + '<button class="modstore-btn" onclick="openModManagerModal()">⚙ Менеджер модов ' + (fdStoreGame() === 'fo3' ? 'Fallout 3' : 'FNV') + '</button>'
     + '</div>'
     + '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">'
     + [['all','Все'], ['base','Патчи'], ['gameplay','Геймплей'], ['anims','Анимации'], ['ui','Интерфейс'], ['gfx','Графика']]
         .map(p => '<button class="modstore-btn' + (fdStoreCat === p[0] ? ' primary' : '') + '" onclick="setStoreCategory(\'' + p[0] + '\')">' + p[1] + '</button>').join('')
-    + '<input type="text" value="' + fdStoreSearch.replace(/"/g, '') + '" oninput="setStoreSearch(this.value)" placeholder="Поиск по модам FNV..." style="flex:1;min-width:150px;height:32px;padding:0 10px;border-radius:7px;border:1px solid rgba(var(--accent-rgb),0.35);background:rgba(0,0,0,0.45);color:var(--text-main);font-size:12px;" />'
+    + '<input type="text" value="' + fdStoreSearch.replace(/"/g, '') + '" oninput="setStoreSearch(this.value)" placeholder="Поиск по модам..." style="flex:1;min-width:150px;height:32px;padding:0 10px;border-radius:7px;border:1px solid rgba(var(--accent-rgb),0.35);background:rgba(0,0,0,0.45);color:var(--text-main);font-size:12px;" />'
     + '</div></div>';
 
   const gridHtml = items.length
@@ -5739,7 +5695,7 @@ function renderModStore() {
         + '<div class="modstore-card-desc">' + m.desc + '</div>'
         + '<div class="modstore-card-foot">'
         + '<span class="modstore-status ok">База: ' + m.req + '</span>'
-        + '<button class="modstore-btn primary" onclick="openNexusInApp(\'https://www.nexusmods.com/newvegas/mods/' + m.nexusId + '?tab=files\')">Скачать с Nexus</button>'
+        + '<button class="modstore-btn primary" onclick="openNexusInApp(\'' + fdModUrl(m) + '\')">Скачать с Nexus</button>'
         + '</div></div>'
       ).join('') + '</div>'
     : '<div style="font-size:12px;color:var(--text-muted);padding:10px 0;">По запросу ничего не найдено.</div>';
@@ -5929,7 +5885,7 @@ function fdImportSelectedZip(zipFullPath, zipName) {
   renderModStore();
   setTimeout(function() {
     if (typeof triggerNativeScheme === 'function') {
-      triggerNativeScheme('falloutpicker://import_zip_' + encodeURIComponent(zipFullPath));
+      triggerNativeScheme('falloutpicker://import_zip_' + fdStoreGame() + '_' + encodeURIComponent(zipFullPath));
     }
   }, 120);
 }
