@@ -1362,7 +1362,7 @@ index 74c2936..063c304 100644
              Transform::from_translation(to(eye)).looking_at(to(aim), Vec3::Y),
              layer.clone(),
 diff --git a/engine/nvforever/src/decals.rs b/engine/nvforever/src/decals.rs
-index f9dd8cb..994cb29 100644
+index f9dd8cb..5d99ee1 100644
 --- a/engine/nvforever/src/decals.rs
 +++ b/engine/nvforever/src/decals.rs
 @@ -91,9 +91,17 @@ const MISSES_LOGGED: u32 = 8;
@@ -1388,7 +1388,7 @@ index f9dd8cb..994cb29 100644
      sfx: Option<Res<Sfx>>,
      mut models: ModelCtx,
      mut materials: ResMut<Assets<ForwardDecalMaterial<StandardMaterial>>>,
-+    (mut meshes, mut flat_materials, mut quad): (ResMut<Assets<Mesh>>, ResMut<Assets<StandardMaterial>>, Local<Option<Handle<Mesh>>>),
++    (mut flat_materials, mut quad): (ResMut<Assets<StandardMaterial>>, Local<Option<Handle<Mesh>>>),
      mut st: ResMut<Decals>,
      root: Query<(Entity, &GlobalTransform), With<WorldRoot>>,
      (rigs, nodes): (Query<&ActorRig>, Query<&GlobalTransform>),
@@ -1442,7 +1442,7 @@ index f9dd8cb..994cb29 100644
 +                .spawn((ForwardDecal, MeshMaterial3d(m.clone()), place, Visibility::default(), RenderLayers::layer(DECAL_LAYER), Decal { age: 0.0, material: material.clone(), flat: None }, ChildOf(parent)))
 +                .id(),
 +            (None, Some(f)) => {
-+                let mesh = quad.get_or_insert_with(|| meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(0.5)))).clone();
++                let mesh = quad.get_or_insert_with(|| models.meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(0.5)))).clone();
 +                commands
 +                    .spawn((Mesh3d(mesh), MeshMaterial3d(f.clone()), place, Visibility::default(), RenderLayers::layer(DECAL_LAYER), bevy::light::NotShadowCaster, Decal { age: 0.0, material: None, flat: flat.clone() }, ChildOf(parent)))
 +                    .id()
@@ -1888,10 +1888,19 @@ index a4d7a2c..7cc0dae 100644
  mod drm_usage;
  mod graph;
 diff --git a/engine/nvforever/src/player_body.rs b/engine/nvforever/src/player_body.rs
-index beddf49..3a859e4 100644
+index beddf49..cc4d528 100644
 --- a/engine/nvforever/src/player_body.rs
 +++ b/engine/nvforever/src/player_body.rs
-@@ -1939,7 +1939,12 @@ fn ensure_body(
+@@ -959,6 +959,8 @@ impl Rig {
+             Some(c) if matches!(key, ClipKey::Grip(..)) => info!("player {:?} rig: hand grip {}", self.view, c.path),
+             Some(c) if matches!(key, ClipKey::Move(..) | ClipKey::PipBoy(_)) => info!("player {:?} rig: {key:?} plays {}", self.view, c.path),
+             // Without it the arm never comes up (#1330): said where a player's log shows it.
++            // [nvport] Without a movement clip the legs stand still while the body slides.
++            None if matches!(key, ClipKey::Move(..)) => warn!("player {:?} rig: {key:?}: none of {:?} in {} could be read: the legs stand still", self.view, key.candidates(), self.folder),
+             None if matches!(key, ClipKey::PipBoy(_)) => warn!("player {:?} rig: {key:?}: none of {:?} in {} could be read; the Pip-Boy cannot come up", self.view, key.candidates(), self.folder),
+             Some(c) => debug!("player {:?} rig: {key:?} plays {} ({:.3} s, shot at {:?}, repeats to {:?})", self.view, c.path, c.clip.length(), c.keys.hit, c.keys.loop_end),
+             None => debug!("player {:?} rig: {key:?}: none of {:?} in {}", self.view, key.candidates(), self.folder),
+@@ -1939,7 +1941,12 @@ fn ensure_body(
  }
  
  /// The least time between two body rebuilds for a changed look, seconds.

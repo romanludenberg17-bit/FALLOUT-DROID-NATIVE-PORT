@@ -704,6 +704,7 @@ public final class FalloutEngine {
             if (runs.isEmpty() && !sc.equals(scope)) continue;
             String g = sc.equals("fo3") ? "Fallout 3" : "New Vegas";
             for (int i = 0; i < runs.size(); i++) {
+                if (i == 0) headSection(sb, g + ": run log, start", runs.get(i), 96 * 1024);
                 section(sb, g + ": run log" + (i == 0 ? "" : " -" + i), runs.get(i), i == 0 ? 448 * 1024 : 128 * 1024);
             }
             if (runs.isEmpty()) section(sb, g + ": run log", null, 0);
@@ -865,6 +866,18 @@ public final class FalloutEngine {
         File base = context.getExternalFilesDir(null);
         String tail = base == null ? "" : tail(new File(base, LOG_FILE), 40);
         return tail.isEmpty() ? why : why + "\n\nКонец лога:\n" + tail;
+    }
+
+    /** The first `max` characters of a file (a long run log's start-up). */
+    private static void headSection(StringBuilder sb, String title, File f, int max) {
+        if (f == null || !f.isFile()) return;
+        try {
+            String t = readText(f);
+            if (t.length() <= 448 * 1024) return; // the tail section holds it all
+            sb.append("\n===== ").append(title).append(" (").append(f.getAbsolutePath()).append(") =====\n");
+            sb.append(t, 0, Math.min(max, t.length())).append("\n...\n");
+        } catch (IOException ignored) {
+        }
     }
 
     private static void section(StringBuilder sb, String title, File f, int max) {
