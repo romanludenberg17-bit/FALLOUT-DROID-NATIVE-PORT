@@ -184,9 +184,14 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
                 // game starts again by itself from its newest save, behind the loading
                 // screen, instead of dropping to the launcher.
                 if (recoverFromDeviceLoss()) return;
-                // Quit Game: back to the launcher.
+                // Quit Game: back to the launcher, the process ended at once (see exitGame).
                 restarting = true;
-                finish();
+                try {
+                    startActivity(new android.content.Intent(NativeGameActivity.this, com.wastelanddroid.MainActivity.class)
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK | android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP));
+                } catch (Exception ignored) {
+                }
+                android.os.Process.killProcess(android.os.Process.myPid());
                 return;
             }
             if (restart && !restarting) {
@@ -385,7 +390,27 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
 
     @Override
     public void exitGame() {
-        finish();
+        // A quick save (F5), then the game's process ends at once (its sound with it) and
+        // the launcher comes back. Waiting on the engine's thread to wind down (the
+        // GameActivity glue's destroy) left the game playing behind the launcher.
+        if (panel != null) panel.hide();
+        try {
+            NativeInput.key(63, true);
+            NativeInput.key(63, false);
+        } catch (UnsatisfiedLinkError ignored) {
+        }
+        android.widget.Toast.makeText(this, "Сохранение и выход…", android.widget.Toast.LENGTH_SHORT).show();
+        restarting = true;
+        ui.postDelayed(() -> {
+            com.wastelanddroid.util.Prefs.get(this).edit().putBoolean(com.wastelanddroid.util.Prefs.LAUNCH_PENDING, false).commit();
+            writeExit("ok");
+            try {
+                startActivity(new android.content.Intent(this, com.wastelanddroid.MainActivity.class)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK | android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP));
+            } catch (Exception ignored) {
+            }
+            android.os.Process.killProcess(android.os.Process.myPid());
+        }, 2500);
     }
 
     private void writeExit(String text) {

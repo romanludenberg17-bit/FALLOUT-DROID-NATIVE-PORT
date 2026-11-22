@@ -169,6 +169,9 @@ public final class FalloutEngine {
         // longer offers more).
         String aa = iniValue(new File(homeDir(context, game.id), "NVForever.ini"), "anti-aliasing");
         if (aa != null && (aa.equalsIgnoreCase("4x") || aa.equalsIgnoreCase("8x"))) ini.get("Settings").put("anti-aliasing", "2x");
+        // The temporal shadow filter kept from an earlier choice: Smooth (it shimmered).
+        String filter = iniValue(new File(homeDir(context, game.id), "NVForever.ini"), "shadow-filter");
+        if (filter != null && filter.equalsIgnoreCase("Temporal")) ini.get("Settings").put("shadow-filter", "Smooth");
         // NVForever's own words (menus, settings) in the phone's language: its translations
         // go into the home's lang folder, and the language is chosen once (the settings
         // page's choice is kept after that).
@@ -814,10 +817,26 @@ public final class FalloutEngine {
         } catch (Exception e) {
             return false;
         }
-        SharedPreferences.Editor ed = prefs.edit().putLong("game_death_seen", newest);
-        if (bad && seen != 0) ed.putInt(GPU_SAFE, Math.min(2, prefs.getInt(GPU_SAFE, 0) + 1));
+        // The engine ends its own process after a lost graphics device (EXIT_SELF) before the
+        // game activity can start it over: a crash report saying so, newer than the last
+        // check, counts as such a death too.
+        long reportSeen = prefs.getLong("gpu_report_seen", 0), reportNewest = reportSeen;
+        for (String sc : new String[]{"fnv", "fo3"}) {
+            for (File crash : newestN(new File(homeDir(context, sc), "logs"), "crash-", ".txt", 2)) {
+                if (crash.lastModified() <= reportSeen) continue;
+                reportNewest = Math.max(reportNewest, crash.lastModified());
+                try {
+                    String t = readText(crash).toLowerCase(java.util.Locale.ROOT);
+                    if (t.contains("device lost") || t.contains("devicelost")) bad = true;
+                } catch (IOException ignored) {
+                }
+            }
+        }
+        SharedPreferences.Editor ed = prefs.edit().putLong("game_death_seen", newest).putLong("gpu_report_seen", reportNewest);
+        boolean first = seen == 0 && reportSeen == 0;
+        if (bad && !first) ed.putInt(GPU_SAFE, Math.min(2, prefs.getInt(GPU_SAFE, 0) + 1));
         ed.commit();
-        return bad && seen != 0;
+        return bad && !first;
     }
 
     /** What nvforever.exit says ("" when there is none). */
