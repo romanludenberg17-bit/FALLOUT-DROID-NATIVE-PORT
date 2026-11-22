@@ -145,6 +145,24 @@ public class PipBoyBridge extends WebViewClient {
             MainActivityTelegram.syncToJs(mainActivity, webView);
             return true;
         }
+        if (strSubstring.startsWith("fx_") && !strSubstring.equals("fx_state")) {
+            // fx_<name>_on / fx_<name>_off: the launcher's effect switches (FalloutEngine.Profile).
+            String[] parts = strSubstring.split("_");
+            if (parts.length == 3) {
+                Prefs.get(mainActivity).edit().putBoolean("fx_" + parts[1], parts[2].equals("on")).remove("gpu_safe_level").apply();
+            }
+            return true;
+        }
+        if (strSubstring.equals("fx_state")) {
+            StringBuilder js = new StringBuilder("{");
+            for (String k : new String[]{"terrain", "shafts", "ao", "clouds", "haze", "water"}) {
+                js.append('"').append(k).append("\":").append(Prefs.get(mainActivity).getBoolean("fx_" + k, false)).append(',');
+            }
+            js.setLength(js.length() - 1);
+            js.append('}');
+            webView.evaluateJavascript("if(window.__fdFxState)window.__fdFxState(" + js + ");", null);
+            return true;
+        }
         if (strSubstring.equals("mod_report")) {
             webView.evaluateJavascript("if(window.__fdModReport)window.__fdModReport(" + com.wastelanddroid.engine.FalloutEngine.modReportJson(mainActivity) + ");", null);
             return true;

@@ -1,8 +1,8 @@
 plugins { id 'com.android.application' }
 
 // Version: bump on every release (see PORT_PROGRESS.md).
-def fdVersionName = "2.0.0-alpha19"
-def fdVersionCode = 318
+def fdVersionName = "2.0.0-alpha20"
+def fdVersionCode = 319
 
 android {
     namespace 'com.wastelanddroid'

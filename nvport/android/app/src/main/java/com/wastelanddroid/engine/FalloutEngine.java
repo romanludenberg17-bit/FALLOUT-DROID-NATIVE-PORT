@@ -265,6 +265,7 @@ public final class FalloutEngine {
         com.wastelanddroid.game.GraphicsSettings g;
         int mipSkip, frameCap;
         boolean custom, fpsCounter;
+        boolean fxTerrain, fxShafts, fxAo, fxClouds, fxHaze, fxWater;
         int safe;
 
         static Profile of(Context context) {
@@ -291,6 +292,13 @@ public final class FalloutEngine {
                 p.mipSkip = Math.max(p.mipSkip, 2);
             }
             p.safe = Prefs.get(context).getInt(GPU_SAFE, 0);
+            SharedPreferences fx = Prefs.get(context);
+            p.fxTerrain = fx.getBoolean("fx_terrain", false);
+            p.fxShafts = fx.getBoolean("fx_shafts", false);
+            p.fxAo = fx.getBoolean("fx_ao", false);
+            p.fxClouds = fx.getBoolean("fx_clouds", false);
+            p.fxHaze = fx.getBoolean("fx_haze", false);
+            p.fxWater = fx.getBoolean("fx_water", false);
             if (p.safe >= 1) {
                 p.g.shadows = 0;
                 p.g.grassDensity = 0;
@@ -396,12 +404,22 @@ public final class FalloutEngine {
             // and cloud/terrain shadows, light shafts, water effects, the mesh/terrain blend
             // (a 1536² rgba16f atlas), anti-tiling, hazes; sun shadow maps at 2048, not 4096.
             boolean highClass = quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH;
-            set.put("ambient-occlusion", "Off");
             set.put("shadow-resolution", "2048");
-            for (String k : new String[]{"fine-shadows", "sharpen", "light-shafts", "water-effects", "mesh-terrain-blend",
-                    "terrain-height-blend", "terrain-anti-tiling", "cloud-shadows", "terrain-shadows", "heat-haze", "desert-haze"}) {
+            for (String k : new String[]{"fine-shadows", "sharpen", "mesh-terrain-blend", "terrain-shadows"}) {
                 set.put(k, "0");
             }
+            // The launcher's "Эффекты" switches (off by default, each costs frames; all off in
+            // the GPU safe mode): the engine's own counterparts of the effect mods (Vegas
+            // Shaders, Vanilla Plus Terrain), whose DLLs cannot run here.
+            boolean fx = safe == 0;
+            set.put("terrain-height-blend", fx && fxTerrain ? "1" : "0");
+            set.put("terrain-anti-tiling", fx && fxTerrain ? "1" : "0");
+            set.put("light-shafts", fx && fxShafts ? "1" : "0");
+            set.put("ambient-occlusion", fx && fxAo ? "Performance" : "Off");
+            set.put("cloud-shadows", fx && fxClouds ? "1" : "0");
+            set.put("heat-haze", fx && fxHaze ? "1" : "0");
+            set.put("desert-haze", fx && fxHaze ? "1" : "0");
+            set.put("water-effects", fx && fxWater ? "1" : "0");
             set.put("bloom", g.bloom ? "?1" : "?0");
             set.put("anisotropic", g.anisotropy >= 8 ? "?1" : "?0");
             set.put("water-reflections", "0");

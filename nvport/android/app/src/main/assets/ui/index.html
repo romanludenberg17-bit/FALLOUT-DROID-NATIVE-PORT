@@ -3820,6 +3820,54 @@ body.gamepad-connected-mode #ingame-controls-layer {
         </div>
       </div>
 
+      <!-- 4b. Effects (the engine's counterparts of the effect mods) -->
+      <div>
+        <div class="sec-group-title" style="margin-top:2px;">Эффекты графики</div>
+        <div class="setting-hint" style="margin:-4px 0 8px;">Встроенные в движок аналоги модов Vegas Shaders и Vanilla Plus Terrain (их DLL на Android не запускаются). По умолчанию выключены; действуют на обе игры со следующего запуска.</div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-name">Улучшенный ландшафт</div>
+            <div class="setting-hint">Аналог Vanilla Plus Terrain: смешивание текстур по высоте и без повторяющегося узора. −5…10% FPS</div>
+          </div>
+          <button class="seg-btn fx-toggle" style="min-width:72px;" id="fx-terrain" onclick="toggleFx('terrain', this)">ВЫКЛ</button>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-name">Лучи света</div>
+            <div class="setting-hint">Аналог «god rays» из Vegas Shaders: солнечные лучи сквозь листву и проёмы. −5…10% FPS</div>
+          </div>
+          <button class="seg-btn fx-toggle" style="min-width:72px;" id="fx-shafts" onclick="toggleFx('shafts', this)">ВЫКЛ</button>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-name">Затенение (AO)</div>
+            <div class="setting-hint">Мягкие тени в углах и под предметами, как в Vegas Shaders. −10…20% FPS</div>
+          </div>
+          <button class="seg-btn fx-toggle" style="min-width:72px;" id="fx-ao" onclick="toggleFx('ao', this)">ВЫКЛ</button>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-name">Тени облаков</div>
+            <div class="setting-hint">По земле бегут тени от облаков. −3…5% FPS</div>
+          </div>
+          <button class="seg-btn fx-toggle" style="min-width:72px;" id="fx-clouds" onclick="toggleFx('clouds', this)">ВЫКЛ</button>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-name">Марево и дымка</div>
+            <div class="setting-hint">Дрожание воздуха от жары и дымка пустыни. −3…5% FPS</div>
+          </div>
+          <button class="seg-btn fx-toggle" style="min-width:72px;" id="fx-haze" onclick="toggleFx('haze', this)">ВЫКЛ</button>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-name">Эффекты воды</div>
+            <div class="setting-hint">Каустика и рябь на воде. −3…8% FPS</div>
+          </div>
+          <button class="seg-btn fx-toggle" style="min-width:72px;" id="fx-water" onclick="toggleFx('water', this)">ВЫКЛ</button>
+        </div>
+      </div>
+
       <!-- 5. Per-Game Mods & Load Order -->
       <div>
         <div class="sec-group-title" style="margin-top:2px;">Моды и плагины (<span id="pg-mods-game-lbl">Fallout: New Vegas</span>)</div>
@@ -4564,7 +4612,21 @@ function selectGame(gameKey) {
   nextSlideshowImage();
 }
 
+
+function toggleFx(k, el) {
+  const on = !el.classList.contains('active');
+  el.classList.toggle('active', on);
+  el.textContent = on ? 'ВКЛ' : 'ВЫКЛ';
+  triggerNativeScheme('falloutpicker://fx_' + k + '_' + (on ? 'on' : 'off'));
+}
+window.__fdFxState = function(st) {
+  Object.keys(st || {}).forEach(function(k) {
+    const el = document.getElementById('fx-' + k);
+    if (el) { el.classList.toggle('active', !!st[k]); el.textContent = st[k] ? 'ВКЛ' : 'ВЫКЛ'; }
+  });
+};
 function openPerGameSettingsModal() {
+  try { triggerNativeScheme('falloutpicker://fx_state'); } catch (e) {}
   const modal = document.getElementById('per-game-settings-modal');
   const title = document.getElementById('pg-modal-title');
   const exeHint = document.getElementById('pg-exe-hint');
