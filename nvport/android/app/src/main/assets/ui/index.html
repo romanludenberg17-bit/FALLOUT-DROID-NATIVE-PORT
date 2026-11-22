@@ -3461,7 +3461,7 @@ body.gamepad-connected-mode #ingame-controls-layer {
             <div class="quick-specs-strip">
               <div class="spec-pill-card" onclick="reopenSetupWizard()" title="Открыть мастер настройки и загрузки драйверов">
                 <div class="spec-pill-label">Драйвер GPU / Настройка</div>
-                <div class="spec-pill-val" id="qspec-gpu">Snapdragon (Adreno)</div>
+                <div class="spec-pill-val" id="qspec-gpu">…</div>
               </div>
               <div class="spec-pill-card" onclick="openPerGameSettingsModal()">
                 <div class="spec-pill-label">Режим мыши</div>
@@ -3826,6 +3826,7 @@ body.gamepad-connected-mode #ingame-controls-layer {
         <div class="setting-row">
           <div>
             <div class="setting-name">Автонастройка графики</div>
+            <div class="setting-hint" id="fd-chip-line" style="color:var(--accent,#1aff80);"></div>
             <div class="setting-hint">По модели процессора и памяти: разрешение, тени, сглаживание, трава, дальность. Сбрасывает настройки графики, выбранные в игре, и выключает эффекты ниже.</div>
           </div>
           <button class="seg-btn" style="min-width:110px;" onclick="triggerNativeScheme('falloutpicker://gfx_auto')">Настроить</button>
@@ -4619,6 +4620,15 @@ function selectGame(gameKey) {
 }
 
 
+window.__fdDevice = function(d) {
+  var cls = {HIGH: 'мощный', MEDIUM: 'средний', LOW: 'слабый'}[d.cls] || d.cls;
+  window.__fdChip = d.chip + ' (' + d.gpu + ')';
+  var q = document.getElementById('qspec-gpu');
+  if (q) q.textContent = window.__fdChip;
+  var l = document.getElementById('fd-chip-line');
+  if (l) l.textContent = 'Ваш процессор: ' + d.chip + ', GPU ' + d.gpu + ' — класс «' + cls + '»';
+};
+setTimeout(function() { try { triggerNativeScheme('falloutpicker://device_info'); } catch (e) {} }, 400);
 function toggleFx(k, el) {
   const on = !el.classList.contains('active');
   el.classList.toggle('active', on);
@@ -4896,13 +4906,13 @@ function setGpuPreset(preset) {
   });
   const qgpu = document.getElementById('qspec-gpu');
   if (preset === 'adreno') {
-    if (qgpu) qgpu.textContent = 'Snapdragon (Adreno)';
+    if (qgpu && window.__fdChip) qgpu.textContent = window.__fdChip;
     setFpsLimit(60); setLowSpecMode(false);
   } else if (preset === 'exynos') {
-    if (qgpu) qgpu.textContent = 'Exynos (Xclipse)';
+    if (qgpu && window.__fdChip) qgpu.textContent = window.__fdChip;
     setFpsLimit(45); setLowSpecMode(false);
   } else {
-    if (qgpu) qgpu.textContent = 'Mali / G99 (PanVK)';
+    if (qgpu && window.__fdChip) qgpu.textContent = window.__fdChip;
     setFpsLimit(30); setLowSpecMode(true);
   }
 }

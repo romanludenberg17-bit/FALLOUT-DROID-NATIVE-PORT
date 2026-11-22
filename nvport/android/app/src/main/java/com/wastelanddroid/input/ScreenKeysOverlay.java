@@ -67,7 +67,7 @@ public class ScreenKeysOverlay extends View {
 
     // ---- smart hiding and menu gestures, by what the engine shows (NativeInput.uiState)
     public static final int UI_PLAY = 1, UI_MENU = 2, UI_FILM = 3, UI_PIPBOY = 4, UI_TALK = 5,
-            UI_MAIN_MENU = 6, UI_CHARGEN = 7, UI_PAUSE = 8, UI_MESSAGE = 9, UI_PIPBOY_MAP = 10, UI_LOCKPICK = 11;
+            UI_MAIN_MENU = 6, UI_CHARGEN = 7, UI_PAUSE = 8, UI_MESSAGE = 9, UI_PIPBOY_MAP = 10, UI_LOCKPICK = 11, UI_CONSOLE = 12;
     /** Lockpicking: the left part of the screen turns the screwdriver while held (W). */
     private static final float LOCK_TURN_SHARE = 0.38f;
     private static final int TURN_CODE = 17;
@@ -104,6 +104,8 @@ public class ScreenKeysOverlay extends View {
                 return false; // a scripted scene or a film: nothing to press
             case UI_LOCKPICK:
                 return has(k, 1) || has(k, 18); // Esc / E to leave; the screen does the rest
+            case UI_CONSOLE:
+                return false; // the console bar has the text and its own close button
             case UI_MENU:
                 for (int c : OTHER_MENU_CODES) if (has(k, c)) return true;
                 return false;

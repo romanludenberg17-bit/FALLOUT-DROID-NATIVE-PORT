@@ -6,6 +6,11 @@
 name = "Русский"
 
 [words]
+# [nvport] The pause menu's save page (pause.rs): saving over a save.
+"New Save" = "Новое сохранение"
+"Overwrite this save?" = "Перезаписать сохранение?"
+"Delete this save?" = "Удалить сохранение?"
+"No saves yet." = "Сохранений пока нет."
 # [nvport] The Tweaks page (engine/nvf-play/src/tweaks.rs): row names.
 "12-Hour Pip-Boy Clock" = "12-часовые часы Пип-Боя"
 "Action Points per Jump" = "ОД за прыжок"

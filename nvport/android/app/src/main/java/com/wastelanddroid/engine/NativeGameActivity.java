@@ -23,6 +23,7 @@ import com.wastelanddroid.input.ScreenKeysOverlay;
  */
 public class NativeGameActivity extends GameActivity implements QuickPanel.Host {
     private ScreenKeysOverlay overlay;
+    private com.wastelanddroid.input.ConsoleBar consoleBar;
     private CrtOverlay crt;
     private QuickPanel panel;
     private LoadingOverlay loading;
@@ -75,6 +76,9 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
         addContentView(crt, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         overlay.bringToFront();
+        consoleBar = new com.wastelanddroid.input.ConsoleBar(this);
+        addContentView(consoleBar, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, android.view.Gravity.TOP));
         panel = new QuickPanel(this, this);
         addContentView(panel, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -218,6 +222,7 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
                 if (engineUpAt == 0) engineUpAt = android.os.SystemClock.uptimeMillis();
                 else if (android.os.SystemClock.uptimeMillis() - engineUpAt > 700) loading.finish();
             }
+            if (consoleBar != null) consoleBar.setShown(state == ScreenKeysOverlay.UI_CONSOLE);
             if (overlay != null) {
                 overlay.setUiState(state);
                 try {

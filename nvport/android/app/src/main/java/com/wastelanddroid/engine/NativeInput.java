@@ -10,6 +10,23 @@ public final class NativeInput {
 
     public static native void key(int evdevCode, boolean down);
 
+    /** One character typed into the console bar (Android's keyboard commits text, not keys). */
+    public static native void typeChar(int codePoint);
+
+    /** A whole line for the console: its characters, then Enter. */
+    public static void typeLine(String line) {
+        try {
+            for (int i = 0; i < line.length(); ) {
+                int cp = line.codePointAt(i);
+                typeChar(cp);
+                i += Character.charCount(cp);
+            }
+            key(28, true);
+            key(28, false);
+        } catch (UnsatisfiedLinkError ignored) {
+        }
+    }
+
     /** Relative mouse motion in pixels (look). */
     public static native void mouseMove(float dx, float dy);
 
