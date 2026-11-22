@@ -145,6 +145,10 @@ public class PipBoyBridge extends WebViewClient {
             MainActivityTelegram.syncToJs(mainActivity, webView);
             return true;
         }
+        if (strSubstring.equals("mod_report")) {
+            webView.evaluateJavascript("if(window.__fdModReport)window.__fdModReport(" + com.wastelanddroid.engine.FalloutEngine.modReportJson(mainActivity) + ");", null);
+            return true;
+        }
         if (strSubstring.equals("check_core_mods")) {
             webView.evaluateJavascript("if(window.__fdModStoreStatus)window.__fdModStoreStatus(" + CoreModInstaller.check(GameDef.FNV.gameDir(mainActivity)) + ");", null);
             return true;

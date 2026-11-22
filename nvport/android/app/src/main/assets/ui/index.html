@@ -3482,11 +3482,11 @@ body.gamepad-connected-mode #ingame-controls-layer {
           <div class="modstore-header-card">
             <div>
               <div class="modstore-header-title">МАГАЗИН МОДОВ — FALLOUT: NEW VEGAS</div>
-              <div class="modstore-header-sub">Арсенал Курьера: база и FPS Overlay вшиты в APK + каталог Nexus Mods прямо в лаунчере</div>
+              <div class="modstore-header-sub">NVSE, JIP LN, JohnnyGuitar, kNVSE встроены в нативный движок + проверка совместимости модов и каталог Nexus Mods</div>
             </div>
             <div style="display:flex;align-items:center;gap:10px;">
-              <span class="modstore-progress-pill" id="modstore-core-progress">База: 0 / 6</span>
-              <button class="modstore-btn" id="btn-open-fnv-modmgr" onclick="openModManagerModal()" style="white-space:nowrap;flex-shrink:0;display:inline-flex;align-items:center;gap:6px;padding:0 14px;height:36px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg><span>Менеджер модов</span></button><button class="modstore-btn primary" id="btn-install-all-core" onclick="installAllCoreMods()">Установить всю базу</button>
+              <span class="modstore-progress-pill" id="modstore-core-progress">Расширители: встроены</span>
+              <button class="modstore-btn" id="btn-open-fnv-modmgr" onclick="openModManagerModal()" style="white-space:nowrap;flex-shrink:0;display:inline-flex;align-items:center;gap:6px;padding:0 14px;height:36px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg><span>Менеджер модов</span></button><button class="modstore-btn primary" id="btn-install-all-core" onclick="installAllCoreMods()">Обновить отчёт</button>
             </div>
           </div>
 
@@ -3898,7 +3898,7 @@ body.gamepad-connected-mode #ingame-controls-layer {
         </div>
         <div class="mod-item">
           <div>
-            <div style="font-weight:800;" id="pg-se-lbl">xNVSE 6.3.5 + NVTF (New Vegas Tick Fix) + 4GB Patch</div>
+            <div style="font-weight:800;" id="pg-se-lbl">xNVSE, JIP LN, JohnnyGuitar, kNVSE — встроены в движок</div>
             <div style="font-size:11px; color:var(--text-muted);">Расширитель скриптов и оптимизация памяти в контейнере</div>
           </div>
           <button class="seg-btn active" id="pg-fose-btn" onclick="toggleModStatus(this)">ВКЛ</button>
@@ -4647,7 +4647,7 @@ function openPerGameSettingsModal() {
     if (exeHint) exeHint.textContent = 'FalloutNV.exe и папка Data/';
     if (modsLbl) modsLbl.textContent = 'Fallout: New Vegas';
     if (esmLbl) esmLbl.textContent = 'FalloutNV.esm + Все официальные DLC (Dead Money, Honest Hearts, OWB, Lonesome Road)';
-    if (seLbl) seLbl.textContent = 'xNVSE 6.3.5 + NVTF (New Vegas Tick Fix) + 4GB Patch';
+    if (seLbl) seLbl.textContent = 'xNVSE, JIP LN, JohnnyGuitar, kNVSE — встроены в движок';
   } else {
     if (title) title.textContent = 'НАСТРОЙКИ ИГРЫ: FALLOUT 3 GOTY';
     const mmb = document.getElementById('pg-modmgr-btn'); if (mmb) mmb.style.display = '';
@@ -5590,13 +5590,46 @@ function renderFdModManager() {
 <script>
 /* === FD MOD STORE JS (v1.1.61 — 5 Offline Core Mods + Nexus In-App Direct Download + FNV Mod Manager) === */
 const FD_MANDATORY_MODS = [
-  { id: '4gb_patch', name: '4GB Patch', tag: 'Вшит в APK', desc: 'Патчит FalloutNV.exe (Large Address Aware — 4 ГБ памяти) напрямую на устройстве.' },
-  { id: 'nvse', name: 'xNVSE 6.4.9', tag: 'Вшит в APK', desc: 'New Vegas Script Extender — распаковывается в корень игры (nvse_loader.exe) мгновенно без интернета.' },
-  { id: 'jip_ln', name: 'JIP LN NVSE 57.30', tag: 'Вшит в APK', desc: 'Главный плагин NVSE с исправлениями движка — распаковывается в Data/NVSE/Plugins/.' },
-  { id: 'johnny_guitar', name: 'JohnnyGuitar NVSE 5.28', tag: 'Вшит в APK', desc: 'Библиотека скриптовых функций для современных модов — распаковывается в Data/NVSE/Plugins/.' },
-  { id: 'knvse', name: 'kNVSE v37', tag: 'Вшит в APK', desc: 'Поддержка кастомных анимаций оружия и персонажей — распаковывается в Data/NVSE/Plugins/.' },
-  { id: 'fps_overlay', name: 'FPS Overlay (HUD)', tag: 'Вшит в APK', desc: 'Встроенный игровой счётчик FPS (FPSCounter.esp + HUD XML + UIO) — распаковывается и подключается в Data/.' }
+  { id: 'nvse', name: 'xNVSE / FOSE', tag: 'В движке', desc: 'Функции скриптового расширителя переписаны внутри нативного движка: моды, которым нужен NVSE (или FOSE в Fallout 3), работают без DLL и без nvse_loader.exe.' },
+  { id: 'jip_ln', name: 'JIP LN NVSE', tag: 'В движке', desc: 'Функции JIP LN (14 модулей: инвентарь, UI, анимации, звук, оружие и др.) встроены в движок.' },
+  { id: 'johnny_guitar', name: 'JohnnyGuitar NVSE', tag: 'В движке', desc: 'Функции JohnnyGuitar (10 модулей) встроены в движок.' },
+  { id: 'knvse', name: 'kNVSE', tag: 'В движке', desc: 'Замена анимаций: функции kNVSE и папки meshes\\AnimGroupOverride (с JSON) читаются движком напрямую.' },
+  { id: 'tweaks', name: "ShowOff, lutana, Stewie's Tweaks", tag: 'В движке', desc: 'Популярные расширения и твики встроены; твики Стьюи — в настройках движка внутри игры.' },
+  { id: 'patches', name: '4GB Patch, NVTF, NVHR, NVAC', tag: 'Не нужны', desc: 'Это исправления старого FalloutNV.exe. Здесь вместо него нативный движок: памяти, частоты кадров и стабильности они не добавят.' }
 ];
+const FD_NOT_SUPPORTED = 'Не работают на Android: ENB и ReShade (встраиваются в DirectX 9, а движок рисует через Vulkan) и любые другие .dll-плагины. Текстуры, модели, звуки и .esp/.esm — работают (BSA и свободные файлы в Data).';
+let fdModReport = null;
+window.__fdModReport = function(r) { fdModReport = r || {}; renderModStore(); };
+function fdEsc(t) { return String(t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function fdModReportHtml() {
+  if (!fdModReport) return '<div class="modstore-card-desc" style="padding:6px 0;">Загрузка отчёта о модах...</div>';
+  let html = '';
+  [['fnv','Fallout: New Vegas'],['fo3','Fallout 3']].forEach(function(g) {
+    const r = fdModReport[g[0]];
+    html += '<div style="font-weight:800;margin:12px 0 6px;">' + g[1] + '</div>';
+    if (!r || !r.when) { html += '<div class="modstore-card-desc">Отчёт появится после первого запуска игры с модами.</div>'; return; }
+    const d = new Date(r.when);
+    html += '<div class="modstore-card-desc" style="margin-bottom:6px;">По запуску ' + d.toLocaleString('ru-RU') + '</div>';
+    (r.dropped || []).forEach(function(x) {
+      html += '<div class="modstore-card-desc" style="color:#ff7a5c;">✖ Не загружен: ' + fdEsc(x) + '</div>';
+    });
+    const masters = /^(FalloutNV|Fallout3|DeadMoney|HonestHearts|OldWorldBlues|LonesomeRoad|GunRunnersArsenal|ClassicPack|MercenaryPack|TribalPack|CaravanPack|Anchorage|ThePitt|BrokenSteel|PointLookout|Zeta)\.esm$/i;
+    const mods = (r.plugins || []).filter(p => !masters.test(p.name));
+    if (!mods.length) { html += '<div class="modstore-card-desc">Плагинов модов со скриптами нет.</div>'; return; }
+    mods.forEach(function(p) {
+      const miss = p.missing || [];
+      const ok = !miss.length;
+      html += '<div class="modstore-card' + (ok ? ' installed' : '') + '" style="margin-bottom:6px;">'
+        + '<div class="modstore-card-top"><div class="modstore-card-name">' + fdEsc(p.name) + '</div>'
+        + '<span class="modstore-status' + (ok ? ' ok' : '') + '">' + (ok ? 'Все функции есть' : ('Нет функций: ' + miss.length)) + '</span></div>'
+        + '<div class="modstore-card-desc">Скриптов: ' + p.scripts + (p.bytes ? (', из них ' + p.bytes + ' в исходном байт-коде') : '')
+        + (ok ? '' : '<br>Эти вызовы ничего не делают, мод может работать частично: <span style="opacity:.85">' + miss.map(fdEsc).join(', ') + '</span>')
+        + '</div></div>';
+    });
+  });
+  return html;
+}
+
 
 const FD_NEXUS_CATALOG = [
   { nexusId: 51664, name: 'YUP — Yukichigai Unofficial Patch', cat: 'base', catLabel: 'Патч', req: 'База FNV', desc: 'Главный неофициальный патч: тысячи исправлений квестов, предметов и скриптов игры + DLC.' },
@@ -5660,32 +5693,23 @@ function renderModStore() {
   const btnAll = document.getElementById('btn-install-all-core');
   if (!grid || !cat) return;
 
-  const doneCount = FD_MANDATORY_MODS.filter(m => !!fdCoreInstalled[m.id]).length;
-  const totalReq = FD_MANDATORY_MODS.length;
-  if (prog) prog.textContent = fdCoreCheckedOnce ? ('База: ' + doneCount + ' / ' + totalReq) : 'Проверка...';
+  if (prog) prog.textContent = 'Расширители: встроены';
   if (btnAll) {
-    if (fdInstallingId) {
-      btnAll.textContent = 'Установка...';
-      btnAll.disabled = true;
-    } else {
-      btnAll.textContent = doneCount === totalReq ? 'Переустановить базу' : 'Установить всю базу';
-      btnAll.disabled = false;
-    }
+    btnAll.textContent = 'Обновить отчёт';
+    btnAll.disabled = false;
   }
 
   grid.innerHTML = FD_MANDATORY_MODS.map(m => {
-    const ok = !!fdCoreInstalled[m.id];
-    const busy = (fdInstallingId === m.id);
-    const statusTxt = busy ? 'Установка...' : (ok ? 'Установлено' : 'Не установлен');
-    const btnTxt = busy ? '...' : (ok ? 'Переустановить' : 'Установить');
-    return '<div class="modstore-card' + (ok ? ' installed' : '') + (busy ? ' installing' : '') + '">'
+    const builtIn = m.tag === 'В движке';
+    return '<div class="modstore-card' + (builtIn ? ' installed' : '') + '">'
       + '<div class="modstore-card-top"><div class="modstore-card-name">' + m.name + '</div><span class="modstore-card-tag">' + m.tag + '</span></div>'
       + '<div class="modstore-card-desc">' + m.desc + '</div>'
       + '<div class="modstore-card-foot">'
-      + '<span class="modstore-status' + ((ok || busy) ? ' ok' : '') + '">' + statusTxt + '</span>'
-      + '<button class="modstore-btn primary" onclick="installMandatoryMod(\'' + m.id + '\')"' + ((busy || fdInstallingId) ? ' disabled' : '') + '>' + btnTxt + '</button>'
+      + '<span class="modstore-status' + (builtIn ? ' ok' : '') + '">' + (builtIn ? 'Работает без установки' : 'Не требуется') + '</span>'
       + '</div></div>';
-  }).join('');
+  }).join('')
+    + '<div class="modstore-card" style="grid-column:1/-1;"><div class="modstore-card-top"><div class="modstore-card-name">Совместимость ваших модов</div><span class="modstore-card-tag">по логу движка</span></div>'
+    + '<div class="modstore-card-desc">' + FD_NOT_SUPPORTED + '</div>' + fdModReportHtml() + '</div>';
 
   if (badge) badge.textContent = 'Nexus Mods (' + FD_NEXUS_CATALOG.length + ' модов FNV)';
 
@@ -5756,6 +5780,8 @@ function installMandatoryMod(modId) {
 }
 
 function installAllCoreMods() {
+  if (typeof triggerNativeScheme === 'function') triggerNativeScheme('falloutpicker://mod_report');
+  return;
   if (fdInstallingId) return;
   let missing = FD_MANDATORY_MODS.filter(m => !fdCoreInstalled[m.id]);
   fdInstallQueue = missing.length ? missing : FD_MANDATORY_MODS.slice();
@@ -5818,6 +5844,7 @@ window.__fdExternalModDone = function(res) {
       origSwitch(tabId);
       if (tabId === 'modstore' && !fdInstallingId && typeof triggerNativeScheme === 'function') {
         triggerNativeScheme('falloutpicker://check_core_mods');
+        triggerNativeScheme('falloutpicker://mod_report');
       }
     };
   }

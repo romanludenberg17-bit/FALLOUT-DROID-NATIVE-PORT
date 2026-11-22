@@ -180,6 +180,10 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
             } catch (UnsatisfiedLinkError ignored) {
             }
             if (exited && !restart && !restarting) {
+                // The graphics driver lost the device (Adreno/Mali reset the GPU): the
+                // game starts again by itself from its newest save, behind the loading
+                // screen, instead of dropping to the launcher.
+                if (recoverFromDeviceLoss()) return;
                 // Quit Game: back to the launcher.
                 restarting = true;
                 finish();
@@ -256,6 +260,94 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
         // The relay ends this process once it is on screen (SIGKILL: no destructors under the
         // engine's live threads; its memory free before the next run). Killing it here, before
         // the relay showed, let the launcher under it come up meanwhile.
+    }
+
+    private static final String RECOVERIES = "gpu_recoveries";
+    private final long startedAt = System.currentTimeMillis();
+
+    /** Starts the game again after a lost graphics device; false when it was not one. */
+    private boolean recoverFromDeviceLoss() {
+        String game = getIntent().getStringExtra("game");
+        if (game == null) game = this instanceof NativeGameActivityFo3 ? "fo3" : "fnv";
+        java.io.File home = FalloutEngine.homeDir(this, game);
+        java.io.File crash = newestFile(new java.io.File(home, "logs"), "crash-", ".txt");
+        long now = System.currentTimeMillis();
+        if (crash == null || now - crash.lastModified() > 30_000) return false;
+        String text;
+        try {
+            byte[] b = java.nio.file.Files.readAllBytes(crash.toPath());
+            text = new String(b, java.nio.charset.StandardCharsets.UTF_8).toLowerCase(java.util.Locale.ROOT);
+        } catch (Exception e) {
+            return false;
+        }
+        if (!text.contains("device lost") && !text.contains("devicelost")) return false;
+        // At most 3 times in 10 minutes: a loss on every start would loop for ever.
+        android.content.SharedPreferences prefs = com.wastelanddroid.util.Prefs.get(this);
+        String[] past = prefs.getString(RECOVERIES, "").split(",");
+        StringBuilder keep = new StringBuilder();
+        int recent = 0;
+        for (String t : past) {
+            try {
+                long v = Long.parseLong(t.trim());
+                if (now - v < 600_000) {
+                    recent++;
+                    keep.append(v).append(',');
+                }
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        if (recent >= 3) return false;
+        keep.append(now);
+        prefs.edit().putString(RECOVERIES, keep.toString()).commit();
+        // The command line again, ending in the newest save (or the main menu).
+        // A save written during this run (autosave, quicksave), else the one it started from.
+        java.io.File save = newestFile(new java.io.File(home, "saves"), "", ".nvfsave");
+        if (save != null && save.lastModified() < startedAt) save = null;
+        try {
+            java.io.File args = new java.io.File(getFilesDir(), FalloutEngine.ARGS_FILE);
+            java.util.List<String> lines = new java.util.ArrayList<>(java.nio.file.Files.readAllLines(args.toPath(), java.nio.charset.StandardCharsets.UTF_8));
+            if (save == null) {
+                int at = lines.indexOf("--load");
+                if (at >= 0 && at + 1 < lines.size() && new java.io.File(lines.get(at + 1)).isFile()) save = new java.io.File(lines.get(at + 1));
+            }
+            java.util.List<String> out = new java.util.ArrayList<>();
+            for (int i = 0; i < lines.size(); i++) {
+                String l = lines.get(i);
+                if (l.equals("--menu") || l.equals("--new-game")) continue;
+                if (l.equals("--load") || l.equals("--handoff")) {
+                    i++;
+                    continue;
+                }
+                out.add(l);
+            }
+            if (save != null) {
+                out.add("--load");
+                out.add(save.getAbsolutePath());
+            } else {
+                out.add("--menu");
+            }
+            StringBuilder sb = new StringBuilder();
+            for (String l : out) sb.append(l).append('\n');
+            FalloutEngine.writeArgs(this, sb.toString());
+        } catch (Exception e) {
+            android.util.Log.w("NVForever", "device loss: could not write the command line", e);
+            return false;
+        }
+        android.util.Log.i("NVForever", "graphics device lost: starting again from " + (save == null ? "the main menu" : save));
+        android.widget.Toast.makeText(this, save == null ? "Сбой видеодрайвера — перезапуск игры" : "Сбой видеодрайвера — перезапуск с последнего сохранения", android.widget.Toast.LENGTH_LONG).show();
+        restartGame();
+        return true;
+    }
+
+    private static java.io.File newestFile(java.io.File dir, String prefix, String suffix) {
+        java.io.File[] kids = dir.listFiles();
+        java.io.File best = null;
+        if (kids == null) return null;
+        for (java.io.File f : kids) {
+            String n = f.getName().toLowerCase(java.util.Locale.ROOT);
+            if (f.isFile() && n.startsWith(prefix) && n.endsWith(suffix) && (best == null || f.lastModified() > best.lastModified())) best = f;
+        }
+        return best;
     }
 
     // ---- the quick panel (QuickPanel.Host)

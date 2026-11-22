@@ -471,7 +471,7 @@ index 4cf8199..5cf51d2 100644
      for (b, mut v, mut node, mut image) in &mut bars {
          v.set_if_neq(show(!view_hidden && !locks.movement && !aimed && cross));
 diff --git a/engine/nvf-play/src/script.rs b/engine/nvf-play/src/script.rs
-index c1893ca..010b93b 100644
+index c1893ca..757bdc8 100644
 --- a/engine/nvf-play/src/script.rs
 +++ b/engine/nvf-play/src/script.rs
 @@ -196,6 +196,189 @@ pub struct NewGameStart {
@@ -664,6 +664,35 @@ index c1893ca..010b93b 100644
      let cell = index.cell_by_name(NEW_GAME_CELL).filter(|c| c.world.is_none()).ok_or_else(|| format!("no interior cell {NEW_GAME_CELL}"))?;
      for &r in &cell.refs {
          let Some((pi, rec)) = fnv_world::fields::winner(lo, r) else { continue };
+@@ -2204,6 +2387,28 @@ pub(crate) fn run_scripts(
+                         if unknown.len() > SHOWN { ", ..." } else { "" }
+                     );
+                 }
++                // Android: the launcher's mod page shows, per plugin, the functions its
++                // scripts call that NVForever does not have (NVFOREVER_HOME/mod_report.tsv:
++                // plugin, scripts, scripts kept as bytes, missing functions).
++                #[cfg(target_os = "android")]
++                if let Some(home) = std::env::var_os("NVFOREVER_HOME") {
++                    let mut per: std::collections::BTreeMap<String, (usize, usize, std::collections::BTreeSet<String>)> = Default::default();
++                    for u in &data.source_units {
++                        let e = per.entry(u.plugin.clone()).or_default();
++                        e.0 += 1;
++                        if u.error.is_some() {
++                            e.1 += 1;
++                        }
++                        for n in &u.unknown_functions {
++                            e.2.insert(n.clone());
++                        }
++                    }
++                    let mut out = String::new();
++                    for (plugin, (n, bad, missing)) in per {
++                        out.push_str(&format!("{plugin}\t{n}\t{bad}\t{}\n", missing.into_iter().collect::<Vec<_>>().join(",")));
++                    }
++                    let _ = std::fs::write(std::path::Path::new(&home).join("mod_report.tsv"), out);
++                }
+                 let running = rt.game.quests.values().filter(|q| q.running).count();
+                 info!(
+                     "scripts ready in {secs:.2} s: {} units, {} scripts, {} quests ({running} start-game-enabled quests running)",
 diff --git a/engine/nvf-play/src/script_hud.rs b/engine/nvf-play/src/script_hud.rs
 index c1b5bc6..9a6a482 100644
 --- a/engine/nvf-play/src/script_hud.rs
@@ -1168,7 +1197,7 @@ index a154858..7bceae8 100644
          let wp = select(w, 0.0, near(uv + off));
          let wm = select(w, 0.0, near(uv - off));
 diff --git a/engine/nvforever/src/main.rs b/engine/nvforever/src/main.rs
-index a6cf138..9f03b8c 100644
+index a6cf138..1dd8f91 100644
 --- a/engine/nvforever/src/main.rs
 +++ b/engine/nvforever/src/main.rs
 @@ -82,6 +82,8 @@ mod haze;
@@ -1180,7 +1209,28 @@ index a6cf138..9f03b8c 100644
  mod dlss;
  mod dlss_download;
  mod nv_low_latency;
-@@ -1061,12 +1063,163 @@ fn parse_smoothing(value: &str) -> Result<nvf_play::smooth_terrain::Smoothing, S
+@@ -985,6 +987,20 @@ fn report_archives(data: Res<GameData>, world: Res<WorldData>) {
+     for d in &world.dropped_plugins {
+         warn!("{d}");
+     }
++    // Android: the launcher's mod page names the plugins that did not load and why.
++    #[cfg(target_os = "android")]
++    if let Some(home) = std::env::var_os("NVFOREVER_HOME") {
++        let mut out = String::new();
++        for d in &world.dropped_plugins {
++            out.push_str(&d.replace('\n', " "));
++            out.push('\n');
++        }
++        for (name, why) in data.vfs.skipped() {
++            out.push_str(&format!("{name}: cannot be read: {why}\n").replace('\n', " ").trim_end());
++            out.push('\n');
++        }
++        let _ = std::fs::write(std::path::Path::new(&home).join("mod_dropped.txt"), out);
++    }
+ }
+ 
+ /// Arguments that choose a world or a mode. A command line with none of them is the game
+@@ -1061,12 +1077,163 @@ fn parse_smoothing(value: &str) -> Result<nvf_play::smooth_terrain::Smoothing, S
  #[global_allocator]
  static ALLOCATOR: crash::SaysWhenEmpty = crash::SaysWhenEmpty;
  
@@ -1345,7 +1395,7 @@ index a6cf138..9f03b8c 100644
      if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(std::path::Path::to_path_buf)) {
          line = with_schemas_beside(line, &dir);
          let functions = dir.join("schemas").join("script").join("functions.json");
-@@ -1075,7 +1228,15 @@ fn main() -> AppExit {
+@@ -1075,7 +1242,15 @@ fn main() -> AppExit {
              std::env::set_var("NVF_PLAY_SCRIPT_FUNCTIONS", &functions);
          }
      }
@@ -1362,7 +1412,7 @@ index a6cf138..9f03b8c 100644
      let _ = COMMAND_LINE.set(line);
      // Taking over a load: tell the old run at once that this run takes part (#1903).
      let handoff_marked = args.handoff.as_deref().map(handoff::mark_started);
-@@ -2326,6 +2487,8 @@ fn main() -> AppExit {
+@@ -2326,6 +2501,8 @@ fn main() -> AppExit {
              s.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
          });
      }

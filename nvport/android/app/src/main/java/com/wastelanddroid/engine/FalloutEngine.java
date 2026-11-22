@@ -222,6 +222,16 @@ public final class FalloutEngine {
         return new Prepared.Ok(game, args);
     }
 
+    /** The engine's command line for its next start (both copies). */
+    public static void writeArgs(Context context, String text) throws IOException {
+        writeText(new File(context.getFilesDir(), ARGS_FILE), text);
+        File ext = context.getExternalFilesDir(null);
+        if (ext != null) {
+            new File(ext, EXIT_FILE).delete();
+            writeText(new File(ext, "nvport_args.txt"), text);
+        }
+    }
+
     public static void launch(Activity activity, Prepared.Ok ok) throws IOException {
         StringBuilder sb = new StringBuilder();
         for (String a : ok.getArgs()) sb.append(a).append('\n');
@@ -602,11 +612,22 @@ public final class FalloutEngine {
                 .append(", Android ").append(android.os.Build.VERSION.RELEASE).append(" (API ").append(android.os.Build.VERSION.SDK_INT).append(")\n");
         sb.append("Exit: ").append(exitStatus(context)).append(gameProcessAlive(context) ? " (game process alive)" : "").append("\n");
         section(sb, "command line", new File(base, "nvport_args.txt"), 16 * 1024);
-        section(sb, LOG_FILE, log, 512 * 1024);
+        section(sb, LOG_FILE, log, 96 * 1024);
+        // Both games, the last played first: a crash while loading a save is followed by
+        // the restart's own run, so the last three runs and crash reports of each go in.
         String scope = Prefs.get(context).getString("last_scope", "fnv");
-        File logs = new File(homeDir(context, scope), "logs");
-        section(sb, "run log", newest(logs, "nvforever-", ".log"), 512 * 1024);
-        section(sb, "crash report", newest(logs, "crash-", ".txt"), 256 * 1024);
+        String[] scopes = "fo3".equals(scope) ? new String[]{"fo3", "fnv"} : new String[]{"fnv", "fo3"};
+        for (String sc : scopes) {
+            File logs = new File(homeDir(context, sc), "logs");
+            List<File> runs = newestN(logs, "nvforever-", ".log", 3);
+            if (runs.isEmpty() && !sc.equals(scope)) continue;
+            String g = sc.equals("fo3") ? "Fallout 3" : "New Vegas";
+            for (int i = 0; i < runs.size(); i++) {
+                section(sb, g + ": run log" + (i == 0 ? "" : " -" + i), runs.get(i), i == 0 ? 448 * 1024 : 128 * 1024);
+            }
+            if (runs.isEmpty()) section(sb, g + ": run log", null, 0);
+            for (File crash : newestN(logs, "crash-", ".txt", 3)) section(sb, g + ": crash report", crash, 48 * 1024);
+        }
         File report = new File(base, REPORT_FILE);
         try {
             writeText(report, sb.toString());
@@ -689,6 +710,66 @@ public final class FalloutEngine {
             if (n.startsWith(prefix) && n.endsWith(suffix) && (best == null || f.lastModified() > best.lastModified())) best = f;
         }
         return best;
+    }
+
+    /**
+     * What the engine found in the mods at its last start, per game, for the launcher's mod
+     * page: {"fnv":{"when":ms,"plugins":[{"name","scripts","bytes","missing":[..]}],
+     * "dropped":[..]},"fo3":{..}} (NVFOREVER_HOME/mod_report.tsv and mod_dropped.txt).
+     */
+    public static String modReportJson(Context context) {
+        org.json.JSONObject all = new org.json.JSONObject();
+        for (String sc : new String[]{"fnv", "fo3"}) {
+            try {
+                File home = homeDir(context, sc);
+                File tsv = new File(home, "mod_report.tsv");
+                File dropped = new File(home, "mod_dropped.txt");
+                org.json.JSONObject g = new org.json.JSONObject();
+                g.put("when", tsv.isFile() ? tsv.lastModified() : 0);
+                org.json.JSONArray plugins = new org.json.JSONArray();
+                if (tsv.isFile()) {
+                    for (String line : readText(tsv).split("\n")) {
+                        String[] f = line.split("\t", -1);
+                        if (f.length < 4 || f[0].isEmpty()) continue;
+                        org.json.JSONObject p = new org.json.JSONObject();
+                        p.put("name", f[0]);
+                        p.put("scripts", parseIntOr(f[1], 0));
+                        p.put("bytes", parseIntOr(f[2], 0));
+                        org.json.JSONArray miss = new org.json.JSONArray();
+                        for (String m : f[3].split(",")) if (!m.isEmpty()) miss.put(m);
+                        p.put("missing", miss);
+                        plugins.put(p);
+                    }
+                }
+                g.put("plugins", plugins);
+                org.json.JSONArray drop = new org.json.JSONArray();
+                if (dropped.isFile()) for (String line : readText(dropped).split("\n")) if (!line.trim().isEmpty()) drop.put(line.trim());
+                g.put("dropped", drop);
+                all.put(sc, g);
+            } catch (Exception ignored) {
+            }
+        }
+        return all.toString();
+    }
+
+    private static int parseIntOr(String s, int d) {
+        try {
+            return Integer.parseInt(s.trim());
+        } catch (NumberFormatException e) {
+            return d;
+        }
+    }
+
+    private static List<File> newestN(File dir, String prefix, String suffix, int n) {
+        List<File> out = new java.util.ArrayList<>();
+        File[] kids = dir.listFiles();
+        if (kids == null) return out;
+        for (File f : kids) {
+            String name = f.getName();
+            if (name.startsWith(prefix) && name.endsWith(suffix)) out.add(f);
+        }
+        java.util.Collections.sort(out, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+        return out.size() > n ? out.subList(0, n) : out;
     }
 
     private static String tail(File f, int lines) {
