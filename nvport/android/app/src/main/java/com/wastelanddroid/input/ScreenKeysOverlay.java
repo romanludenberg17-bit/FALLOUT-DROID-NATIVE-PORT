@@ -264,28 +264,57 @@ public class ScreenKeysOverlay extends View {
         }
         if (id != lookId) return;
         lookId = -1;
-        boolean tap = gesture == G_PENDING && !lookMoved && t >= 0;
+        boolean still = gesture == G_PENDING && !lookMoved && t >= 0;
+        // Held still: the right button (drop an item, the other action of a row).
+        boolean longPress = still && t - downAt >= LONG_PRESS_MS;
         if (gesture == G_DRAG) {
             NativeInput.pointTo(x, y);
         }
         endGesture();
-        if (tap) clickAt(x, y);
+        if (longPress) rightClickAt(x, y);
+        else if (still) clickAt(x, y);
     }
+
+    private static final long LONG_PRESS_MS = 550;
 
     // The engine finds what is under the pointer from the frames before a click (hover):
     // a click in the frame the pointer moved lands on nothing. So the pointer goes first,
     // the button a few frames later.
-    private static final long CLICK_PRESS_DELAY_MS = 50, CLICK_RELEASE_DELAY_MS = 110;
+    // A row is selected by the pointer resting on it (hover) and acted on by a click on the
+    // selected row: the pointer goes, moves a hair a little later (the engine sees a move
+    // onto the row even at 20 FPS), and the button comes several frames after that.
+    private static final long CLICK_NUDGE_MS = 45, CLICK_PRESS_DELAY_MS = 140, CLICK_RELEASE_DELAY_MS = 210;
     private final android.os.Handler clicks = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable lmbDown = () -> NativeInput.key(272, true);
     private final Runnable lmbUp = () -> NativeInput.key(272, false);
+    private final Runnable rmbDown = () -> NativeInput.key(273, true);
+    private final Runnable rmbUp = () -> NativeInput.key(273, false);
+    private float clickX, clickY;
+    private final Runnable nudge = () -> NativeInput.pointTo(clickX + 1f, clickY);
 
-    private void clickAt(float x, float y) {
+    private void pointForClick(float x, float y) {
         clicks.removeCallbacks(lmbDown);
         clicks.removeCallbacks(lmbUp);
+        clicks.removeCallbacks(rmbDown);
+        clicks.removeCallbacks(rmbUp);
+        clicks.removeCallbacks(nudge);
+        clickX = x;
+        clickY = y;
         NativeInput.pointTo(x, y);
+        clicks.postDelayed(nudge, CLICK_NUDGE_MS);
+    }
+
+    private void clickAt(float x, float y) {
+        pointForClick(x, y);
         clicks.postDelayed(lmbDown, CLICK_PRESS_DELAY_MS);
         clicks.postDelayed(lmbUp, CLICK_RELEASE_DELAY_MS);
+    }
+
+    private void rightClickAt(float x, float y) {
+        performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+        pointForClick(x, y);
+        clicks.postDelayed(rmbDown, CLICK_PRESS_DELAY_MS);
+        clicks.postDelayed(rmbUp, CLICK_RELEASE_DELAY_MS);
     }
 
     // ---- editor mode (ControlsEditorActivity)

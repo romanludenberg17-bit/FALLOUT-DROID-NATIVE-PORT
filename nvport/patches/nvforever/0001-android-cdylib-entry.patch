@@ -1115,6 +1115,63 @@ index 0000000..1b06365
 +        _ => return None,
 +    })
 +}
+diff --git a/engine/nvforever/src/blackjack_view.rs b/engine/nvforever/src/blackjack_view.rs
+index 74c2936..063c304 100644
+--- a/engine/nvforever/src/blackjack_view.rs
++++ b/engine/nvforever/src/blackjack_view.rs
+@@ -312,7 +312,7 @@ fn build(commands: &mut Commands, s: &Session, models: &mut ModelCtx, window: &Q
+             RenderTarget::Image(ImageRenderTarget::from(image.clone())),
+             Projection::Perspective(PerspectiveProjection { fov: FOV_DEG.to_radians(), near: 1.0, far: 3000.0, ..default() }),
+             Tonemapping::Linear,
+-            Msaa::Sample4,
++            crate::graphics::offscreen_msaa(),
+             AmbientLight { color: Color::WHITE, brightness: 120.0, ..default() },
+             Transform::from_translation(to(eye)).looking_at(to(aim), Vec3::Y),
+             layer.clone(),
+diff --git a/engine/nvforever/src/dlss/mod.rs b/engine/nvforever/src/dlss/mod.rs
+index a1ead38..2fd4be3 100644
+--- a/engine/nvforever/src/dlss/mod.rs
++++ b/engine/nvforever/src/dlss/mod.rs
+@@ -1074,11 +1074,23 @@ pub fn render_plugin() -> bevy::render::RenderPlugin {
+     let adapter_name = adapter_pin();
+     let memory_hints = crate::memory_budget::hints_at_start();
+     bevy::render::RenderPlugin {
+-        render_creation: bevy::render::settings::WgpuSettings { adapter_name, memory_hints, ..default() }.into(),
++        render_creation: bevy::render::settings::WgpuSettings { adapter_name, memory_hints, disabled_features: android_disabled_features(), ..default() }.into(),
+         ..default()
+     }
+ }
+ 
++/// Android: bindless textures off (no texture/sampler binding arrays, no non-uniform
++/// indexing). Adreno drivers lose the device and show textures flickering with the
++/// bindless materials; every material has its ordinary bind-group path. NVF_BINDLESS=1
++/// keeps them.
++fn android_disabled_features() -> Option<bevy::render::settings::WgpuFeatures> {
++    use bevy::render::settings::WgpuFeatures as F;
++    if !cfg!(target_os = "android") || std::env::var("NVF_BINDLESS").is_ok_and(|v| v == "1") {
++        return None;
++    }
++    Some(F::TEXTURE_BINDING_ARRAY | F::BUFFER_BINDING_ARRAY | F::STORAGE_RESOURCE_BINDING_ARRAY | F::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING | F::PARTIALLY_BOUND_BINDING_ARRAY)
++}
++
+ /// The adapter name the loader pinned, if any.
+ #[cfg(windows)]
+ fn adapter_pin() -> Option<String> {
+diff --git a/engine/nvforever/src/graphics.rs b/engine/nvforever/src/graphics.rs
+index d73236a..4c56cb6 100644
+--- a/engine/nvforever/src/graphics.rs
++++ b/engine/nvforever/src/graphics.rs
+@@ -1614,3 +1614,10 @@ mod tests {
+         assert!(!overlay.world().contains_resource::<MeasuringDiagnostics>());
+     }
+ }
++
++/// Multisampling of the views drawn into a picture (terminal, lock, scope, card tables):
++/// 4x, none on Android (a phone's GPU lost its device under the terminal's full-screen 4x
++/// picture over the main view).
++pub fn offscreen_msaa() -> Msaa {
++    if cfg!(target_os = "android") { Msaa::Off } else { Msaa::Sample4 }
++}
 diff --git a/engine/nvforever/src/handoff.rs b/engine/nvforever/src/handoff.rs
 index c1ed297..8b2b924 100644
 --- a/engine/nvforever/src/handoff.rs
@@ -1196,6 +1253,19 @@ index a154858..7bceae8 100644
          // What is near is left out of the blur behind it.
          let wp = select(w, 0.0, near(uv + off));
          let wm = select(w, 0.0, near(uv - off));
+diff --git a/engine/nvforever/src/lockpick_view.rs b/engine/nvforever/src/lockpick_view.rs
+index 6f12c0e..c59a1eb 100644
+--- a/engine/nvforever/src/lockpick_view.rs
++++ b/engine/nvforever/src/lockpick_view.rs
+@@ -316,7 +316,7 @@ fn show(
+                 RenderTarget::Image(ImageRenderTarget::from(image.clone())),
+                 Projection::Perspective(PerspectiveProjection { fov: FOV_DEG.to_radians(), near: 1.0, far: 2000.0, ..default() }),
+                 Tonemapping::Linear,
+-                Msaa::Sample4,
++                crate::graphics::offscreen_msaa(),
+                 AmbientLight { color: Color::WHITE, brightness: 250.0, ..default() },
+                 Transform::from_translation(to(eye)).looking_at(to(aim), Vec3::Y),
+                 layer.clone(),
 diff --git a/engine/nvforever/src/main.rs b/engine/nvforever/src/main.rs
 index a6cf138..1dd8f91 100644
 --- a/engine/nvforever/src/main.rs
@@ -1517,6 +1587,50 @@ index beddf49..3a859e4 100644
  
  fn build(commands: &mut Commands, parent: Entity, world: &ActorWorld, ctx: &mut ActorCtx, worn: &[FormId], look: Option<&fnv_actor::Look>) -> Result<Body, String> {
      let a = world.resolve_as(FormId::PLAYER_BASE.0, FormId::PLAYER_REF.0, Some(worn), look)?;
+diff --git a/engine/nvforever/src/roulette_view.rs b/engine/nvforever/src/roulette_view.rs
+index 665979d..3000e98 100644
+--- a/engine/nvforever/src/roulette_view.rs
++++ b/engine/nvforever/src/roulette_view.rs
+@@ -274,7 +274,7 @@ fn show(
+                 RenderTarget::Image(ImageRenderTarget::from(image.clone())),
+                 Projection::Perspective(PerspectiveProjection { fov: VFOV_DEG.to_radians(), near: 1.0, far: 4000.0, ..default() }),
+                 Tonemapping::Linear,
+-                Msaa::Sample4,
++                crate::graphics::offscreen_msaa(),
+                 AmbientLight { color: Color::WHITE, brightness: 350.0, ..default() },
+                 Transform::from_translation(PLACE),
+                 layer.clone(),
+diff --git a/engine/nvforever/src/scope_view.rs b/engine/nvforever/src/scope_view.rs
+index bf97e78..4b28395 100644
+--- a/engine/nvforever/src/scope_view.rs
++++ b/engine/nvforever/src/scope_view.rs
+@@ -188,7 +188,7 @@ fn show(
+                 RenderTarget::Image(ImageRenderTarget::from(image.clone())),
+                 Projection::Orthographic(OrthographicProjection { scaling_mode: ScalingMode::FixedVertical { viewport_height: VIEW_HEIGHT }, near: 0.0, far: 3000.0, ..OrthographicProjection::default_3d() }),
+                 Tonemapping::Linear,
+-                Msaa::Sample4,
++                crate::graphics::offscreen_msaa(),
+                 AmbientLight { color: Color::WHITE, brightness: 500.0, ..default() },
+                 Transform::from_translation(to(eye)).looking_at(to(Vec3::ZERO), Vec3::Y),
+                 layer.clone(),
+@@ -254,7 +254,7 @@ fn draw_lens(commands: &mut Commands, model: &nvf_assets::model::PreparedModel,
+                 RenderTarget::Image(ImageRenderTarget::from(reticle.clone())),
+                 Projection::Orthographic(OrthographicProjection { scaling_mode: ScalingMode::FixedVertical { viewport_height: 2.0 * LENS_CIRCLE }, near: 0.0, far: 3000.0, ..OrthographicProjection::default_3d() }),
+                 Tonemapping::Linear,
+-                Msaa::Sample4,
++                crate::graphics::offscreen_msaa(),
+                 AmbientLight { color: Color::WHITE, brightness: 500.0, ..default() },
+                 Transform::from_translation(to(Vec3::new(0.0, -1000.0, 0.0))).looking_at(to(Vec3::ZERO), Vec3::Y),
+                 layer,
+@@ -274,7 +274,7 @@ fn draw_lens(commands: &mut Commands, model: &nvf_assets::model::PreparedModel,
+             RenderTarget::Image(ImageRenderTarget::from(world_image.clone())),
+             bevy::camera::Hdr,
+             Tonemapping::Linear,
+-            Msaa::Sample4,
++            crate::graphics::offscreen_msaa(),
+             Projection::Perspective(PerspectiveProjection { fov: 0.1, near: 5.0, far: crate::sky::OUTDOOR_FAR, aspect_ratio: 1.0, ..default() }),
+             crate::sky::initial_fog(),
+             bevy::core_pipeline::prepass::DepthPrepass,
 diff --git a/engine/nvforever/src/sky.rs b/engine/nvforever/src/sky.rs
 index bd2755d..9e9e53d 100644
 --- a/engine/nvforever/src/sky.rs
@@ -1562,6 +1676,32 @@ index bd2755d..9e9e53d 100644
          let cur = at(&self.weather);
          let dimmer = match &self.prev {
              Some(p) => at(p) + (cur - at(p)) * self.fade,
+diff --git a/engine/nvforever/src/terminal_view.rs b/engine/nvforever/src/terminal_view.rs
+index 5a7c1e2..5f62ce4 100644
+--- a/engine/nvforever/src/terminal_view.rs
++++ b/engine/nvforever/src/terminal_view.rs
+@@ -207,7 +207,7 @@ fn show(
+             RenderTarget::Image(ImageRenderTarget::from(image.clone())),
+             Projection::Perspective(PerspectiveProjection { fov: FOV, near: 1.0, far: 200.0, ..default() }),
+             Tonemapping::Linear,
+-            Msaa::Sample4,
++            crate::graphics::offscreen_msaa(),
+             AmbientLight { color: Color::WHITE, brightness: 150.0, ..default() },
+             Transform::from_translation(to(eye)).looking_at(to(aim), Vec3::Y),
+             layer.clone(),
+diff --git a/engine/nvforever/src/vigor_view.rs b/engine/nvforever/src/vigor_view.rs
+index 1bc62a8..81a905e 100644
+--- a/engine/nvforever/src/vigor_view.rs
++++ b/engine/nvforever/src/vigor_view.rs
+@@ -142,7 +142,7 @@ fn spawn(commands: &mut Commands, images: &mut Assets<Image>, size: Extent3d, pl
+             RenderTarget::Image(ImageRenderTarget::from(image.clone())),
+             Projection::Perspective(PerspectiveProjection { fov: projection.fov, near: projection.near, far: CAMERA_FAR, ..default() }),
+             Tonemapping::Linear,
+-            Msaa::Sample4,
++            crate::graphics::offscreen_msaa(),
+             AmbientLight { color: AMBIENT_COLOR, brightness: AMBIENT * unit, ..default() },
+             Transform::IDENTITY,
+             layer.clone(),
 diff --git a/engine/vendor/bevy_winit/src/system.rs b/engine/vendor/bevy_winit/src/system.rs
 index 22ad677..cd70569 100644
 --- a/engine/vendor/bevy_winit/src/system.rs

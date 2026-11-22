@@ -60,7 +60,11 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
         crt = new CrtOverlay(this);
         addContentView(crt, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        pages = new PipBoyPages(this, fo3);
+        addContentView(pages, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT, android.view.Gravity.START));
         overlay.bringToFront();
+        pages.bringToFront();
         panel = new QuickPanel(this, this);
         addContentView(panel, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -208,6 +212,7 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
             }
             // Fallout 3's main menu is on a CRT, as in the original.
             if (crt != null) crt.setOn(fo3 && state == ScreenKeysOverlay.UI_MAIN_MENU);
+            if (pages != null) pages.setOn(state == ScreenKeysOverlay.UI_PIPBOY || state == ScreenKeysOverlay.UI_PIPBOY_MAP);
             ui.postDelayed(this, 120);
         }
     };
@@ -244,6 +249,7 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
     // the next command line; the launcher (its own process) starts this activity again
     // once this process has ended.
     private boolean restarting;
+    private PipBoyPages pages;
 
     private void restartGame() {
         restarting = true;
@@ -297,16 +303,28 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
             }
         }
         if (recent >= 3) return false;
+        // Lost again within a minute of the last start-over: that save's place loses it, so
+        // the main menu this time.
+        long last = 0;
+        for (String t : past) {
+            try {
+                last = Math.max(last, Long.parseLong(t.trim()));
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        boolean again = now - last < 90_000;
         keep.append(now);
         prefs.edit().putString(RECOVERIES, keep.toString()).commit();
         // The command line again, ending in the newest save (or the main menu).
         // A save written during this run (autosave, quicksave), else the one it started from.
         java.io.File save = newestFile(new java.io.File(home, "saves"), "", ".nvfsave");
         if (save != null && save.lastModified() < startedAt) save = null;
+        boolean toMenu = again;
         try {
             java.io.File args = new java.io.File(getFilesDir(), FalloutEngine.ARGS_FILE);
             java.util.List<String> lines = new java.util.ArrayList<>(java.nio.file.Files.readAllLines(args.toPath(), java.nio.charset.StandardCharsets.UTF_8));
-            if (save == null) {
+            if (toMenu) save = null;
+            else if (save == null) {
                 int at = lines.indexOf("--load");
                 if (at >= 0 && at + 1 < lines.size() && new java.io.File(lines.get(at + 1)).isFile()) save = new java.io.File(lines.get(at + 1));
             }

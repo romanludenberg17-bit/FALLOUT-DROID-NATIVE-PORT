@@ -362,9 +362,12 @@ public final class FalloutEngine {
             // saved them all once and they override the launcher's profile (a "fps" physics
             // rate up to 160 Hz; draw distances as parts of the command line's distances).
             set.put("physics-rate", "60");
-            for (String k : new String[]{"object-distance", "actor-distance", "item-distance", "grass-distance", "tree-distance"}) {
+            for (String k : new String[]{"object-distance", "actor-distance", "item-distance", "grass-distance"}) {
                 set.put(k, "1.000");
             }
+            // Trees: a part of the distant LOD's far limit, not of --tree-distance (1.000
+            // drew them out to the LOD's 46 000 units): no row, the flag's distance.
+            set.put("tree-distance", null);
             // Phones: the desktop effects stay off, whatever the engine's own settings page
             // kept (its INI wins over the command line): ambient occlusion (GTAO), the fine
             // and cloud/terrain shadows, light shafts, water effects, the mesh/terrain blend
