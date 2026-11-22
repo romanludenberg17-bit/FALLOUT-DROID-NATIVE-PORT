@@ -220,7 +220,10 @@ public class ScreenKeysOverlay extends View {
             if (gesture == G_PENDING && Math.hypot(x - downX, y - downY) > dp(TAP_SLOP_DP)) {
                 lookMoved = true;
                 boolean held = t - downAt >= HOLD_TO_DRAG_MS;
-                if (uiState == UI_PIPBOY_MAP || held) {
+                // Sideways first: a slider (the creator's, the settings'), dragged at once;
+                // up or down first: a list, scrolled.
+                boolean sideways = Math.abs(x - downX) > Math.abs(y - downY) * 1.3f;
+                if (uiState == UI_PIPBOY_MAP || held || sideways) {
                     gesture = G_DRAG;
                     // The pointer has stood at the press point since the finger came down.
                     NativeInput.key(272, true);

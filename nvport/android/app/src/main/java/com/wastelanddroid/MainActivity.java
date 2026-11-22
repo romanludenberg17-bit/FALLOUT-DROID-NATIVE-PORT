@@ -168,12 +168,22 @@ public final class MainActivity extends Activity {
         if (game == null) return;
         intent.removeExtra(EXTRA_RELAUNCH_GAME);
         this.prefs.edit().putBoolean(Prefs.LAUNCH_PENDING, true).commit();
-        // The game's process ends as its activity finishes: start the next run after it.
-        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-            Intent g = new Intent(this, com.wastelanddroid.engine.NativeGameActivity.class).putExtra("game", game);
-            startActivity(g);
-            overridePendingTransition(0, 0);
-        }, 900);
+        // The next run starts once the game's old process is gone (its memory free).
+        final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+        final long since = android.os.SystemClock.uptimeMillis();
+        h.post(new Runnable() {
+            @Override
+            public void run() {
+                boolean alive = FalloutEngine.gameProcessAlive(MainActivity.this);
+                if (alive && android.os.SystemClock.uptimeMillis() - since < 8000) {
+                    h.postDelayed(this, 100);
+                    return;
+                }
+                Intent g = new Intent(MainActivity.this, com.wastelanddroid.engine.NativeGameActivity.class).putExtra("game", game);
+                startActivity(g);
+                overridePendingTransition(0, 0);
+            }
+        });
     }
 
     @Override // android.app.Activity
@@ -415,7 +425,6 @@ public final class MainActivity extends Activity {
             return;
         }
         this.launching = true;
-        Toast.makeText(this, "Подготовка " + gameDef.title + "...", 0).show();
         this.prefs.edit().putBoolean(Prefs.LAUNCH_PENDING, true).commit();
         new Thread(new Runnable() {
             @Override

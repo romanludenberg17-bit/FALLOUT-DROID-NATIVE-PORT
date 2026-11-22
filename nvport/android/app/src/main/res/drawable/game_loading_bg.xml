@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The game's window while GameActivity loads libnvforever.so (before any view can be
+     added): Fallout Droid's art, darkened, instead of a black screen. LoadingOverlay takes
+     over once the activity is up. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@android:color/black" />
+    <item>
+        <bitmap android:src="@drawable/game_loading" android:gravity="fill" android:filter="true" />
+    </item>
+</layer-list>

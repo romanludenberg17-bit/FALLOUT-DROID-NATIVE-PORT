@@ -37,7 +37,7 @@ public final class FalloutEngine {
     /** The game's process (manifest: NativeGameActivity android:process). */
     public static final String GAME_PROCESS_SUFFIX = ":game";
     /** Bumped when the bundled engine data (schemas) changes. */
-    private static final int ENGINE_DATA_VERSION = 2; // 2: + lang (NVForever's own words)
+    private static final int ENGINE_DATA_VERSION = 3; // 2: + lang (NVForever's own words)
 
     private FalloutEngine() {}
 
@@ -132,6 +132,13 @@ public final class FalloutEngine {
         args.add("env:NVFOREVER_HOME=" + homeDir(context, game.id).getAbsolutePath());
         args.add("env:NVF_PLAY_SCRIPT_FUNCTIONS=" + new File(schemas, "script/functions.json").getAbsolutePath());
         args.add("env:NVPORT_GAME=" + game.id);
+        // Russian (Cyrillic) game text is Windows-1251: New Vegas's Russian edition keeps it in
+        // *_lang.esp over an English master, which the engine's own guess reads as 1252
+        // (names like "Î ìâû"). Latin letters are the same in both, so an English game is safe.
+        String phoneLang = java.util.Locale.getDefault().getLanguage();
+        if (phoneLang.equals("ru") || phoneLang.equals("uk") || phoneLang.equals("be") || hasLangPlugin(data)) {
+            args.add("env:NVF_CODE_PAGE=1251");
+        }
         // The log: warnings, errors and what the story does; the per-frame render lines
         // (glow, exposure, interior fog, file reads, the winit cursor) stay out — each
         // line goes to two files and logcat.
@@ -242,7 +249,9 @@ public final class FalloutEngine {
             p.g = com.wastelanddroid.game.GraphicsSettings.load(context, p.quality);
             // textureQuality 0 high, 1 medium, 2 low -> levels skipped; phones always lose one
             // level below High (FNV's 1024/2048 textures on a 8 GB phone).
-            p.mipSkip = Math.min(3, p.g.textureQuality + (p.quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? 0 : 1));
+            // At least one level on every phone: the engine and the GPU share the RAM (the
+            // logs: under 1 GB free of 7 GB with full-size textures).
+            p.mipSkip = Math.min(3, Math.max(1, p.g.textureQuality + (p.quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? 0 : 1)));
             // Targets: 30 FPS on a low class (Helio G99), 60 on a medium one, up to 120 on a
             // high one (Snapdragon 8 Gen 5 class: ~100). A chosen limit (the in-game panel,
             // "fps_lock": auto / 30 / 60 / 90 / 120 / off) wins.
@@ -325,6 +334,13 @@ public final class FalloutEngine {
             // As in the original: aiming holds the gun low with the crosshair (the engine's
             // "true iron sights" moves it to the eye and away from the usual framing).
             set.put("true-iron-sights", "0");
+            // The rows that stand for this command line's numbers: the engine's settings page
+            // saved them all once and they override the launcher's profile (a "fps" physics
+            // rate up to 160 Hz; draw distances as parts of the command line's distances).
+            set.put("physics-rate", "60");
+            for (String k : new String[]{"object-distance", "actor-distance", "item-distance", "grass-distance", "tree-distance"}) {
+                set.put(k, "1.000");
+            }
             // Phones: the desktop effects stay off, whatever the engine's own settings page
             // kept (its INI wins over the command line): ambient occlusion (GTAO), the fine
             // and cloud/terrain shadows, light shafts, water effects, the mesh/terrain blend
@@ -499,6 +515,14 @@ public final class FalloutEngine {
         }
         // Always named: the engine's own default is New Vegas's masters.
         return out;
+    }
+
+    /** A Russian edition's language plugin (FalloutNV_lang.esp and the like) in Data. */
+    static boolean hasLangPlugin(File data) {
+        String[] names = data.list();
+        if (names == null) return false;
+        for (String n : names) if (n.toLowerCase(java.util.Locale.ROOT).endsWith("_lang.esp")) return true;
+        return false;
     }
 
     /** The names of `list` (comma-separated) that are in Data, in that order. */

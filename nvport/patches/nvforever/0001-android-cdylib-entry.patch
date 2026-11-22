@@ -313,6 +313,61 @@ index 4f6f70c..c60af4c 100644
          };
          drop(decode_span);
          let handle = match result {
+diff --git a/engine/nvf-play/src/creator/view.rs b/engine/nvf-play/src/creator/view.rs
+index 8d81a9d..dbd9c13 100644
+--- a/engine/nvf-play/src/creator/view.rs
++++ b/engine/nvf-play/src/creator/view.rs
+@@ -199,13 +199,49 @@ fn first_line(face: &Face, s: &str) -> Line {
+     face.font.lines(s, None).into_iter().next().unwrap_or_default()
+ }
+ 
++/// [nvport] The creator's words in the chosen language (`fnv_util::words`): the whole text
++/// when the language has a line for it, else word by word (the FaceGen controls' names come
++/// from the game's data: "Skin Tint", "Brow Ridge - high / low"), else as it is.
++pub fn translated(s: &str) -> std::borrow::Cow<'_, str> {
++    use fnv_util::words;
++    let whole = words::tr_str(s);
++    if !std::ptr::eq(whole, s) || words::language() == "en" {
++        return std::borrow::Cow::Borrowed(whole);
++    }
++    let mut out = String::with_capacity(s.len() * 2);
++    let mut word = String::new();
++    let mut changed = false;
++    let mut flush = |word: &mut String, out: &mut String, changed: &mut bool| {
++        if word.is_empty() {
++            return;
++        }
++        let t = words::tr_str(word);
++        *changed |= t != word.as_str();
++        out.push_str(t);
++        word.clear();
++    };
++    for ch in s.chars() {
++        if ch.is_alphanumeric() || ch == '\'' {
++            word.push(ch);
++        } else {
++            flush(&mut word, &mut out, &mut changed);
++            out.push(ch);
++        }
++    }
++    flush(&mut word, &mut out, &mut changed);
++    if changed { std::borrow::Cow::Owned(out) } else { std::borrow::Cow::Borrowed(s) }
++}
++
+ pub fn width(face: &Face, s: &str, scale: f32) -> f32 {
+-    first_line(face, s).width * scale
++    let s = translated(s);
++    first_line(face, &s).width * scale
+ }
+ 
+ /// One line of text, its top at `top`, `scale` times the font's size. Its width.
+ #[allow(clippy::too_many_arguments)]
+ pub fn text(p: &mut ChildSpawnerCommands, face: &Face, s: &str, x: f32, top: f32, scale: f32, align: Align, color: Color) -> f32 {
++    let s = translated(s);
++    let s: &str = &s;
+     let line = first_line(face, s);
+     let w = line.width * scale;
+     let x = match align {
 diff --git a/engine/nvf-play/src/music.rs b/engine/nvf-play/src/music.rs
 index 70bfca9..d0b27f7 100644
 --- a/engine/nvf-play/src/music.rs
@@ -606,10 +661,10 @@ index bbdb0c0..ab27c2a 100644
  libloading = "0.8.9"
 diff --git a/engine/nvforever/src/android_input.rs b/engine/nvforever/src/android_input.rs
 new file mode 100644
-index 0000000..dca57c1
+index 0000000..7e6e30f
 --- /dev/null
 +++ b/engine/nvforever/src/android_input.rs
-@@ -0,0 +1,348 @@
+@@ -0,0 +1,365 @@
 +//! [nvport] Input from the Android launcher (Fallout Droid): on-screen keys, touch look,
 +//! gamepads mapped to PC keys and physical keyboards/mice arrive through JNI
 +//! (`com.wastelanddroid.engine.NativeInput`) and are written as Bevy's own input messages,
@@ -812,6 +867,23 @@ index 0000000..dca57c1
 +    }
 +}
 +
++/// [nvport] The frame-rate counter stays out of the character creator, the character
++/// screens and the Pip-Boy: it sits in their corner on a phone's screen.
++fn perf_overlay_out_of_menus(
++    creator: Option<Res<nvf_play::creator::CreatorMenu>>,
++    chargen: Option<Res<nvf_play::chargen::ChargenMenus>>,
++    pipboy: Option<Res<nvf_play::pipboy::PipBoy>>,
++    mut panels: Query<&mut Visibility, With<crate::perf_overlay::draw::PanelRoot>>,
++) {
++    let hide = creator.is_some_and(|c| c.is_open()) || chargen.is_some_and(|c| c.progress().is_some()) || pipboy.is_some_and(|p| p.shown());
++    let want = if hide { Visibility::Hidden } else { Visibility::Inherited };
++    for mut v in &mut panels {
++        if *v != want {
++            *v = want;
++        }
++    }
++}
++
 +/// `NativeInput.uiState()`: see [`UI_STATE`].
 +#[unsafe(no_mangle)]
 +pub extern "C" fn Java_com_wastelanddroid_engine_NativeInput_uiState(_e: JEnv, _c: JClass) -> i32 {
@@ -822,7 +894,7 @@ index 0000000..dca57c1
 +
 +impl Plugin for AndroidInputPlugin {
 +    fn build(&self, app: &mut App) {
-+        app.add_systems(PreUpdate, drain.before(InputSystems)).add_systems(Last, (publish_ui_state, publish_play_flags)).add_systems(PostUpdate, creator_hides_actors).add_systems(PreUpdate, apply_frame_cap);
++        app.add_systems(PreUpdate, drain.before(InputSystems)).add_systems(Last, (publish_ui_state, publish_play_flags)).add_systems(PostUpdate, creator_hides_actors).add_systems(Last, perf_overlay_out_of_menus).add_systems(PreUpdate, apply_frame_cap);
 +    }
 +}
 +
@@ -1279,6 +1351,49 @@ index 0d206a3..29f7260 100644
      let full = KeepLimits::default();
      KeepLimits { secs: (full.secs * s).round().max(MIN_LIMITS.secs), max: ((full.max as f64 * s).round() as usize).max(MIN_LIMITS.max) }
  }
+diff --git a/engine/nvforever/src/perf_overlay/draw.rs b/engine/nvforever/src/perf_overlay/draw.rs
+index 2d777b9..5a3285f 100644
+--- a/engine/nvforever/src/perf_overlay/draw.rs
++++ b/engine/nvforever/src/perf_overlay/draw.rs
+@@ -68,7 +68,7 @@ const GRAPH_PX: (u32, u32) = (8, 2048);
+ 
+ /// The panel's root, despawned with its rows when the panel is set again.
+ #[derive(Component)]
+-pub(super) struct PanelRoot;
++pub(crate) struct PanelRoot;
+ 
+ /// What the panel is drawn with: font 7 (or its stand-in).
+ pub(super) struct Kit {
+diff --git a/engine/nvforever/src/perf_overlay/mod.rs b/engine/nvforever/src/perf_overlay/mod.rs
+index a4d7a2c..7cc0dae 100644
+--- a/engine/nvforever/src/perf_overlay/mod.rs
++++ b/engine/nvforever/src/perf_overlay/mod.rs
+@@ -47,7 +47,7 @@
+ //! A later row is a switch in [`readings::Rows`], a row of [`readings::rows`] and, if it
+ //! draws other than a line of text, a part of [`draw`].
+ 
+-mod draw;
++pub(crate) mod draw;
+ #[cfg(any(target_os = "linux", test))]
+ mod drm_usage;
+ mod graph;
+diff --git a/engine/nvforever/src/player_body.rs b/engine/nvforever/src/player_body.rs
+index beddf49..3a859e4 100644
+--- a/engine/nvforever/src/player_body.rs
++++ b/engine/nvforever/src/player_body.rs
+@@ -1939,7 +1939,12 @@ fn ensure_body(
+ }
+ 
+ /// The least time between two body rebuilds for a changed look, seconds.
++/// [nvport] 0.4 s on Android: a rebuild makes the face's meshes and textures again, and a
++/// phone dragging a slider for minutes ran its GPU out (device lost).
++#[cfg(not(target_os = "android"))]
+ const LOOK_REBUILD: f32 = 0.1;
++#[cfg(target_os = "android")]
++const LOOK_REBUILD: f32 = 0.4;
+ 
+ fn build(commands: &mut Commands, parent: Entity, world: &ActorWorld, ctx: &mut ActorCtx, worn: &[FormId], look: Option<&fnv_actor::Look>) -> Result<Body, String> {
+     let a = world.resolve_as(FormId::PLAYER_BASE.0, FormId::PLAYER_REF.0, Some(worn), look)?;
 diff --git a/engine/nvforever/src/sky.rs b/engine/nvforever/src/sky.rs
 index bd2755d..9e9e53d 100644
 --- a/engine/nvforever/src/sky.rs
@@ -1345,3 +1460,188 @@ index 22ad677..cd70569 100644
              {
                  warn!(
                      "Could not set cursor grab mode for window {}: {}",
+diff --git a/lang/ru.toml b/lang/ru.toml
+index 69dc72c..fbbca32 100644
+--- a/lang/ru.toml
++++ b/lang/ru.toml
+@@ -550,3 +550,180 @@ name = "Русский"
+ # [design; engine/nvforever/src/heat_haze.rs] The Heat haze row (a prototype).
+ "Heat haze (experimental)" = "Марево (экспериментально)"
+ "On: the far ground near the horizon shimmers slightly on hot, clear days, by the sun and the weather. A prototype. Not in the original." = "Вкл.: дальняя земля у горизонта слегка дрожит в жаркие ясные дни, в зависимости от солнца и погоды. Прототип. Нет в оригинале."
++
++# [nvport] The character creator's words (engine/nvf-play/src/creator/view.rs `translated`):
++# whole texts first, then single words for the FaceGen controls' names from the game's data.
++"APPEARANCE" = "ВНЕШНОСТЬ"
++"BARBER" = "ПАРИКМАХЕР"
++"SURGEON" = "ХИРУРГ"
++"BASICS" = "ОСНОВА"
++"FACE" = "ЛИЦО"
++"DETAIL" = "ДЕТАЛИ"
++"SKIN" = "КОЖА"
++"HAIR" = "ВОЛОСЫ"
++"EYES" = "ГЛАЗА"
++"RANDOM" = "СЛУЧАЙНО"
++"UNDO" = "ОТМЕНА"
++"RESET" = "СБРОС"
++"DONE" = "ГОТОВО"
++"Age" = "Возраст"
++"Sex" = "Пол"
++"Origin" = "Происхождение"
++"Starting face" = "Исходное лицо"
++"Your own" = "Своё"
++"Male" = "Мужской"
++"Female" = "Женский"
++"Hair style" = "Причёска"
++"Hair colour" = "Цвет волос"
++"Hair shade" = "Тон волос"
++"Hair warmth" = "Теплота волос"
++"Hair grey" = "Седина"
++"No hair" = "Без волос"
++"Facial hair" = "Растительность на лице"
++"Beard" = "Борода"
++"Clean shaven" = "Гладко выбрит"
++"Brows" = "Брови"
++"Eyebrows" = "Брови"
++"Eye colour" = "Цвет глаз"
++"Region" = "Область"
++"Eyelids" = "Веки"
++"Eyeliner" = "Подводка"
++"Eyeshadow" = "Тени для век"
++"Eye Sockets" = "Глазницы"
++"None" = "Нет"
++"more above" = "ещё выше"
++"more below" = "ещё ниже"
++"Who you are: sex, origin, a starting face and age." = "Кто вы: пол, происхождение, исходное лицо и возраст."
++"The shape of the face, region by region." = "Форма лица, по областям."
++"What makes a face uneven: twists and shifts." = "Неровности лица: скручивания и сдвиги."
++"Tone, complexion, shading and paint." = "Тон, цвет лица, оттенки и раскраска."
++"Hair, its colour, beard and brows." = "Волосы, их цвет, борода и брови."
++"Eye colour and the skin around the eyes." = "Цвет глаз и кожа вокруг глаз."
++"Drag to turn    Right-drag or Shift-drag to pan    Wheel to zoom    Reset View C)" = "Перетащить — повернуть    Двумя пальцами / ПКМ — сдвинуть    Колесо / щипок — масштаб    Сброс вида C)"
++"Right stick to turn    Left stick to pan    Triggers to zoom    Reset View RS)" = "Правый стик — повернуть    Левый стик — сдвинуть    Курки — масштаб    Сброс вида RS)"
++"Skin" = "Кожа"
++"Shade" = "Оттенок"
++"Tint" = "Тон"
++"Dark" = "Тёмный"
++"Light" = "Светлый"
++"Flushed" = "Румяный"
++"Pale" = "Бледный"
++"Orange" = "Оранжевый"
++"Purple" = "Фиолетовый"
++"Yellow" = "Жёлтый"
++"Red" = "Красный"
++"Ash" = "Пепельный"
++"Rich" = "Насыщенный"
++"Grey" = "Седой"
++"Brow" = "Бровь"
++"Ridge" = "Надбровье"
++"Inner" = "внутр."
++"Outer" = "внешн."
++"up" = "вверх"
++"down" = "вниз"
++"high" = "высоко"
++"low" = "низко"
++"Cheekbones" = "Скулы"
++"Cheeks" = "Щёки"
++"thin" = "узкий"
++"wide" = "широкий"
++"concave" = "вогнутый"
++"convex" = "выпуклый"
++"round" = "круглый"
++"gaunt" = "впалый"
++"Chin" = "Подбородок"
++"forward" = "вперёд"
++"backward" = "назад"
++"pronounced" = "выраженный"
++"recessed" = "скошенный"
++"retracted" = "втянутый"
++"jutting" = "выступающий"
++"shallow" = "мелкий"
++"deep" = "глубокий"
++"small" = "маленький"
++"large" = "большой"
++"tall" = "высокий"
++"short" = "короткий"
++"Eyes" = "Глаза"
++"tilt" = "наклон"
++"inward" = "внутрь"
++"outward" = "наружу"
++"together" = "ближе"
++"apart" = "дальше"
++"Face" = "Лицо"
++"heavy" = "тяжёлое"
++"light" = "лёгкое"
++"thick" = "полное"
++"Forehead" = "Лоб"
++"back" = "назад"
++"Jaw" = "Челюсть"
++"Jawline" = "Линия челюсти"
++"Neck" = "Шея"
++"slope" = "наклон"
++"Mouth" = "Рот"
++"drawn" = "сжатый"
++"pursed" = "поджатый"
++"happy" = "весёлый"
++"sad" = "грустный"
++"lips" = "губы"
++"Lips" = "Губы"
++"deflated" = "тонкие"
++"inflated" = "пухлые"
++"puckered" = "вытянутые"
++"protruding" = "выступающий"
++"underbite" = "нижний прикус"
++"overbite" = "верхний прикус"
++"distance" = "расстояние"
++"Nose" = "Нос"
++"bridge" = "переносица"
++"flat" = "плоский"
++"pointed" = "острый"
++"nostril" = "ноздря"
++"nostrils" = "ноздри"
++"region" = "область"
++"sellion" = "переносье"
++"Temples" = "Виски"
++"long" = "длинный"
++"Complexion" = "Цвет лица"
++"Freckles" = "Веснушки"
++"Wrinkles" = "Морщины"
++"young" = "молодой"
++"old" = "старый"
++"Young" = "Молодой"
++"Old" = "Старый"
++"Stubble" = "Щетина"
++"Asymmetry" = "Асимметрия"
++"Twist" = "Скручивание"
++"Shift" = "Сдвиг"
++"Paint" = "Раскраска"
++"Sockets" = "Впадины"
++"Eyelid" = "Веко"
++"Cheek" = "Щека"
++"ratio" = "пропорция"
++"Ears" = "Уши"
++"Hair" = "Волосы"
++"Colour" = "Цвет"
++"colour" = "цвет"
++"Eye" = "Глаз"
++"Upper" = "Верх"
++"Lower" = "Низ"
++"Left" = "Левый"
++"Right" = "Правый"
++"Top" = "Верх"
++"Bottom" = "Низ"
++"Size" = "Размер"
++"size" = "размер"
++"Width" = "Ширина"
++"Height" = "Высота"
++"Depth" = "Глубина"
++"Angle" = "Угол"
++"Lip" = "Губа"
++"Mustache" = "Усы"
++"Moustache" = "Усы"
++"Goatee" = "Эспаньолка"
++"Sideburns" = "Бакенбарды"
++"Pink" = "Розовый"
++"Brown" = "Карий"
++"Hazel" = "Ореховый"
++"Gray" = "Серый"
++"Violet" = "Фиолетовый"

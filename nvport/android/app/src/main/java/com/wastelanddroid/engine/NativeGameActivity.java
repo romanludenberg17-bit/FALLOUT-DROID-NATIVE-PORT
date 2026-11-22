@@ -241,8 +241,10 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
                 .putExtra(com.wastelanddroid.MainActivity.EXTRA_RELAUNCH_GAME, getIntent().getStringExtra("game"))
                 .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK | android.content.Intent.FLAG_ACTIVITY_NO_ANIMATION);
         startActivity(i);
-        finish();
-        overridePendingTransition(0, 0);
+        // This process ends now, at once (SIGKILL: no destructors running under the engine's
+        // live threads, which aborted on destroyed mutexes, and its memory free before the
+        // next run starts: two engines at once ran the phone out of RAM, 4 FPS, a crash).
+        android.os.Process.killProcess(android.os.Process.myPid());
     }
 
     // ---- the quick panel (QuickPanel.Host)
