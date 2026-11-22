@@ -18,6 +18,11 @@ NDKBIN=$ANDROID_HOME/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64/bin
 "$NDKBIN/llvm-nm" -D --defined-only "$SO" | grep -q "GameActivity_onCreate" || { echo "engine is not a GameActivity build"; exit 1; }
 "$NDKBIN/llvm-nm" -D --defined-only "$SO" | grep -q "Java_com_wastelanddroid_engine_NativeInput_key" || { echo "engine lacks NativeInput JNI"; exit 1; }
 
+# Automatic report upload (ReportUploader.java): {"repo":"owner/name","token":"..."} kept
+# beside the signing keys, never in git; without it the APK uploads nothing.
+CFG=$HERE/android/app/src/main/assets/report_upload.json
+if [ -f "$KEYS/report_upload.json" ]; then cp "$KEYS/report_upload.json" "$CFG"; else rm -f "$CFG"; fi
+
 cd "$HERE/android"
 echo "sdk.dir=$ANDROID_HOME" > local.properties
 gradle --no-daemon -q assembleRelease

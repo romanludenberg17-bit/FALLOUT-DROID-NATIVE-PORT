@@ -276,151 +276,33 @@ public final class ModManager {
         return "";
     }
 
+    /** [nvport] A .zip or .7z mod: ArchiveInstaller (Data root at any depth, FOMOD, replacer check). */
     public InstalledMod install(String str, InputStream inputStream, File file) throws IOException {
-        File file2 = new File(file, "mod-import.zip");
-        FileOutputStream fileOutputStream = new FileOutputStream(file2);
+        File file2 = new File(file, "mod-import.bin");
         try {
-            Files2.copy(inputStream, fileOutputStream);
-            fileOutputStream.close();
-            try {
-                ArrayList arrayList = new ArrayList();
-                byte[] fomodXml = null;
-                String fomodBase = null;
-                ZipInputStream zipInputStream = new ZipInputStream(Files.newInputStream(file2.toPath(), new OpenOption[0]));
-                while (true) {
-                    try {
-                        ZipEntry nextEntry = zipInputStream.getNextEntry();
-                        if (nextEntry == null) {
-                            break;
-                        }
-                        if (!nextEntry.isDirectory()) {
-                            String name = nextEntry.getName().replace('\\', '/');
-                            arrayList.add(name);
-                            String low = name.toLowerCase(Locale.ROOT);
-                            if (fomodXml == null && (low.equals("fomod/moduleconfig.xml") || low.endsWith("/fomod/moduleconfig.xml"))) {
-                                java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
-                                Files2.copy(zipInputStream, bo);
-                                fomodXml = bo.toByteArray();
-                                fomodBase = name.substring(0, low.length() - "fomod/moduleconfig.xml".length());
-                            }
-                        }
-                    } finally {
-                    }
-                }
-                zipInputStream.close();
-                if (arrayList.isEmpty()) {
-                    throw new IOException("Архив пуст");
-                }
-                // [nvport] A FOMOD installer: its default choices instead of every file.
-                java.util.Map<String, List<String>> plan = null;
-                if (fomodXml != null) {
-                    try {
-                        Fomod fm = Fomod.parse(fomodXml);
-                        plan = fm.plan(arrayList, fomodBase);
-                        if (plan.isEmpty()) plan = null;
-                        else android.util.Log.i("FalloutDroid", "fomod: options " + fm.chosen + ", " + plan.size() + " files");
-                    } catch (Exception e) {
-                        android.util.Log.w("FalloutDroid", "fomod: not read, installing every file", e);
-                        plan = null;
-                    }
-                }
-                // [nvport] Body and clothing replacers: only on chips that carry them.
-                List<String> dests = new ArrayList<>();
-                if (plan != null) {
-                    for (List<String> d : plan.values()) dests.addAll(d);
-                } else {
-                    String r = detectRoot(arrayList);
-                    for (Object o : arrayList) {
-                        String e = (String) o;
-                        if (e.startsWith(r)) dests.add(e.substring(r.length()));
-                    }
-                }
-                if (isBodyOrArmorReplacer(dests) && !com.wastelanddroid.game.DeviceProfile.replacersAllowed()) {
-                    throw new IOException("Реплейсеры тел и одежды доступны на Snapdragon 7+ Gen 2 и мощнее (ваш чип: " + com.wastelanddroid.game.DeviceProfile.chipName() + ")");
-                }
-                String strDetectRoot = plan != null ? "" : detectRoot(arrayList);
-                String strReplaceAll = str.replaceAll("[^\\p{L}\\p{N} ._-]", "_");
-                InstalledMod installedMod = new InstalledMod(strReplaceAll);
-                File file3 = new File(this.stateDir, strReplaceAll + ".bak");
-                String str2 = this.dataDir.getCanonicalPath() + File.separator;
-                zipInputStream = new ZipInputStream(Files.newInputStream(file2.toPath(), new OpenOption[0]));
-                while (true) {
-                    try {
-                        ZipEntry nextEntry2 = zipInputStream.getNextEntry();
-                        if (nextEntry2 == null) {
-                            break;
-                        }
-                        if (!nextEntry2.isDirectory() && plan != null) {
-                            List<String> targets = plan.get(nextEntry2.getName().replace('\\', '/'));
-                            if (targets != null) {
-                                byte[] data = null;
-                                for (String t : targets) {
-                                    File out = new File(this.dataDir, t);
-                                    if (!out.getCanonicalPath().startsWith(str2)) continue;
-                                    if (data == null) {
-                                        java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
-                                        Files2.copy(zipInputStream, bo);
-                                        data = bo.toByteArray();
-                                    }
-                                    if (out.exists()) {
-                                        File bak = new File(file3, t);
-                                        if (!bak.exists()) Files2.copy(out, bak);
-                                    }
-                                    File parent = out.getParentFile();
-                                    if (parent != null) parent.mkdirs();
-                                    try (FileOutputStream fo = new FileOutputStream(out)) {
-                                        fo.write(data);
-                                    }
-                                    if (!installedMod.files.contains(t)) installedMod.files.add(t);
-                                }
-                            }
-                        } else if (!nextEntry2.isDirectory()) {
-                            String strReplace = nextEntry2.getName().replace('\\', '/');
-                            if (strReplace.startsWith(strDetectRoot)) {
-                                String strSubstring = strReplace.substring(strDetectRoot.length());
-                                if (!strSubstring.isEmpty() && !strSubstring.toLowerCase(Locale.ROOT).startsWith("fomod/")) {
-                                    File file4 = new File(this.dataDir, strSubstring);
-                                    if (file4.getCanonicalPath().startsWith(str2)) {
-                                        if (file4.exists()) {
-                                            File file5 = new File(file3, strSubstring);
-                                            if (!file5.exists()) {
-                                                Files2.copy(file4, file5);
-                                            }
-                                        }
-                                        File parentFile = file4.getParentFile();
-                                        if (parentFile != null) {
-                                            parentFile.mkdirs();
-                                        }
-                                        FileOutputStream fileOutputStream2 = new FileOutputStream(file4);
-                                        try {
-                                            Files2.copy(zipInputStream, fileOutputStream2);
-                                            fileOutputStream2.close();
-                                            installedMod.files.add(strSubstring);
-                                        } finally {
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } finally {
-                    }
-                }
-                zipInputStream.close();
-                if (installedMod.files.isEmpty()) {
+            try (FileOutputStream out = new FileOutputStream(file2)) {
+                Files2.copy(inputStream, out);
+            }
+            String name = str.replaceAll("[^\\p{L}\\p{N} ._-]", "_");
+            InstalledMod installedMod = new InstalledMod(name);
+            ArchiveInstaller.Result r = ArchiveInstaller.install(file2, this.dataDir, new File(this.stateDir, name + ".bak"));
+            switch (r.code) {
+                case ArchiveInstaller.OK:
+                    break;
+                case ArchiveInstaller.ERR_REPLACER:
+                    throw new IOException("Реплейсеры тел и одежды доступны на Snapdragon 7+ Gen 2 и мощнее (ваш чип: " + r.detail + ")");
+                case ArchiveInstaller.ERR_RAR:
+                    throw new IOException("Архивы .rar не поддерживаются — перепакуйте в .zip или .7z");
+                case ArchiveInstaller.ERR_EMPTY:
                     throw new IOException("В архиве не найдено файлов для папки Data");
-                }
-                saveMod(installedMod);
-                return installedMod;
-            } finally {
-                file2.delete();
+                default:
+                    throw new IOException("Не удалось распаковать архив (" + r.code + ") " + r.detail);
             }
-        } catch (Throwable th) {
-            try {
-                fileOutputStream.close();
-            } catch (Throwable th2) {
-                th.addSuppressed(th2);
-            }
-            throw th;
+            installedMod.files.addAll(r.files);
+            saveMod(installedMod);
+            return installedMod;
+        } finally {
+            file2.delete();
         }
     }
 

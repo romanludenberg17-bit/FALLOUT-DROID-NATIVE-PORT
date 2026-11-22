@@ -1035,7 +1035,7 @@ public final class FalloutEngine {
         }
     }
 
-    private static String versionName(Context context) {
+    static String versionName(Context context) {
         try {
             return context.getPackageManager().getPackageInfo(context.getPackageName(), 0).versionName;
         } catch (Exception e) {

@@ -3831,6 +3831,13 @@ body.gamepad-connected-mode #ingame-controls-layer {
           </div>
           <button class="seg-btn" style="min-width:110px;" onclick="triggerNativeScheme('falloutpicker://gfx_auto')">Настроить</button>
         </div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-name">Автоотправка отчетов</div>
+            <div class="setting-hint">После вылета или игры с низким FPS отчет (логи игры и модель телефона) сам уходит разработчику — без личных данных. Помогает быстрее чинить ошибки.</div>
+          </div>
+          <button class="seg-btn fx-toggle active" style="min-width:72px;" id="fd-auto-reports" onclick="toggleAutoReports(this)">ВКЛ</button>
+        </div>
         <div class="setting-hint" style="margin:-4px 0 8px;">Встроенные в движок аналоги модов Vegas Shaders и Vanilla Plus Terrain (их DLL на Android не запускаются). По умолчанию выключены; действуют на обе игры со следующего запуска.</div>
         <div class="setting-row">
           <div>
@@ -4620,7 +4627,15 @@ function selectGame(gameKey) {
 }
 
 
+function toggleAutoReports(el) {
+  const on = !el.classList.contains('active');
+  el.classList.toggle('active', on);
+  el.textContent = on ? 'ВКЛ' : 'ВЫКЛ';
+  triggerNativeScheme('falloutpicker://auto_reports_' + (on ? 'on' : 'off'));
+}
 window.__fdDevice = function(d) {
+  var ar = document.getElementById('fd-auto-reports');
+  if (ar && typeof d.reports === 'boolean') { ar.classList.toggle('active', d.reports); ar.textContent = d.reports ? 'ВКЛ' : 'ВЫКЛ'; }
   var cls = {HIGH: 'мощный', MEDIUM: 'средний', LOW: 'слабый'}[d.cls] || d.cls;
   window.__fdChip = d.chip + ' (' + d.gpu + ')';
   var q = document.getElementById('qspec-gpu');
@@ -5861,10 +5876,12 @@ window.__fdExternalModDone = function(res) {
     if (typeof triggerNativeScheme === 'function') triggerNativeScheme('falloutpicker://check_core_mods');
   } else {
     setModStoreProgress(false, 0, '');
-    let msg = 'Ошибка скачивания или распаковки .zip';
+    let msg = 'Ошибка скачивания или распаковки архива';
     if (res === 'NO_DIR') msg = 'Сначала выберите папку Fallout: New Vegas!';
-    else if (res === 'ERR_7Z') msg = 'Этот файл на Nexus в формате .7z — распакуйте/перепакуйте в .zip или выберите .zip версию.';
-    else if (res === 'ERR_RAR') msg = 'Этот файл в формате .rar — нужен .zip архив.';
+    else if (res === 'ERR_REPLACER') msg = 'Реплейсеры тел и одежды доступны на Snapdragon 7+ Gen 2 и мощнее' + (window.__fdChip ? ' (ваш чип: ' + window.__fdChip + ')' : '') + '.';
+    else if (res === 'ERR_EMPTY') msg = 'В архиве не найдено файлов для папки Data.';
+    else if (res === 'ERR_FORMAT') msg = 'Неизвестный формат архива — нужен .zip или .7z.';
+    else if (res === 'ERR_RAR') msg = 'Этот файл в формате .rar — нужен .zip или .7z архив.';
     else if (res === 'ERR_HTML') msg = 'Войдите в аккаунт Nexus Mods внутри окна и нажмите Slow Download.';
     if (typeof showToast === 'function') showToast(msg);
   }
@@ -5997,7 +6014,7 @@ window.__fdDirList = function(obj) {
 
   if (fdBrowseMode === 'zip') {
     if (badge) {
-      badge.textContent = zips.length ? ('ZIP: ' + zips.length) : 'Выберите .zip';
+      badge.textContent = zips.length ? ('Архивов: ' + zips.length) : 'Выберите .zip / .7z';
       if (zips.length) badge.classList.add('found');
     }
     let out = '';

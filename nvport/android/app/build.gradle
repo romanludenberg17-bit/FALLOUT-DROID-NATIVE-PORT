@@ -1,8 +1,8 @@
 plugins { id 'com.android.application' }
 
 // Version: bump on every release (see PORT_PROGRESS.md).
-def fdVersionName = "2.0.0-alpha30"
-def fdVersionCode = 329
+def fdVersionName = "2.0.0-alpha31"
+def fdVersionCode = 330
 
 android {
     namespace 'com.wastelanddroid'
@@ -38,4 +38,7 @@ dependencies {
     implementation 'androidx.games:games-activity:4.4.2'
     implementation 'androidx.appcompat:appcompat:1.7.1'
     implementation 'androidx.core:core:1.16.0'
+    // [nvport] .7z mod archives (LZMA/LZMA2): commons-compress + xz.
+    implementation 'org.apache.commons:commons-compress:1.27.1'
+    implementation 'org.tukaani:xz:1.10'
 }

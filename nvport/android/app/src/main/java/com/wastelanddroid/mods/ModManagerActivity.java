@@ -63,7 +63,7 @@ public final class ModManagerActivity extends Activity {
         textViewLabel.setTextSize(20.0f);
         textViewLabel.setTypeface(Ui.mono(true));
         linearLayoutRow.addView(textViewLabel, Ui.weight());
-        linearLayoutRow.addView(Ui.ghostButton(this, R.drawable.ic_download, "Установить .zip", new View.OnClickListener() { // from class: com.wastelanddroid.mods.ModManagerActivity$$ExternalSyntheticLambda3
+        linearLayoutRow.addView(Ui.ghostButton(this, R.drawable.ic_download, "Установить .zip / .7z", new View.OnClickListener() { // from class: com.wastelanddroid.mods.ModManagerActivity$$ExternalSyntheticLambda3
             @Override // android.view.View.OnClickListener
             public final void onClick(View view) {
                 ModManagerActivity.this.lambda$onCreate$0(view);
@@ -91,7 +91,7 @@ public final class ModManagerActivity extends Activity {
         LinearLayout linearLayoutColumn3 = Ui.column(this);
         this.modList = linearLayoutColumn3;
         linearLayoutCard2.addView(linearLayoutColumn3);
-        linearLayoutCard2.addView(Ui.hint(this, "Поддерживаются .zip. Архивы .7z/.rar сначала перепакуйте в .zip. Установщики FOMOD ставятся автоматически: обязательные файлы и рекомендуемые автором варианты. Реплейсеры тел и одежды — на Snapdragon 7+ Gen 2 и мощнее."));
+        linearLayoutCard2.addView(Ui.hint(this, "Поддерживаются .zip и .7z (.rar перепакуйте). Установщики FOMOD ставятся автоматически: обязательные файлы и рекомендуемые автором варианты. Реплейсеры тел и одежды — на Snapdragon 7+ Gen 2 и мощнее."));
         linearLayoutCard2.addView(Ui.hint(this, "Мастер-файлы (.esm) всегда загружаются раньше плагинов (.esp); основная игра и официальные DLC закреплены вверху."));
         linearLayoutRow2.addView(scroll(linearLayoutCard2), new LinearLayout.LayoutParams(0, -1, 1.0f));
         LinearLayout.LayoutParams layoutParams = new LinearLayout.LayoutParams(-1, 0, 1.0f);
@@ -264,7 +264,7 @@ public final class ModManagerActivity extends Activity {
         Intent intent = new Intent("android.intent.action.OPEN_DOCUMENT");
         intent.addCategory("android.intent.category.OPENABLE");
         intent.setType("*/*");
-        intent.putExtra("android.intent.extra.MIME_TYPES", new String[]{"application/zip", "application/x-zip-compressed", "application/octet-stream"});
+        intent.putExtra("android.intent.extra.MIME_TYPES", new String[]{"application/zip", "application/x-zip-compressed", "application/x-7z-compressed", "application/octet-stream"});
         startActivityForResult(intent, 1);
     }
 

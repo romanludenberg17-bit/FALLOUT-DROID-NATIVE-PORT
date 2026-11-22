@@ -9,3 +9,4 @@ nvport/android/app/build/
 nvport/android/build/
 nvport/android/app/src/main/jniLibs/
 nvport/output/
+nvport/android/app/src/main/assets/report_upload.json

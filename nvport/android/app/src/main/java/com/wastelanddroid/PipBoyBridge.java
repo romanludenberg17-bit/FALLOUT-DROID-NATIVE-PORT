@@ -158,11 +158,15 @@ public class PipBoyBridge extends WebViewClient {
             }
             return true;
         }
+        if (strSubstring.equals("auto_reports_on") || strSubstring.equals("auto_reports_off")) {
+            Prefs.get(mainActivity).edit().putBoolean("auto_reports", strSubstring.endsWith("_on")).apply();
+            return true;
+        }
         if (strSubstring.equals("device_info")) {
             String chip = com.wastelanddroid.game.DeviceProfile.chipName().replace("'", "");
             String gpu = com.wastelanddroid.game.DeviceProfile.gpuName();
             String cls = com.wastelanddroid.game.DeviceProfile.autoQuality(mainActivity).name();
-            webView.evaluateJavascript("if(window.__fdDevice)window.__fdDevice({chip:'" + chip + "',gpu:'" + gpu + "',cls:'" + cls + "'});", null);
+            webView.evaluateJavascript("if(window.__fdDevice)window.__fdDevice({chip:'" + chip + "',gpu:'" + gpu + "',cls:'" + cls + "',reports:" + Prefs.get(mainActivity).getBoolean("auto_reports", true) + "});", null);
             return true;
         }
         if (strSubstring.equals("fx_state")) {

@@ -81,91 +81,40 @@ public class CoreModInstaller {
         }
     }
 
+    /** [nvport] Any mod archive (.zip/.7z) from a stream: spooled, then ArchiveInstaller. */
     public static String extractZipStream(String str, InputStream inputStream) {
-        if (str == null) {
+        if (str == null || str.length() == 0) {
             return "NO_DIR";
         }
+        File tmp = new File(str, ".fd_mod_import.tmp");
         try {
-            if (str.length() == 0) {
-                return "NO_DIR";
+            try (FileOutputStream out = new FileOutputStream(tmp)) {
+                byte[] buf = new byte[65536];
+                int n;
+                while ((n = inputStream.read(buf)) > 0) out.write(buf, 0, n);
+            } finally {
+                inputStream.close();
             }
-            BufferedInputStream bufferedInputStream = new BufferedInputStream(inputStream, 8192);
-            bufferedInputStream.mark(4);
-            int i = bufferedInputStream.read();
-            int i2 = bufferedInputStream.read();
-            bufferedInputStream.reset();
-            if (i == 60) {
-                bufferedInputStream.close();
-                return "ERR_HTML";
-            }
-            if (i == 55 && i2 == 122) {
-                bufferedInputStream.close();
-                return "ERR_7Z";
-            }
-            if (i == 82 && i2 == 97) {
-                bufferedInputStream.close();
-                return "ERR_RAR";
-            }
-            ZipInputStream zipInputStream = new ZipInputStream(bufferedInputStream);
-            byte[] bArr = new byte[16384];
-            int i3 = 0;
-            while (true) {
-                ZipEntry nextEntry = zipInputStream.getNextEntry();
-                if (nextEntry == null) {
-                    break;
-                }
-                if (!nextEntry.isDirectory()) {
-                    String strReplace = nextEntry.getName().replace('\\', '/');
-                    String lowerCase = strReplace.toLowerCase();
-                    if (!lowerCase.contains("__macosx") && !lowerCase.startsWith("fomod/") && !lowerCase.contains("/fomod/") && !lowerCase.endsWith(".ds_store")) {
-                        int iIndexOf = lowerCase.indexOf("/data/");
-                        if (iIndexOf >= 0) {
-                            strReplace = strReplace.substring(iIndexOf + 1);
-                        } else {
-                            int iIndexOf2 = lowerCase.indexOf("/nvse_");
-                            if (iIndexOf2 >= 0) {
-                                strReplace = strReplace.substring(iIndexOf2 + 1);
-                            } else {
-                                int iIndexOf3 = lowerCase.indexOf("/nvse/");
-                                if (iIndexOf3 >= 0) {
-                                    strReplace = strReplace.substring(iIndexOf3 + 1);
-                                } else if (!lowerCase.startsWith("data/") && !lowerCase.startsWith("nvse_") && !lowerCase.equals("d3d9.dll")) {
-                                    if (lowerCase.startsWith("plugins/")) {
-                                        strReplace = "Data/NVSE/" + strReplace;
-                                    } else if (lowerCase.endsWith(".dll") && !lowerCase.contains("/")) {
-                                        strReplace = "Data/NVSE/Plugins/" + strReplace;
-                                    }
-                                }
-                                strReplace = "Data/" + strReplace;
-                            }
-                        }
-                        File file = new File(str, strReplace);
-                        File parentFile = file.getParentFile();
-                        if (parentFile != null) {
-                            parentFile.mkdirs();
-                        }
-                        FileOutputStream fileOutputStream = new FileOutputStream(file);
-                        while (true) {
-                            int i4 = zipInputStream.read(bArr);
-                            if (i4 <= 0) {
-                                break;
-                            }
-                            fileOutputStream.write(bArr, 0, i4);
-                        }
-                        fileOutputStream.close();
-                        zipInputStream.closeEntry();
-                        i3++;
-                        if (lowerCase.endsWith(".esp") || lowerCase.endsWith(".esm")) {
-                            ensurePlugin(str, file.getName());
-                        }
-                    }
-                }
-            }
-            zipInputStream.close();
-            return i3 != 0 ? "OK" : "ERR";
+            return installArchive(str, tmp);
         } catch (Throwable th) {
             return "ERR";
+        } finally {
+            tmp.delete();
         }
+    }
+
+    /** Installs an archive file into the game's Data folder and enables its plugins. */
+    public static String installArchive(String gameDir, File archive) {
+        com.wastelanddroid.mods.ArchiveInstaller.Result r =
+                com.wastelanddroid.mods.ArchiveInstaller.install(archive, new File(gameDir, "Data"), null);
+        android.util.Log.i("FalloutDroid", "mod install: " + r.code + " " + r.detail + ", " + r.files.size() + " files");
+        for (String f : r.files) {
+            String l = f.toLowerCase();
+            if (!f.contains("/") && (l.endsWith(".esp") || l.endsWith(".esm"))) {
+                ensurePlugin(gameDir, f);
+            }
+        }
+        return r.code;
     }
 
     public static String install(Context context, String str, String str2) {
@@ -199,7 +148,7 @@ public class CoreModInstaller {
             return "NO_DIR";
         }
         try {
-            return str.length() != 0 ? extractZipStream(str, new FileInputStream(str2)) : "NO_DIR";
+            return str.length() != 0 ? installArchive(str, new File(str2)) : "NO_DIR";
         } catch (Throwable th) {
             return "ERR";
         }
@@ -261,7 +210,7 @@ public class CoreModInstaller {
                 for (File file3 : fileArrListFiles) {
                     if (file3.isFile()) {
                         String name = file3.getName();
-                        if (name.toLowerCase().endsWith(".zip")) {
+                        if (name.toLowerCase().endsWith(".zip") || name.toLowerCase().endsWith(".7z")) {
                             if (i2 != 0) {
                                 sb.append(",");
                             }

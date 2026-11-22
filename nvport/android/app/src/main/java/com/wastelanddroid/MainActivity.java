@@ -569,6 +569,8 @@ public final class MainActivity extends Activity {
     @Override // android.app.Activity
     protected void onResume() {
         super.onResume();
+        // [nvport] A crash or a slow run since the last look: its report to the developer.
+        com.wastelanddroid.engine.ReportUploader.checkInBackground(this);
         String str = this.appliedAccent;
         String strAccent = Ui.accent(this);
         if (!str.equals(strAccent)) {
