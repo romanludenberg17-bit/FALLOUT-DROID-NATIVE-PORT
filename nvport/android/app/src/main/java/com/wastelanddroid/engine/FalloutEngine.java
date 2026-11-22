@@ -34,6 +34,12 @@ public final class FalloutEngine {
     public static final String REPORT_FILE = "fd_report.txt";
     /** Prefs key prefix: a save to start straight into (the saves screen). */
     public static final String PENDING_LOAD = "pending_load_";
+    /**
+     * After the graphics driver lost the device (NativeGameActivity's start-over): 1 no
+     * sun shadows, no MSAA, no grass; 2 also at most 720p and one more texture level
+     * skipped. Cleared when the graphics settings are saved again.
+     */
+    public static final String GPU_SAFE = "gpu_safe_level";
     /** The game's process (manifest: NativeGameActivity android:process). */
     public static final String GAME_PROCESS_SUFFIX = ":game";
     /** Bumped when the bundled engine data (schemas) changes. */
@@ -254,6 +260,7 @@ public final class FalloutEngine {
         com.wastelanddroid.game.GraphicsSettings g;
         int mipSkip, frameCap;
         boolean custom, fpsCounter;
+        int safe;
 
         static Profile of(Context context) {
             Profile p = new Profile();
@@ -278,6 +285,12 @@ public final class FalloutEngine {
                 if (!p.custom) p.g.grassDensity = 0;
                 p.mipSkip = Math.max(p.mipSkip, 2);
             }
+            p.safe = Prefs.get(context).getInt(GPU_SAFE, 0);
+            if (p.safe >= 1) {
+                p.g.shadows = 0;
+                p.g.grassDensity = 0;
+            }
+            if (p.safe >= 2) p.mipSkip = Math.min(3, Math.max(p.mipSkip, 2));
             return p;
         }
 
@@ -301,7 +314,7 @@ public final class FalloutEngine {
             add(a, "--lodgen-res", 256);
             add(a, "--lodgen-step", high ? 4 : 8);
             add(a, "--cell-fade", 0.5f);
-            add(a, "--msaa", high ? 2 : 1);
+            add(a, "--msaa", high && safe == 0 ? 2 : 1);
             // The game's own logic at 60 Hz on every phone (the default follows the frame
             // rate up to 160: CPU time the GPU-bound frame does not have).
             add(a, "--physics-hz", 60);
@@ -341,7 +354,10 @@ public final class FalloutEngine {
             set.put("frame-cap", frameCap <= 0 ? "Off" : String.valueOf(frameCap));
             // Multisampling also smooths alpha-tested cut-outs (grates, plants, fences), which
             // otherwise shimmer: cheap on tile-based mobile GPUs, resolved in tile memory.
-            set.put("anti-aliasing", quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? "2x" : "FXAA");
+            set.put("anti-aliasing", quality == com.wastelanddroid.game.DeviceProfile.Quality.HIGH && safe == 0 ? "2x" : "FXAA");
+            // No upscaler on a phone: FSR 3.1's compute passes at full precision (the
+            // Adreno driver reports no 16-bit floats) are heavier than the pixels they save.
+            set.put("upscaler", "Off");
             set.put("sun-shadows", g.shadows <= 0 ? "Off" : g.shadows >= 3 ? "Quality" : "Performance");
             set.put("grass", g.grassDensity > 0 ? "1" : "0");
             set.put("distant-lod", "1");
@@ -490,7 +506,8 @@ public final class FalloutEngine {
         String res = prefs.getString("resolution", null);
         if (res != null && res.contains("x")) {
             try {
-                return Integer.parseInt(res.substring(res.indexOf('x') + 1).trim());
+                int h = Integer.parseInt(res.substring(res.indexOf('x') + 1).trim());
+                return prefs.getInt(GPU_SAFE, 0) >= 2 ? Math.min(h, 660) : h;
             } catch (NumberFormatException ignored) {
             }
         }
@@ -498,7 +515,9 @@ public final class FalloutEngine {
         int base = q == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? 810
                 : q == com.wastelanddroid.game.DeviceProfile.Quality.MEDIUM ? 660 : 480;
         int scale = Math.max(50, Math.min(100, prefs.getInt(Prefs.RES_SCALE, 100)));
-        return Math.max(360, base * scale / 100);
+        int h = Math.max(360, base * scale / 100);
+        if (prefs.getInt(GPU_SAFE, 0) >= 2) h = Math.min(h, 660);
+        return h;
     }
 
     private static final String[] FNV_MASTERS = {"FalloutNV.esm", "DeadMoney.esm", "HonestHearts.esm",

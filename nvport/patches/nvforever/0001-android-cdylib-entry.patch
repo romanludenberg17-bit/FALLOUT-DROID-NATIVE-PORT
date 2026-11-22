@@ -1128,35 +1128,6 @@ index 74c2936..063c304 100644
              AmbientLight { color: Color::WHITE, brightness: 120.0, ..default() },
              Transform::from_translation(to(eye)).looking_at(to(aim), Vec3::Y),
              layer.clone(),
-diff --git a/engine/nvforever/src/dlss/mod.rs b/engine/nvforever/src/dlss/mod.rs
-index a1ead38..2fd4be3 100644
---- a/engine/nvforever/src/dlss/mod.rs
-+++ b/engine/nvforever/src/dlss/mod.rs
-@@ -1074,11 +1074,23 @@ pub fn render_plugin() -> bevy::render::RenderPlugin {
-     let adapter_name = adapter_pin();
-     let memory_hints = crate::memory_budget::hints_at_start();
-     bevy::render::RenderPlugin {
--        render_creation: bevy::render::settings::WgpuSettings { adapter_name, memory_hints, ..default() }.into(),
-+        render_creation: bevy::render::settings::WgpuSettings { adapter_name, memory_hints, disabled_features: android_disabled_features(), ..default() }.into(),
-         ..default()
-     }
- }
- 
-+/// Android: bindless textures off (no texture/sampler binding arrays, no non-uniform
-+/// indexing). Adreno drivers lose the device and show textures flickering with the
-+/// bindless materials; every material has its ordinary bind-group path. NVF_BINDLESS=1
-+/// keeps them.
-+fn android_disabled_features() -> Option<bevy::render::settings::WgpuFeatures> {
-+    use bevy::render::settings::WgpuFeatures as F;
-+    if !cfg!(target_os = "android") || std::env::var("NVF_BINDLESS").is_ok_and(|v| v == "1") {
-+        return None;
-+    }
-+    Some(F::TEXTURE_BINDING_ARRAY | F::BUFFER_BINDING_ARRAY | F::STORAGE_RESOURCE_BINDING_ARRAY | F::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING | F::PARTIALLY_BOUND_BINDING_ARRAY)
-+}
-+
- /// The adapter name the loader pinned, if any.
- #[cfg(windows)]
- fn adapter_pin() -> Option<String> {
 diff --git a/engine/nvforever/src/graphics.rs b/engine/nvforever/src/graphics.rs
 index d73236a..4c56cb6 100644
 --- a/engine/nvforever/src/graphics.rs

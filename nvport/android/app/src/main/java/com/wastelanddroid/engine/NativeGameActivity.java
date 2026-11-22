@@ -270,6 +270,7 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
 
     private static final String RECOVERIES = "gpu_recoveries";
     private final long startedAt = System.currentTimeMillis();
+    private int safeLevel;
 
     /** Starts the game again after a lost graphics device; false when it was not one. */
     private boolean recoverFromDeviceLoss() {
@@ -328,31 +329,25 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
                 int at = lines.indexOf("--load");
                 if (at >= 0 && at + 1 < lines.size() && new java.io.File(lines.get(at + 1)).isFile()) save = new java.io.File(lines.get(at + 1));
             }
-            java.util.List<String> out = new java.util.ArrayList<>();
-            for (int i = 0; i < lines.size(); i++) {
-                String l = lines.get(i);
-                if (l.equals("--menu") || l.equals("--new-game")) continue;
-                if (l.equals("--load") || l.equals("--handoff")) {
-                    i++;
-                    continue;
-                }
-                out.add(l);
-            }
-            if (save != null) {
-                out.add("--load");
-                out.add(save.getAbsolutePath());
-            } else {
-                out.add("--menu");
-            }
+            // A lighter picture from now on (FalloutEngine.GPU_SAFE: 1 no sun shadows, MSAA,
+            // grass; 2 also a lower resolution and smaller textures), and the command line
+            // made again from the profile, ending in the save (or the main menu).
+            int level = Math.min(2, prefs.getInt(FalloutEngine.GPU_SAFE, 0) + 1);
+            prefs.edit().putInt(FalloutEngine.GPU_SAFE, level).commit();
+            safeLevel = level;
+            if (save != null) prefs.edit().putString(FalloutEngine.PENDING_LOAD + game, save.getAbsolutePath()).commit();
+            com.wastelanddroid.game.GameDef def = com.wastelanddroid.game.GameDef.byId(game);
+            FalloutEngine.Prepared p = FalloutEngine.prepare(this, def, new java.io.File(def.gameDir(this)));
+            if (!(p instanceof FalloutEngine.Prepared.Ok)) return false;
             StringBuilder sb = new StringBuilder();
-            for (String l : out) sb.append(l).append('\n');
+            for (String l : ((FalloutEngine.Prepared.Ok) p).getArgs()) sb.append(l).append('\n');
             FalloutEngine.writeArgs(this, sb.toString());
         } catch (Exception e) {
             android.util.Log.w("NVForever", "device loss: could not write the command line", e);
             return false;
         }
         android.util.Log.i("NVForever", "graphics device lost: starting again from " + (save == null ? "the main menu" : save));
-        android.widget.Toast.makeText(this, save == null ? "Сбой видеодрайвера — перезапуск игры" : "Сбой видеодрайвера — перезапуск с последнего сохранения", android.widget.Toast.LENGTH_LONG).show();
+        android.widget.Toast.makeText(this, (save == null ? "Сбой видеодрайвера — перезапуск игры" : "Сбой видеодрайвера — перезапуск с последнего сохранения") + (safeLevel >= 2 ? "; графика снижена (разрешение, текстуры, тени)" : "; тени, MSAA и трава выключены"), android.widget.Toast.LENGTH_LONG).show();
         restartGame();
         return true;
     }

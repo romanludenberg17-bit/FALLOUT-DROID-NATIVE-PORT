@@ -106,11 +106,11 @@ public final class GraphicsSettings {
     }
 
     public void save(Context context) {
-        Prefs.get(context).edit().putBoolean("gfx_custom", true).putInt("gfx_tex", this.textureQuality).putInt("gfx_aniso", this.anisotropy).putInt("gfx_shadows", this.shadows).putInt("gfx_view", this.viewDistance).putInt("gfx_grass", this.grassDensity).putBoolean("gfx_water", this.waterReflections).putBoolean("gfx_hdr", this.hdr).putBoolean("gfx_bloom", this.bloom).putBoolean("gfx_decals", this.decals).putBoolean("gfx_treeshadows", this.treeShadows).putInt("gfx_fov", this.fov).putInt("gfx_fade", this.fade).apply();
+        Prefs.get(context).edit().remove("gpu_safe_level").putBoolean("gfx_custom", true).putInt("gfx_tex", this.textureQuality).putInt("gfx_aniso", this.anisotropy).putInt("gfx_shadows", this.shadows).putInt("gfx_view", this.viewDistance).putInt("gfx_grass", this.grassDensity).putBoolean("gfx_water", this.waterReflections).putBoolean("gfx_hdr", this.hdr).putBoolean("gfx_bloom", this.bloom).putBoolean("gfx_decals", this.decals).putBoolean("gfx_treeshadows", this.treeShadows).putInt("gfx_fov", this.fov).putInt("gfx_fade", this.fade).apply();
     }
 
     public static void resetToPreset(Context context) {
-        Prefs.get(context).edit().putBoolean("gfx_custom", false).apply();
+        Prefs.get(context).edit().remove("gpu_safe_level").putBoolean("gfx_custom", false).apply();
     }
 
     private static String f(float f) {
