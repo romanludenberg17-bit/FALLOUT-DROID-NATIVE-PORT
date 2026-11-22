@@ -3823,6 +3823,13 @@ body.gamepad-connected-mode #ingame-controls-layer {
       <!-- 4b. Effects (the engine's counterparts of the effect mods) -->
       <div>
         <div class="sec-group-title" style="margin-top:2px;">Эффекты графики</div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-name">Автонастройка графики</div>
+            <div class="setting-hint">По модели процессора и памяти: разрешение, тени, сглаживание, трава, дальность. Сбрасывает настройки графики, выбранные в игре, и выключает эффекты ниже.</div>
+          </div>
+          <button class="seg-btn" style="min-width:110px;" onclick="triggerNativeScheme('falloutpicker://gfx_auto')">Настроить</button>
+        </div>
         <div class="setting-hint" style="margin:-4px 0 8px;">Встроенные в движок аналоги модов Vegas Shaders и Vanilla Plus Terrain (их DLL на Android не запускаются). По умолчанию выключены; действуют на обе игры со следующего запуска.</div>
         <div class="setting-row">
           <div>

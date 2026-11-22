@@ -145,6 +145,11 @@ public class PipBoyBridge extends WebViewClient {
             MainActivityTelegram.syncToJs(mainActivity, webView);
             return true;
         }
+        if (strSubstring.equals("gfx_auto")) {
+            Prefs.get(mainActivity).edit().putBoolean("gfx_auto", true).apply();
+            webView.evaluateJavascript("if(window.showToast)showToast('Графика будет настроена под этот телефон при следующем запуске игры');if(window.__fdFxState)window.__fdFxState({terrain:false,shafts:false,ao:false,clouds:false,haze:false,water:false});", null);
+            return true;
+        }
         if (strSubstring.startsWith("fx_") && !strSubstring.equals("fx_state")) {
             // fx_<name>_on / fx_<name>_off: the launcher's effect switches (FalloutEngine.Profile).
             String[] parts = strSubstring.split("_");

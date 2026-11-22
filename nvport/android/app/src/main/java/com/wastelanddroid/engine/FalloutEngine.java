@@ -160,11 +160,30 @@ public final class FalloutEngine {
         args.add("--nif-schema");
         args.add(new File(schemas, "nif").getAbsolutePath());
         args.add("--window=borderless");
+        // Automatic setup for this phone's class (the launcher's button, and once with this
+        // version): the effects off and the picture rows set from the class, over the
+        // player's earlier choices.
+        SharedPreferences ap = Prefs.get(context);
+        boolean auto = ap.getBoolean("gfx_auto", false) || !ap.getBoolean("gfx_auto_v25", false);
+        if (auto) {
+            SharedPreferences.Editor ed = ap.edit().putBoolean("gfx_auto", false).putBoolean("gfx_auto_v25", true).putBoolean("gfx_custom", false).remove(GPU_SAFE);
+            for (String k : new String[]{"terrain", "shafts", "ao", "clouds", "haze", "water"}) ed.putBoolean("fx_" + k, false);
+            ed.commit();
+        }
         Profile profile = Profile.of(context);
         args.add("env:NVF_TEX_MIP_SKIP=" + profile.mipSkip);
         profile.addArgs(args);
         java.util.Map<String, java.util.Map<String, String>> ini = new java.util.LinkedHashMap<>();
         ini.put("Settings", profile.iniSettings());
+        if (auto) {
+            // The class's values replace the player's ("?" rows are first values only).
+            for (java.util.Map.Entry<String, String> e : ini.get("Settings").entrySet()) {
+                if (e.getValue() != null && e.getValue().startsWith("?")) e.setValue(e.getValue().substring(1));
+            }
+            ini.get("Settings").put("shadow-filter", "Smooth");
+            ini.get("Settings").put("shadow-distance", null);
+            for (String k : new String[]{"object-distance", "actor-distance", "item-distance", "grass-distance"}) ini.get("Settings").put(k, "1.000");
+        }
         // Multisampling 4x / 8x kept from an earlier choice: 2x (the phone's settings page no
         // longer offers more).
         String aa = iniValue(new File(homeDir(context, game.id), "NVForever.ini"), "anti-aliasing");
