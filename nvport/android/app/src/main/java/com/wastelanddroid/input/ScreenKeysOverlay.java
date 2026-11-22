@@ -167,6 +167,10 @@ public class ScreenKeysOverlay extends View {
     private int pinchId = -1;
     private float pinchX, pinchY, pinchBase, scrollAcc;
     private boolean lmbHeld;
+    private int lootId = -1;
+    private float lootX, lootY, lastLootY, lootAcc;
+    private long lootAt;
+    private boolean lootMoved;
 
     private void endGesture() {
         if (lmbHeld) NativeInput.key(272, false);
@@ -545,6 +549,17 @@ public class ScreenKeysOverlay extends View {
             lookMoved = true;
             return;
         }
+        if (k < 0 && lootId == -1 && lookId == -1 && (playFlags & 128) != 0 && NativeInput.quickLootAt(x, y)) {
+            // The Quick Loot list: tap a row to take it, swipe up or down to scroll, hold
+            // for the full menu (Wait, T).
+            lootId = id;
+            lootX = x;
+            lootY = lastLootY = y;
+            lootAt = t;
+            lootMoved = false;
+            lootAcc = 0;
+            return;
+        }
         if (k < 0) {
             if (lookId == -1) {
                 lookId = id;
@@ -581,6 +596,19 @@ public class ScreenKeysOverlay extends View {
     }
 
     private void pointerMove(int id, float x, float y, long t) {
+        if (id == lootId) {
+            if (Math.hypot(x - lootX, y - lootY) > dp(TAP_SLOP_DP)) lootMoved = true;
+            lootAcc += y - lastLootY;
+            lastLootY = y;
+            float step = dp(SCROLL_STEP_DP) * 0.8f;
+            while (Math.abs(lootAcc) >= step) {
+                // The finger up shows what is below: the wheel down.
+                float dir = Math.signum(lootAcc);
+                NativeInput.scroll(dir);
+                lootAcc -= dir * step;
+            }
+            return;
+        }
         if (menuMode && (id == lookId || id == pinchId)) {
             menuMove(id, x, y, t);
             return;
@@ -640,6 +668,19 @@ public class ScreenKeysOverlay extends View {
     }
 
     private void pointerUp(int id, float x, float y, long t) {
+        if (id == lootId) {
+            lootId = -1;
+            if (!lootMoved && t >= 0) {
+                if (t - lootAt >= LONG_PRESS_MS) {
+                    performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                    NativeInput.key(20, true); // T: the full menu
+                    NativeInput.key(20, false);
+                } else {
+                    NativeInput.quickLootTapAt(x, y);
+                }
+            }
+            return;
+        }
         if (menuMode && (id == lookId || id == pinchId)) {
             menuUp(id, x, y, t);
             return;
@@ -691,6 +732,7 @@ public class ScreenKeysOverlay extends View {
         armed.clear();
         endGesture();
         lookId = -1;
+        lootId = -1;
         invalidate();
     }
 

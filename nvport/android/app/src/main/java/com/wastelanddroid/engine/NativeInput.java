@@ -48,6 +48,27 @@ public final class NativeInput {
         cursorTo(x * scaleX, y * scaleY);
     }
 
+    private static native boolean quickLootHit(float x, float y);
+
+    private static native void quickLootTap(float x, float y);
+
+    /** The Quick Loot list shows and the point (view pixels) is on it. */
+    public static boolean quickLootAt(float x, float y) {
+        try {
+            return quickLootHit(x * scaleX, y * scaleY);
+        } catch (UnsatisfiedLinkError e) {
+            return false;
+        }
+    }
+
+    /** A tap on the Quick Loot list (view pixels): the row under it is taken. */
+    public static void quickLootTapAt(float x, float y) {
+        try {
+            quickLootTap(x * scaleX, y * scaleY);
+        } catch (UnsatisfiedLinkError ignored) {
+        }
+    }
+
     /** Wheel, in lines (positive = up). */
     public static native void scroll(float lines);
 }

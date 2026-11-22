@@ -331,6 +331,58 @@ index 4f6f70c..c60af4c 100644
          };
          drop(decode_span);
          let handle = match result {
+diff --git a/engine/nvf-play/src/corner_messages.rs b/engine/nvf-play/src/corner_messages.rs
+index b1ba548..8715aa2 100644
+--- a/engine/nvf-play/src/corner_messages.rs
++++ b/engine/nvf-play/src/corner_messages.rs
+@@ -71,6 +71,25 @@ fn seconds(note: &Note) -> f32 {
+     note.seconds.filter(|s| *s > 0.0).unwrap_or(DEFAULT_SECONDS)
+ }
+ 
++/// [nvport] The longest a message stays while others wait.
++const WAITING_SECONDS: f32 = 3.0;
++
++/// [nvport] The engine's own English lines in the player's language: "<item> added",
++/// "<n> items added (<total> in all)", "Note: <name>".
++fn localized(text: &str) -> String {
++    use fnv_util::words::tr;
++    if let Some(rest) = text.strip_prefix("Note: ") {
++        return format!("{} {rest}", tr("Note:"));
++    }
++    if let Some((n, total)) = text.strip_suffix(" in all)").and_then(|t| t.split_once(" items added (")) {
++        return format!("{} {n} ({} {total})", tr("Items added:"), tr("in all"));
++    }
++    if let Some(item) = text.strip_suffix(" added") {
++        return format!("{} {item}", tr("Added:"));
++    }
++    text.to_string()
++}
++
+ /// The messages waiting and the one on screen.
+ #[derive(Resource, Default)]
+ pub struct CornerMessages {
+@@ -83,7 +102,8 @@ impl CornerMessages {
+     /// Add a message behind those waiting. One that says what the last one says (the
+     /// same text, icon and time) is left out, and so is any when too many wait; `false`
+     /// then.
+-    pub fn push(&mut self, note: Note) -> bool {
++    pub fn push(&mut self, mut note: Note) -> bool {
++        note.text = localized(&note.text);
+         let last = self.waiting.back().or(self.showing.as_ref().map(|s| &s.0));
+         if last == Some(&note) || self.waiting.len() >= MAX_WAITING {
+             return false;
+@@ -97,7 +117,10 @@ impl CornerMessages {
+         let mut changed = false;
+         if let Some((note, age)) = &mut self.showing {
+             *age += dt;
+-            if *age >= seconds(note) + FADE {
++            // [nvport] With others waiting a long line (a tutorial's ten seconds) gives way
++            // after three: a karma change or an item comes while it still matters.
++            let limit = if self.waiting.is_empty() { seconds(note) } else { seconds(note).min(WAITING_SECONDS) };
++            if *age >= limit + FADE {
+                 self.showing = None;
+                 changed = true;
+             }
 diff --git a/engine/nvf-play/src/creator/view.rs b/engine/nvf-play/src/creator/view.rs
 index 8d81a9d..dbd9c13 100644
 --- a/engine/nvf-play/src/creator/view.rs
@@ -453,6 +505,84 @@ index 70bfca9..d0b27f7 100644
      } else if battle_loop {
          battle_set.map(wanted_battle)
      } else if recovering {
+diff --git a/engine/nvf-play/src/quick_loot.rs b/engine/nvf-play/src/quick_loot.rs
+index 8c7cbf9..1266692 100644
+--- a/engine/nvf-play/src/quick_loot.rs
++++ b/engine/nvf-play/src/quick_loot.rs
+@@ -763,6 +763,19 @@ type Out<'w> = (
+ /// Follows the target, reads the keys: in `PlaySet::Activation`, after the target is found
+ /// and before `crate::activate::activate` reads Activate.
+ #[allow(clippy::too_many_arguments)]
++/// [nvport] The list on a touch screen: the box and each shown row's band in the window's
++/// logical pixels ([left, top, right, bottom]), the first shown row's index; empty while no
++/// list shows. Set as the list is drawn ([`draw`]).
++pub static TOUCH_BOXES: std::sync::Mutex<(Vec<[f32; 4]>, usize)> = std::sync::Mutex::new((Vec::new(), 0));
++/// [nvport] A tap on the list (logical pixels), taken by [`follow`]: the row under it is
++/// selected and taken (Activate's take).
++pub static TOUCH_TAP: std::sync::Mutex<Option<Vec2>> = std::sync::Mutex::new(None);
++
++/// [nvport] The list's box on screen (logical pixels), if it shows.
++pub fn touch_box() -> Option<[f32; 4]> {
++    TOUCH_BOXES.lock().ok().and_then(|b| b.0.first().copied()).filter(|_| HOLDS.load(Ordering::Relaxed))
++}
++
+ pub(crate) fn follow(
+     input: crate::bindings::ControlInput,
+     scroll: Res<AccumulatedMouseScroll>,
+@@ -808,7 +821,12 @@ pub(crate) fn follow(
+     }
+     let shown_now = ql.shown.is_some();
+     HOLDS.store(shown_now, Ordering::Relaxed);
+-    let Some(s) = ql.shown.as_mut() else { return };
++    let Some(s) = ql.shown.as_mut() else {
++        if let Ok(mut t) = TOUCH_TAP.lock() {
++            *t = None;
++        }
++        return;
++    };
+     // The frame a list opens, its keys are not read: the systems that read them before
+     // `PlaySet::Activation` (Ready Item, the wheel) saw no list and may have used them.
+     if !same {
+@@ -827,7 +845,18 @@ pub(crate) fn follow(
+         let steps = if notches > 0.0 { -1 } else { 1 };
+         s.model.apply(&mut sim.world, Command::Scroll(steps));
+     }
+-    let cmd = if input.just_pressed(Control::Activate) {
++    // [nvport] A tap on a row: that row, taken.
++    let tapped = TOUCH_TAP.lock().ok().and_then(|mut t| t.take());
++    let tapped_row = tapped.and_then(|at| {
++        let boxes = TOUCH_BOXES.lock().ok()?;
++        let (rects, first) = (&boxes.0, boxes.1);
++        rects.iter().skip(1).position(|r| at.x >= r[0] && at.x <= r[2] && at.y >= r[1] && at.y <= r[3]).map(|i| first + i)
++    });
++    if let Some(row) = tapped_row.filter(|r| *r < s.rows().len()) {
++        s.model.focus = Side::Container;
++        s.model.apply(&mut sim.world, Command::Hover(Side::Container, row));
++    }
++    let cmd = if input.just_pressed(Control::Activate) || tapped_row.is_some() {
+         Some(Command::Stack)
+     } else if input.just_pressed(Control::ReadyItem) && s.kind != Kind::Pocket {
+         Some(Command::TakeAll)
+@@ -1058,6 +1087,19 @@ fn draw(
+         let (laid, faces) = (laid.clone(), faces.clone());
+         commands.entity(e).with_children(|p| spawn_panel(p, &laid, &faces, crime));
+     }
++    // [nvport] Where the box and its rows are, for touch (TOUCH_BOXES): the box hangs from
++    // the window's centre, LEFT units right and half its height up; a unit is
++    // `unit_scale / 9.6` per cent of the window's height (`crate::interface::u`).
++    if let Ok(w) = window.single() {
++        let k = crate::interface::unit_scale() / 9.6 / 100.0 * w.height();
++        let (ox, oy) = (w.width() / 2.0 + LEFT * k, w.height() / 2.0 - laid.box_h / 2.0 * k);
++        let r = |x0: f32, y0: f32, x1: f32, y1: f32| [ox + x0 * k, oy + y0 * k, ox + x1 * k, oy + y1 * k];
++        let mut rects = vec![r(0.0, 0.0, laid.size.x, laid.box_h)];
++        rects.extend(laid.bands.iter().map(|b| r(0.0, b.min.y, laid.size.x, b.max.y)));
++        if let Ok(mut t) = TOUCH_BOXES.lock() {
++            *t = (rects, s.first());
++        }
++    }
+     *drawn = now;
+ }
+ 
 diff --git a/engine/nvf-play/src/reticle.rs b/engine/nvf-play/src/reticle.rs
 index 4cf8199..5cf51d2 100644
 --- a/engine/nvf-play/src/reticle.rs
@@ -759,10 +889,10 @@ index bbdb0c0..ab27c2a 100644
  libloading = "0.8.9"
 diff --git a/engine/nvforever/src/android_input.rs b/engine/nvforever/src/android_input.rs
 new file mode 100644
-index 0000000..07726e8
+index 0000000..89cd9c1
 --- /dev/null
 +++ b/engine/nvforever/src/android_input.rs
-@@ -0,0 +1,412 @@
+@@ -0,0 +1,441 @@
 +//! [nvport] Input from the Android launcher (Fallout Droid): on-screen keys, touch look,
 +//! gamepads mapped to PC keys and physical keyboards/mice arrive through JNI
 +//! (`com.wastelanddroid.engine.NativeInput`) and are written as Bevy's own input messages,
@@ -832,6 +962,30 @@ index 0000000..07726e8
 +#[unsafe(no_mangle)]
 +pub extern "C" fn Java_com_wastelanddroid_engine_NativeInput_cursorTo(_e: JEnv, _c: JClass, x: f32, y: f32) {
 +    push(Ev::CursorTo(x, y));
++}
++
++/// The window's scale factor (physical / logical pixels), kept by `drain` for the calls below.
++static SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x3f80_0000);
++
++fn logical(x: f32, y: f32) -> Vec2 {
++    Vec2::new(x, y) / f32::from_bits(SCALE.load(Ordering::Relaxed)).max(0.01)
++}
++
++/// `NativeInput.quickLootHit(float x, float y)`: the Quick Loot list shows and the point
++/// (surface pixels) is on it.
++#[unsafe(no_mangle)]
++pub extern "C" fn Java_com_wastelanddroid_engine_NativeInput_quickLootHit(_e: JEnv, _c: JClass, x: f32, y: f32) -> u8 {
++    let p = logical(x, y);
++    nvf_play::quick_loot::touch_box().is_some_and(|b| p.x >= b[0] && p.x <= b[2] && p.y >= b[1] && p.y <= b[3]) as u8
++}
++
++/// `NativeInput.quickLootTap(float x, float y)`: a tap on the Quick Loot list (surface
++/// pixels): the row under it is taken.
++#[unsafe(no_mangle)]
++pub extern "C" fn Java_com_wastelanddroid_engine_NativeInput_quickLootTap(_e: JEnv, _c: JClass, x: f32, y: f32) {
++    if let Ok(mut t) = nvf_play::quick_loot::TOUCH_TAP.lock() {
++        *t = Some(logical(x, y));
++    }
 +}
 +
 +/// The launcher's arguments file (`<internal data>/nvport_args.txt`), set by android_main.
@@ -931,6 +1085,10 @@ index 0000000..07726e8
 +        if l.pov {
 +            f |= 32;
 +        }
++    }
++    // Bit 7: the Quick Loot list shows (touch: tap a row to take it, swipe it to scroll).
++    if nvf_play::quick_loot::holds_input() {
++        f |= 128;
 +    }
 +    PLAY_FLAGS.store(f, Ordering::Relaxed);
 +}
@@ -1048,6 +1206,7 @@ index 0000000..07726e8
 +        _ => return,
 +    };
 +    let Ok((window, mut win)) = window.single_mut() else { return };
++    SCALE.store(win.scale_factor().to_bits(), Ordering::Relaxed);
 +    for e in events {
 +        match e {
 +            Ev::Key(code, down) => {
@@ -1662,6 +1821,24 @@ index bf97e78..4b28395 100644
              Projection::Perspective(PerspectiveProjection { fov: 0.1, near: 5.0, far: crate::sky::OUTDOOR_FAR, aspect_ratio: 1.0, ..default() }),
              crate::sky::initial_fog(),
              bevy::core_pipeline::prepass::DepthPrepass,
+diff --git a/engine/nvforever/src/shadow_rate.rs b/engine/nvforever/src/shadow_rate.rs
+index d428306..fc4697e 100644
+--- a/engine/nvforever/src/shadow_rate.rs
++++ b/engine/nvforever/src/shadow_rate.rs
+@@ -319,7 +319,12 @@ pub(crate) fn hold_cascades(
+     if let Some(share) = share.as_mut().filter(|s| s.0.is_some()) {
+         share.0 = None;
+     }
+-    let schedule: &[(u32, u32)] = if on.0 {
++    // [nvport] A phone: the nearest cascade every frame (held, it shimmered as the view
++    // moved at a phone's uneven frame rate), the farther ones every other and fourth frame.
++    const PHONE_SCHEDULE: [(u32, u32); 3] = [(1, 0), (2, 1), (4, 3)];
++    let schedule: &[(u32, u32)] = if on.0 && cfg!(target_os = "android") {
++        &PHONE_SCHEDULE
++    } else if on.0 {
+         &PERFORMANCE_SCHEDULE
+     } else if staggered() {
+         &STAGGERED_SCHEDULE
 diff --git a/engine/nvforever/src/sky.rs b/engine/nvforever/src/sky.rs
 index bd2755d..9e9e53d 100644
 --- a/engine/nvforever/src/sky.rs
@@ -1765,20 +1942,24 @@ index 22ad677..df42c57 100644
                  warn!(
                      "Could not set cursor grab mode for window {}: {}",
 diff --git a/lang/ru.toml b/lang/ru.toml
-index 69dc72c..5529ae1 100644
+index 69dc72c..d2e5966 100644
 --- a/lang/ru.toml
 +++ b/lang/ru.toml
-@@ -6,6 +6,9 @@
+@@ -6,6 +6,13 @@
  name = "Русский"
  
  [words]
 +# [nvport] The phone build's settings page (engine/nvforever/src/android_input.rs).
 +"Too heavy for a phone: 2x, FXAA or SMAA" = "Слишком тяжело для телефона: 2x, FXAA или SMAA"
 +"Not available on a phone" = "Недоступно на телефоне"
++"Note:" = "Запись:"
++"Items added:" = "Добавлено предметов:"
++"in all" = "всего"
++"Added:" = "Добавлено:"
  # [design, #2200; engine/nvf-play/src/pause.rs] NVForever's device selection.
  "Automatic Input Switching" = "Автоматическая смена устройства ввода"
  "On: a controller button, stick or trigger selects Controller; a key or mouse click selects Keyboard and Mouse (mouse motion does not). Off: choose Input Device yourself." = "Вкл.: кнопка, стик или курок геймпада выбирает геймпад; клавиша или щелчок мыши — клавиатуру и мышь (движение мыши — нет). Выкл.: выбирайте устройство сами."
-@@ -550,3 +553,180 @@ name = "Русский"
+@@ -550,3 +557,180 @@ name = "Русский"
  # [design; engine/nvforever/src/heat_haze.rs] The Heat haze row (a prototype).
  "Heat haze (experimental)" = "Марево (экспериментально)"
  "On: the far ground near the horizon shimmers slightly on hot, clear days, by the sun and the weather. A prototype. Not in the original." = "Вкл.: дальняя земля у горизонта слегка дрожит в жаркие ясные дни, в зависимости от солнца и погоды. Прототип. Нет в оригинале."

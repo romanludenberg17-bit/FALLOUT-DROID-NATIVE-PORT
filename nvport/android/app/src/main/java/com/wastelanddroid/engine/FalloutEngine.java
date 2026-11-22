@@ -538,7 +538,9 @@ public final class FalloutEngine {
 
     public static int renderHeight(Context context) {
         SharedPreferences prefs = Prefs.get(context);
-        String res = prefs.getString("resolution", null);
+        // The launcher's old per-game resolution row is gone (its "2400x1080" left the game
+        // drawing at the screen's full size): the class's height and the render scale only.
+        String res = null;
         if (res != null && res.contains("x")) {
             try {
                 int h = Integer.parseInt(res.substring(res.indexOf('x') + 1).trim());
@@ -703,6 +705,7 @@ public final class FalloutEngine {
             android.app.ActivityManager am = (android.app.ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
             String game = context.getPackageName() + GAME_PROCESS_SUFFIX;
             int n = 0;
+            boolean anrShown = false;
             for (android.app.ApplicationExitInfo e : am.getHistoricalProcessExitReasons(context.getPackageName(), 0, 30)) {
                 if (!game.equals(e.getProcessName())) continue;
                 sb.append(new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.ROOT).format(new java.util.Date(e.getTimestamp())))
@@ -710,12 +713,38 @@ public final class FalloutEngine {
                         .append(" status ").append(e.getStatus())
                         .append(", pss ").append(e.getPss() / 1024).append(" MB, rss ").append(e.getRss() / 1024).append(" MB")
                         .append(e.getDescription() == null ? "" : ", " + e.getDescription()).append('\n');
+                // The newest "not responding": where the main thread stood (its stack).
+                if (e.getReason() == android.app.ApplicationExitInfo.REASON_ANR && !anrShown) {
+                    anrShown = true;
+                    try (java.io.InputStream in = e.getTraceInputStream()) {
+                        if (in != null) {
+                            java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+                            byte[] chunk = new byte[16384];
+                            for (int r; (r = in.read(chunk)) > 0 && buf.size() < 4 << 20; ) buf.write(chunk, 0, r);
+                            sb.append(mainThreadOf(buf.toString("UTF-8")));
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
                 if (++n >= max) break;
             }
         } catch (Exception e) {
             sb.append(e).append('\n');
         }
         return sb.length() == 0 ? "(no record)" : sb.toString();
+    }
+
+    /** The "main" thread's part of an ANR trace (at most 60 lines). */
+    private static String mainThreadOf(String trace) {
+        int at = trace.indexOf("\"main\"");
+        if (at < 0) return "  (no main thread in the trace)\n";
+        String[] lines = trace.substring(at).split("\n");
+        StringBuilder sb = new StringBuilder("  ANR main thread:\n");
+        for (int i = 0; i < lines.length && i < 60; i++) {
+            if (i > 0 && lines[i].trim().isEmpty()) break;
+            sb.append("    ").append(lines[i]).append('\n');
+        }
+        return sb.toString();
     }
 
     private static String reasonName(int r) {
