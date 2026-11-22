@@ -36,8 +36,8 @@ public final class QuickPanel extends FrameLayout {
 
     /** Accent colours of the keys: amber (New Vegas), green (Fallout 3), blue, white, red. */
     private static final int[] ACCENTS = {0xFFFFB840, 0xFF1AFF80, 0xFF2ECFFF, 0xFFE6F0FF, 0xFFFF5A3C};
-    private static final String[] FPS_CHOICES = {"auto", "30", "60", "90", "120", "off"};
-    private static final String[] FPS_LABELS = {"АВТО", "30", "60", "90", "120", "БЕЗ"};
+    private static final String[] FPS_CHOICES = {"auto", "30", "60", "90", "120", "144", "off"};
+    private static final String[] FPS_LABELS = {"АВТО", "30", "60", "90", "120", "144", "БЕЗ"};
 
     private final Host host;
     private final LinearLayout column;

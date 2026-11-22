@@ -436,7 +436,7 @@ index 70bfca9..d0b27f7 100644
          battle_set.map(wanted_battle)
      } else if recovering {
 diff --git a/engine/nvf-play/src/reticle.rs b/engine/nvf-play/src/reticle.rs
-index 4cf8199..5a4aac1 100644
+index 4cf8199..5cf51d2 100644
 --- a/engine/nvf-play/src/reticle.rs
 +++ b/engine/nvf-play/src/reticle.rs
 @@ -541,7 +541,7 @@ fn draw(
@@ -456,14 +456,16 @@ index 4cf8199..5a4aac1 100644
      ),
      data: Option<Res<GameData>>,
      mut images: ResMut<Assets<Image>>,
-@@ -666,7 +667,10 @@ fn draw(
+@@ -666,7 +667,12 @@ fn draw(
      // The player's tweaks: no crosshair in first or in third person (the prompt stays)
      // [design: docs/design/tweaks.md].
      let third = control.as_ref().is_some_and(|c| c.third_person_view());
 -    let view_hidden = tweaks.as_ref().is_some_and(|t| if third { t.hide_crosshair_third } else { t.hide_crosshair_first });
 +    // [nvport] Down the sights in first person, as the original: no crosshair while the view
 +    // zooms to the weapon's Sight FOV (the gun's own sights aim).
-+    let sighting = !third && aim.as_ref().is_some_and(|a| a.share() > 0.05);
++    // Fallout 3 has no iron sights (its aim only zooms the view): the crosshair stays there.
++    let fo3 = std::env::var("NVPORT_GAME").is_ok_and(|v| v.trim().eq_ignore_ascii_case("fo3"));
++    let sighting = !fo3 && !third && aim.as_ref().is_some_and(|a| a.share() > 0.05);
 +    let view_hidden = sighting || tweaks.as_ref().is_some_and(|t| if third { t.hide_crosshair_third } else { t.hide_crosshair_first });
      let gap = spread.max(CROSS_REST);
      for (b, mut v, mut node, mut image) in &mut bars {

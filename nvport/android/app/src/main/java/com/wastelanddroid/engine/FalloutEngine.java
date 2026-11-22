@@ -178,6 +178,8 @@ public final class FalloutEngine {
             ini.get("Settings").put("language", lang);
         }
         if (game == GameDef.FO3) {
+            // Fallout 3 aims by zooming the view, without iron sights: the gun stays where it is.
+            ini.get("Settings").put("true-iron-sights", "0");
             args.add("env:NVF_CHARGEN_QUEST=" + FO3_CHARGEN_QUEST);
             // Fallout 3's interface is green (its iSystemColorHUDMain / PipBoy 26, 255, 128),
             // New Vegas's amber.
@@ -312,7 +314,8 @@ public final class FalloutEngine {
             List<String> extra = new ArrayList<>();
             if (g.bloom) extra.add("bloom");
             if (g.anisotropy >= 8) extra.add("anisotropic");
-            if (g.waterReflections && high) extra.add("water-reflections");
+            // No water reflections on a phone: a second camera draws the whole scene again
+            // and reads pixels back from the GPU every frame (a device lost on Adreno).
             if (extra.isEmpty()) {
                 a.add("--graphics");
                 a.add("vanilla");
@@ -365,7 +368,7 @@ public final class FalloutEngine {
             }
             set.put("bloom", g.bloom ? "1" : "0");
             set.put("anisotropic", g.anisotropy >= 8 ? "1" : "0");
-            set.put("water-reflections", g.waterReflections && highClass ? "1" : "0");
+            set.put("water-reflections", "0");
             return set;
         }
 
@@ -458,7 +461,7 @@ public final class FalloutEngine {
         if (v.equals("off")) return 0;
         try {
             int n = Integer.parseInt(v.replaceAll("[^0-9]", ""));
-            return n <= 0 ? auto : n <= 30 ? 30 : n <= 60 ? 60 : n <= 90 ? 90 : 120;
+            return n <= 0 ? auto : n <= 30 ? 30 : n <= 60 ? 60 : n <= 90 ? 90 : n <= 120 ? 120 : 144;
         } catch (NumberFormatException e) {
             return auto;
         }

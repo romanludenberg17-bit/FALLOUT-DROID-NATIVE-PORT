@@ -25,7 +25,26 @@ public final class GameRelayActivity extends Activity {
         if ("fo3".equals(game)) setTheme(com.wastelanddroid.R.style.FdGameThemeFo3);
         super.onCreate(state);
         since = SystemClock.uptimeMillis();
-        h.post(wait);
+    }
+
+    private boolean ended;
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (ended) return;
+        ended = true;
+        // On screen now (the game's loading picture): the old game process ends.
+        android.app.ActivityManager am = (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
+        java.util.List<android.app.ActivityManager.RunningAppProcessInfo> list = am == null ? null : am.getRunningAppProcesses();
+        if (list != null) {
+            String name = getPackageName() + FalloutEngine.GAME_PROCESS_SUFFIX;
+            for (android.app.ActivityManager.RunningAppProcessInfo p : list) {
+                if (name.equals(p.processName)) android.os.Process.killProcess(p.pid);
+            }
+        }
+        since = SystemClock.uptimeMillis();
+        h.postDelayed(wait, 150);
     }
 
     private final Runnable wait = new Runnable() {

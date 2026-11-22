@@ -136,7 +136,12 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
         try {
             android.view.Surface surface = h.getSurface();
             if (surface != null && surface.isValid() && wantedHz > 0) {
-                surface.setFrameRate(wantedHz, android.view.Surface.FRAME_RATE_COMPATIBILITY_DEFAULT);
+                if (android.os.Build.VERSION.SDK_INT >= 31) {
+                    surface.setFrameRate(wantedHz, android.view.Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
+                            android.view.Surface.CHANGE_FRAME_RATE_ALWAYS);
+                } else {
+                    surface.setFrameRate(wantedHz, android.view.Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE);
+                }
             }
         } catch (RuntimeException ignored) {
         }
@@ -248,10 +253,9 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
         overridePendingTransition(0, 0);
         // The launcher's "game running" flag for its crash check.
         com.wastelanddroid.util.Prefs.get(this).edit().putBoolean(com.wastelanddroid.util.Prefs.LAUNCH_PENDING, true).commit();
-        // This process ends now, at once (SIGKILL: no destructors running under the engine's
-        // live threads, which aborted on destroyed mutexes, and its memory free before the
-        // next run starts: two engines at once ran the phone out of RAM, 4 FPS, a crash).
-        android.os.Process.killProcess(android.os.Process.myPid());
+        // The relay ends this process once it is on screen (SIGKILL: no destructors under the
+        // engine's live threads; its memory free before the next run). Killing it here, before
+        // the relay showed, let the launcher under it come up meanwhile.
     }
 
     // ---- the quick panel (QuickPanel.Host)
