@@ -40,6 +40,8 @@ public final class FalloutEngine {
      * skipped. Cleared when the graphics settings are saved again.
      */
     public static final String GPU_SAFE = "gpu_safe_level";
+    /** One start with the light picture after a repeated lost device (NativeGameActivity). */
+    public static final String RECOVERY_LITE = "recovery_lite_once";
     /** The game's process (manifest: NativeGameActivity android:process). */
     public static final String GAME_PROCESS_SUFFIX = ":game";
     /** Bumped when the bundled engine data (schemas) changes. */
@@ -180,6 +182,8 @@ public final class FalloutEngine {
             ed.commit();
         }
         Profile profile = Profile.of(context);
+        // The light start is for this one start: the next one is the player's again.
+        if (profile.lite) ap.edit().remove(RECOVERY_LITE).commit();
         // The engine's own Texture Quality row (android_input.rs) wins once the player set it.
         int mip = profile.mipSkip;
         try {
@@ -327,6 +331,8 @@ public final class FalloutEngine {
         boolean strong;
         /** DeviceProfile.flagshipProfile. */
         boolean flagship;
+        /** This start only: the light picture after a repeated lost device. */
+        boolean lite;
 
         static Profile of(Context context) {
             Profile p = new Profile();
@@ -364,6 +370,10 @@ public final class FalloutEngine {
             if (!mayDegrade(context, p.quality)) Prefs.get(context).edit().remove(GPU_SAFE).apply();
             p.safe = Prefs.get(context).getInt(GPU_SAFE, 0);
             p.strong = strongGraphics(context);
+            if (Prefs.get(context).getBoolean(RECOVERY_LITE, false)) {
+                p.safe = Math.max(p.safe, 1);
+                p.lite = true;
+            }
             SharedPreferences fx = Prefs.get(context);
             p.fxTerrain = fx.getBoolean("fx_terrain", false);
             p.fxShafts = fx.getBoolean("fx_shafts", false);
@@ -378,7 +388,7 @@ public final class FalloutEngine {
             if (p.safe >= 2) p.mipSkip = Math.min(3, Math.max(p.mipSkip, 2));
             // The flagship profile (DeviceProfile.flagshipProfile): every level of every
             // texture, the sun's shadows at Quality, all of the engine's effects.
-            p.flagship = com.wastelanddroid.game.DeviceProfile.flagshipProfile();
+            p.flagship = com.wastelanddroid.game.DeviceProfile.flagshipProfile() && !p.lite;
             if (p.flagship) {
                 p.mipSkip = 0;
                 p.g.shadows = 3;
@@ -522,9 +532,15 @@ public final class FalloutEngine {
             set.put("smooth-terrain", "Off");
             set.put("frame-generation", "Off");
             set.put("display-sync", null);
+            // The one light start after repeated lost devices: also no cloud shadows and no
+            // eye adaptation (its compute pass), whatever the settings page holds.
+            if (lite) {
+                set.put("cloud-shadows", "0");
+                set.put("eye-adaptation", "0");
+            }
             // A strong chip (strongGraphics): the rows its settings page shows again are the
             // player's; the launcher's values are first values only there.
-            if (strong) {
+            if (strong && !lite) {
                 // (Shadow resolution, fine, terrain and cloud shadows stay the launcher's:
                 // 4096² maps and those passes broke the picture on an 8 Gen 5, alpha35.)
                 for (String k : new String[]{"sharpen", "mesh-terrain-blend",

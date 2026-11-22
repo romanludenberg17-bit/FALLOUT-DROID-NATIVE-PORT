@@ -340,7 +340,12 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
         // A save written during this run (autosave, quicksave), else the one it started from.
         java.io.File save = newestFile(new java.io.File(home, "saves"), "", ".nvfsave");
         if (save != null && save.lastModified() < startedAt) save = null;
-        boolean toMenu = again;
+        // Lost again soon after a start-over: one more try from the same save, with the light
+        // picture for that start only (FalloutEngine.RECOVERY_LITE: no sun shadows, MSAA,
+        // cloud shadows, eye adaptation), and the main menu only after that also fails.
+        boolean lite = again && recent == 1;
+        boolean toMenu = again && !lite;
+        if (lite) prefs.edit().putBoolean(FalloutEngine.RECOVERY_LITE, true).commit();
         try {
             java.io.File args = new java.io.File(getFilesDir(), FalloutEngine.ARGS_FILE);
             java.util.List<String> lines = new java.util.ArrayList<>(java.nio.file.Files.readAllLines(args.toPath(), java.nio.charset.StandardCharsets.UTF_8));
@@ -368,7 +373,7 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
             return false;
         }
         android.util.Log.i("NVForever", "graphics device lost: starting again from " + (save == null ? "the main menu" : save));
-        android.widget.Toast.makeText(this, (save == null ? "Сбой видеодрайвера — перезапуск игры" : "Сбой видеодрайвера — перезапуск с последнего сохранения") + (safeLevel == 0 ? "" : safeLevel >= 2 ? "; графика снижена (разрешение, текстуры, тени)" : "; тени, MSAA и трава выключены"), android.widget.Toast.LENGTH_LONG).show();
+        android.widget.Toast.makeText(this, (save == null ? "Сбой видеодрайвера — перезапуск игры" : "Сбой видеодрайвера — перезапуск с последнего сохранения") + (lite ? "; этот запуск — с упрощённой графикой, следующий снова с вашей" : safeLevel == 0 ? "" : safeLevel >= 2 ? "; графика снижена (разрешение, текстуры, тени)" : "; тени, MSAA и трава выключены"), android.widget.Toast.LENGTH_LONG).show();
         restartGame();
         return true;
     }
