@@ -427,7 +427,9 @@ public final class FalloutEngine {
             // The fields of view come from the command line (a null value drops the row the
             // engine's settings page kept, as a part of its slider).
             set.put("field-of-view", null);
-            set.put("viewmodel-field-of-view", null);
+            // The weapon's own field of view is the player's from the settings page once
+            // set (a long rifle's sights look small at 50; a lower value draws the gun
+            // larger): the launcher's 50 only stands while the row is not set.
             // The rows that stand for this command line's numbers: the engine's settings page
             // saved them all once and they override the launcher's profile (a "fps" physics
             // rate up to 160 Hz; draw distances as parts of the command line's distances).
