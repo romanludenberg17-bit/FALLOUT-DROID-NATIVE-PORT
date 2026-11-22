@@ -46,10 +46,27 @@
         <activity android:name=".mods.ModManagerActivity" android:exported="false" android:screenOrientation="sensorLandscape" />
         <activity android:name=".saves.SavesActivity" android:exported="false" android:screenOrientation="sensorLandscape" />
 
+        <!-- A save loaded in game: the fresh run starts from here, under the loading picture. -->
+        <activity android:name=".engine.GameRelayActivity" android:exported="false"
+            android:theme="@style/FdGameTheme" android:screenOrientation="sensorLandscape"
+            android:noHistory="true" android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|navigation|uiMode" />
+
         <!-- The game: GameActivity + libnvforever.so (NVForever engine, android_main). -->
         <activity android:name=".engine.NativeGameActivity" android:exported="false"
             android:process=":game"
             android:theme="@style/FdGameTheme"
+            android:screenOrientation="sensorLandscape"
+            android:launchMode="singleTask"
+            android:resizeableActivity="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|navigation|uiMode|density"
+            android:windowSoftInputMode="stateHidden">
+            <meta-data android:name="android.app.lib_name" android:value="nvforever" />
+        </activity>
+        <!-- Fallout 3: the same game activity with its own loading picture (theme). -->
+        <activity android:name=".engine.NativeGameActivityFo3" android:exported="false"
+            android:process=":game"
+            android:theme="@style/FdGameThemeFo3"
             android:screenOrientation="sensorLandscape"
             android:launchMode="singleTask"
             android:resizeableActivity="false"

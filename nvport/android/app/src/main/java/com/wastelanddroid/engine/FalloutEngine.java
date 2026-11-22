@@ -230,7 +230,7 @@ public final class FalloutEngine {
             writeText(new File(ext, "nvport_args.txt"), sb.toString());
         }
         Prefs.get(activity).edit().putString("last_scope", ok.getScope()).commit();
-        Intent intent = new Intent(activity, NativeGameActivity.class);
+        Intent intent = new Intent(activity, NativeGameActivityFo3.forGame(ok.getGame().id));
         intent.putExtra("game", ok.getGame().id);
         activity.startActivity(intent);
     }

@@ -59,7 +59,9 @@ public final class LoadingOverlay extends View {
         // One picture per run of the activity: the window's background (still) and this
         // overlay show the same one.
         if (shared == null || sharedFo3 != fo3) {
-            shared = pick(c, fo3 ? "Fallout3LoadingScreen" : "FalloutNVLoadingScreen");
+            // The theme's picture (res/drawable-nodpi/game_loading_*): no jump from the
+            // system's starting frame to this screen.
+            shared = load(c, fo3 ? "loading/Fallout3LoadingScreen.jpg" : "loading/FalloutNVLoadingScreen.jpg");
             sharedFo3 = fo3;
         }
         picture = shared;

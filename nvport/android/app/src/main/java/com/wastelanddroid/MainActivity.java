@@ -179,7 +179,7 @@ public final class MainActivity extends Activity {
                     h.postDelayed(this, 100);
                     return;
                 }
-                Intent g = new Intent(MainActivity.this, com.wastelanddroid.engine.NativeGameActivity.class).putExtra("game", game);
+                Intent g = new Intent(MainActivity.this, com.wastelanddroid.engine.NativeGameActivityFo3.forGame(game)).putExtra("game", game);
                 startActivity(g);
                 overridePendingTransition(0, 0);
             }

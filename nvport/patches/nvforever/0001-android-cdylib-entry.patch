@@ -662,6 +662,22 @@ index c1893ca..010b93b 100644
      let cell = index.cell_by_name(NEW_GAME_CELL).filter(|c| c.world.is_none()).ok_or_else(|| format!("no interior cell {NEW_GAME_CELL}"))?;
      for &r in &cell.refs {
          let Some((pi, rec)) = fnv_world::fields::winner(lo, r) else { continue };
+diff --git a/engine/nvf-play/src/script_hud.rs b/engine/nvf-play/src/script_hud.rs
+index c1b5bc6..9a6a482 100644
+--- a/engine/nvf-play/src/script_hud.rs
++++ b/engine/nvf-play/src/script_hud.rs
+@@ -328,6 +328,11 @@ fn subtitles(hud: &ScriptHud, g: &fnv_game::Game<'_>, sim: &SimState, player: Op
+     // The response being said in the conversation with the player: drawn by the dialogue
+     // menu (`crate::dialogue_menu`), logged with the others.
+     subs.extend(crate::dialogue::subtitle(g, sim));
++    // [nvport] One subtitle on screen, the newest line, as the original shows them: several
++    // speakers heard at once (a party's chatter) wrote their lines over each other.
++    if on_screen.len() > 1 {
++        on_screen.drain(..on_screen.len() - 1);
++    }
+     Subtitles { logged: subs.join("\n"), on_screen, wheel }
+ }
+ 
 diff --git a/engine/nvforever/Cargo.toml b/engine/nvforever/Cargo.toml
 index bbdb0c0..ab27c2a 100644
 --- a/engine/nvforever/Cargo.toml
@@ -694,10 +710,10 @@ index bbdb0c0..ab27c2a 100644
  libloading = "0.8.9"
 diff --git a/engine/nvforever/src/android_input.rs b/engine/nvforever/src/android_input.rs
 new file mode 100644
-index 0000000..fc97e01
+index 0000000..1b06365
 --- /dev/null
 +++ b/engine/nvforever/src/android_input.rs
-@@ -0,0 +1,369 @@
+@@ -0,0 +1,370 @@
 +//! [nvport] Input from the Android launcher (Fallout Droid): on-screen keys, touch look,
 +//! gamepads mapped to PC keys and physical keyboards/mice arrive through JNI
 +//! (`com.wastelanddroid.engine.NativeInput`) and are written as Bevy's own input messages,
@@ -913,6 +929,7 @@ index 0000000..fc97e01
 +    mut panels: Query<&mut Visibility, With<crate::perf_overlay::draw::PanelRoot>>,
 +) {
 +    let hide = creator.is_some_and(|c| c.is_open()) || chargen.is_some_and(|c| c.progress().is_some()) || pipboy.is_some_and(|p| p.shown());
++    crate::perf_overlay::draw::HIDDEN.store(hide, Ordering::Relaxed);
 +    let want = if hide { Visibility::Hidden } else { Visibility::Inherited };
 +    for mut v in &mut panels {
 +        if *v != want {
@@ -931,7 +948,7 @@ index 0000000..fc97e01
 +
 +impl Plugin for AndroidInputPlugin {
 +    fn build(&self, app: &mut App) {
-+        app.add_systems(PreUpdate, drain.before(InputSystems)).add_systems(Last, (publish_ui_state, publish_play_flags)).add_systems(PostUpdate, creator_hides_actors).add_systems(Last, perf_overlay_out_of_menus).add_systems(PreUpdate, apply_frame_cap);
++        app.add_systems(PreUpdate, drain.before(InputSystems)).add_systems(Last, (publish_ui_state, publish_play_flags)).add_systems(PostUpdate, creator_hides_actors).add_systems(PreUpdate, perf_overlay_out_of_menus).add_systems(Last, perf_overlay_out_of_menus).add_systems(PreUpdate, apply_frame_cap);
 +    }
 +}
 +
@@ -1068,10 +1085,10 @@ index 0000000..fc97e01
 +    })
 +}
 diff --git a/engine/nvforever/src/handoff.rs b/engine/nvforever/src/handoff.rs
-index c1ed297..e736041 100644
+index c1ed297..8b2b924 100644
 --- a/engine/nvforever/src/handoff.rs
 +++ b/engine/nvforever/src/handoff.rs
-@@ -318,6 +318,29 @@ pub fn leave(
+@@ -318,6 +318,32 @@ pub fn leave(
              let _ = std::fs::remove_file(&file);
              let _ = std::fs::remove_file(started_marker(&file));
              let keep = crate::restart_args(&crate::command_line());
@@ -1088,7 +1105,10 @@ index c1ed297..e736041 100644
 +                match crate::android_input::request_restart(&args) {
 +                    Ok(()) => {
 +                        info!("load: restarting the game with {}", r.as_ref().map_or("--menu".to_string(), |r| format!("--load {}", r.path.display())));
-+                        *h = Leaving::HandedOver;
++                        // Not HandedOver: that ends the process from inside (EndNow), with the
++                        // engine's threads still running (destroyed mutexes, an abort). The
++                        // loading screen stays up; the launcher's activity ends the process.
++                        *h = Leaving::No;
 +                    }
 +                    Err(e) => {
 +                        warn!("load: {e}; staying");
@@ -1389,18 +1409,32 @@ index 0d206a3..29f7260 100644
      KeepLimits { secs: (full.secs * s).round().max(MIN_LIMITS.secs), max: ((full.max as f64 * s).round() as usize).max(MIN_LIMITS.max) }
  }
 diff --git a/engine/nvforever/src/perf_overlay/draw.rs b/engine/nvforever/src/perf_overlay/draw.rs
-index 2d777b9..5a3285f 100644
+index 2d777b9..e6227d1 100644
 --- a/engine/nvforever/src/perf_overlay/draw.rs
 +++ b/engine/nvforever/src/perf_overlay/draw.rs
-@@ -68,7 +68,7 @@ const GRAPH_PX: (u32, u32) = (8, 2048);
+@@ -68,7 +68,11 @@ const GRAPH_PX: (u32, u32) = (8, 2048);
  
  /// The panel's root, despawned with its rows when the panel is set again.
  #[derive(Component)]
 -pub(super) struct PanelRoot;
 +pub(crate) struct PanelRoot;
++
++/// [nvport] The panel is hidden now (the character creator, the Pip-Boy): a panel made again
++/// (each second, as its readings change) starts hidden, not shown for a frame.
++pub(crate) static HIDDEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
  
  /// What the panel is drawn with: font 7 (or its stand-in).
  pub(super) struct Kit {
+@@ -145,7 +149,8 @@ pub(super) fn spawn(commands: &mut Commands, kit: &Kit, rows: &[Row], measured:
+         min_width: u(width),
+         ..default()
+     };
+-    commands.spawn((PanelRoot, node, BackgroundColor(Color::BLACK.with_alpha(BACKING)), GlobalZIndex(Z), Pickable::IGNORE)).with_children(|panel| {
++    let shown = if HIDDEN.load(std::sync::atomic::Ordering::Relaxed) { Visibility::Hidden } else { Visibility::Inherited };
++    commands.spawn((PanelRoot, node, shown, BackgroundColor(Color::BLACK.with_alpha(BACKING)), GlobalZIndex(Z), Pickable::IGNORE)).with_children(|panel| {
+         bracket(panel);
+         for (row, value) in rows.iter().zip(values) {
+             if row.graph {
 diff --git a/engine/nvforever/src/perf_overlay/mod.rs b/engine/nvforever/src/perf_overlay/mod.rs
 index a4d7a2c..7cc0dae 100644
 --- a/engine/nvforever/src/perf_overlay/mod.rs

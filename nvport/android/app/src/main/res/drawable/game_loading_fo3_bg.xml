@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The game's window from the system's starting frame until the engine draws: the loading
+     screen's first frame (LoadingOverlay draws the same picture, animated, over it). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@android:color/black" />
+    <item>
+        <bitmap android:src="@drawable/game_loading_fo3" android:gravity="fill" android:filter="true" />
+    </item>
+</layer-list>

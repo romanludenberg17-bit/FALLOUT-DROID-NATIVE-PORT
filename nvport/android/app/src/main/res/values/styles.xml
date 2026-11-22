@@ -19,9 +19,12 @@
     </style>
     <!-- GameActivity (games-activity 4.x) is an AppCompatActivity: an AppCompat theme is required. -->
     <style name="FdGameTheme" parent="Theme.AppCompat.NoActionBar">
-        <item name="android:windowBackground">@drawable/game_loading_bg</item>
+        <item name="android:windowBackground">@drawable/game_loading_fnv_bg</item>
         <item name="android:windowFullscreen">true</item>
         <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
         <item name="android:windowContentOverlay">@null</item>
+    </style>
+    <style name="FdGameThemeFo3" parent="@style/FdGameTheme">
+        <item name="android:windowBackground">@drawable/game_loading_fo3_bg</item>
     </style>
 </resources>

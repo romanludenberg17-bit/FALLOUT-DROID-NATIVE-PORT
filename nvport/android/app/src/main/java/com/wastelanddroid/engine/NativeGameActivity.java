@@ -33,15 +33,8 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
     @Override
     protected void onCreate(Bundle state) {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        // The loading screen's first frame behind everything at once: GameActivity's
-        // onCreate loads the 170 MB engine before any view can be shown.
-        try {
-            android.graphics.Rect b = getWindowManager().getCurrentWindowMetrics().getBounds();
-            int w = Math.max(b.width(), b.height()), h = Math.min(b.width(), b.height());
-            getWindow().setBackgroundDrawable(new android.graphics.drawable.BitmapDrawable(getResources(),
-                    LoadingOverlay.still(this, "fo3".equals(getIntent().getStringExtra("game")), w, h)));
-        } catch (RuntimeException ignored) {
-        }
+        // The window's background is the loading screen's first frame (the theme:
+        // FdGameTheme / FdGameThemeFo3), shown by the system before this process runs.
         try {
             super.onCreate(state);
         } catch (Throwable t) {
@@ -63,7 +56,7 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
         }
         gamepad = new GamepadInput(new InputBridge(), mapping);
         gamepad.start();
-        fo3 = "fo3".equals(getIntent().getStringExtra("game"));
+        fo3 = this instanceof NativeGameActivityFo3 || "fo3".equals(getIntent().getStringExtra("game"));
         crt = new CrtOverlay(this);
         addContentView(crt, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -246,10 +239,15 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
     private void restartGame() {
         restarting = true;
         android.util.Log.i("NVForever", "engine asked for a fresh run: relaunching");
-        android.content.Intent i = new android.content.Intent(this, com.wastelanddroid.MainActivity.class)
-                .putExtra(com.wastelanddroid.MainActivity.EXTRA_RELAUNCH_GAME, getIntent().getStringExtra("game"))
-                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK | android.content.Intent.FLAG_ACTIVITY_NO_ANIMATION);
+        String game = getIntent().getStringExtra("game");
+        if (game == null) game = this instanceof NativeGameActivityFo3 ? "fo3" : "fnv";
+        android.content.Intent i = new android.content.Intent(this, GameRelayActivity.class)
+                .putExtra(GameRelayActivity.EXTRA_GAME, game)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NO_ANIMATION);
         startActivity(i);
+        overridePendingTransition(0, 0);
+        // The launcher's "game running" flag for its crash check.
+        com.wastelanddroid.util.Prefs.get(this).edit().putBoolean(com.wastelanddroid.util.Prefs.LAUNCH_PENDING, true).commit();
         // This process ends now, at once (SIGKILL: no destructors running under the engine's
         // live threads, which aborted on destroyed mutexes, and its memory free before the
         // next run starts: two engines at once ran the phone out of RAM, 4 FPS, a crash).
