@@ -97,4 +97,7 @@ public final class NativeInput {
 
     /** Wheel, in lines (positive = up). */
     public static native void scroll(float lines);
+
+    /** Thermal Adaptive Mode (0 Normal .. 3 Critical), the system's status and headroom (-1 unknown). */
+    public static native void thermal(int mode, int status, float headroom);
 }

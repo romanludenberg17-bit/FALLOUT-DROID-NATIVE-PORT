@@ -177,9 +177,50 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
      * Every 3 s of play: frames late for 60 FPS (or the lower cap) twice in a row take the
      * resolution down 8 %, early ones twice in a row put it back, between 70 % and 100 %.
      */
+    private static final float[] THERMAL_TOP = {1f, 0.85f, 0.75f, 0.65f};
+    private static final String[] THERMAL_NAMES = {"Normal", "Warm", "Hot", "Critical"};
+    private int thermalWas = -1;
+
+    /**
+     * Thermal Adaptive Mode from the system (PowerManager, API 29/30): Normal (status none
+     * or light, headroom under 0.85), Warm (moderate, or headroom 0.85+), Hot (severe, or
+     * headroom 0.95+), Critical (critical and above). Told to the engine for its run log.
+     */
+    private int thermalMode() {
+        int mode = 0;
+        float headroom = Float.NaN;
+        int status = -1;
+        try {
+            android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+            if (pm != null && android.os.Build.VERSION.SDK_INT >= 29) {
+                status = pm.getCurrentThermalStatus();
+                if (status >= android.os.PowerManager.THERMAL_STATUS_CRITICAL) mode = 3;
+                else if (status >= android.os.PowerManager.THERMAL_STATUS_SEVERE) mode = 2;
+                else if (status >= android.os.PowerManager.THERMAL_STATUS_MODERATE) mode = 1;
+            }
+            if (pm != null && android.os.Build.VERSION.SDK_INT >= 30) {
+                headroom = pm.getThermalHeadroom(10);
+                if (!Float.isNaN(headroom)) {
+                    if (headroom >= 0.95f) mode = Math.max(mode, 2);
+                    else if (headroom >= 0.85f) mode = Math.max(mode, 1);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        if (mode != thermalWas) {
+            thermalWas = mode;
+            try {
+                NativeInput.thermal(mode, status, Float.isNaN(headroom) ? -1f : headroom);
+            } catch (UnsatisfiedLinkError ignored) {
+            }
+        }
+        return mode;
+    }
+
     private void dynamicResolution(int state) {
         if (++drsTicks < 25) return;
         drsTicks = 0;
+        int thermal = thermalMode();
         boolean on;
         float ms;
         try {
@@ -195,17 +236,27 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
             }
             return;
         }
+        // The top of the range by the phone's heat (Thermal Adaptive Mode): Normal 100 %,
+        // Warm 85 %, Hot 75 %, Critical 65 % of the chosen resolution, the bottom 20 points
+        // under it. The player's choice is drawn in full again once the phone cools down.
+        float top = THERMAL_TOP[thermal];
+        float bottom = Math.max(0.5f, top - 0.3f);
+        if (drsScale > top) {
+            drsScale = top;
+            android.util.Log.i("NVForever", "dynamic resolution " + Math.round(drsScale * 100) + "% (thermal " + THERMAL_NAMES[thermal] + ")");
+            fitSurface(mSurfaceView.getWidth(), mSurfaceView.getHeight());
+        }
         if (state != ScreenKeysOverlay.UI_PLAY || ms <= 0f) return;
         int cap = FalloutEngine.frameCap(this);
         float goal = 1000f / Math.min(60, cap > 0 ? cap : 60);
         drsLate = ms > goal * 1.12f ? drsLate + 1 : 0;
         drsEarly = ms < goal * 0.8f ? drsEarly + 1 : 0;
         float was = drsScale;
-        if (drsLate >= 2 && drsScale > 0.7f) {
-            drsScale = Math.max(0.7f, drsScale - 0.08f);
+        if (drsLate >= 2 && drsScale > bottom) {
+            drsScale = Math.max(bottom, drsScale - 0.08f);
             drsLate = 0;
-        } else if (drsEarly >= 2 && drsScale < 1f) {
-            drsScale = Math.min(1f, drsScale + 0.08f);
+        } else if (drsEarly >= 2 && drsScale < top) {
+            drsScale = Math.min(top, drsScale + 0.08f);
             drsEarly = 0;
         }
         if (drsScale != was && mSurfaceView != null) {

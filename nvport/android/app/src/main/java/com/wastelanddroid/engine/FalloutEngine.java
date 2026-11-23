@@ -194,6 +194,15 @@ public final class FalloutEngine {
         } catch (Exception ignored) {
         }
         args.add("env:NVF_TEX_MIP_SKIP=" + mip);
+        // GPU mesh preprocessing for the engine (console `fdgpu none|preprocess|culling|auto`,
+        // kept in gpu_preprocess.txt): auto lets the engine choose (the CPU path on an
+        // Adreno 8xx).
+        try {
+            java.io.File gp = new java.io.File(homeDir(context, game.id), "gpu_preprocess.txt");
+            String mode = gp.isFile() ? readText(gp).trim() : "auto";
+            if (mode.matches("none|preprocess|culling|auto")) args.add("env:NVPORT_GPU_PREPROCESS=" + mode);
+        } catch (Exception ignored) {
+        }
         // The resolution row of the game's settings shows the height in use (0: native).
         args.add("env:NVPORT_RENDER_HEIGHT=" + Math.max(0, renderHeight(context)));
         // Snapdragon 7+ Gen 2 and up, and every high class chip: the engine's settings page
@@ -498,8 +507,11 @@ public final class FalloutEngine {
             // saved them all once and they override the launcher's profile (a "fps" physics
             // rate up to 160 Hz; draw distances as parts of the command line's distances).
             set.put("physics-rate", "60");
+            // First values only ("?"): the game's Graphics Profile and its rows own the
+            // distances once set (a forced 1.000 every start undid a Potato or Low profile
+            // after a restart: the page then read Custom, the world drew everything).
             for (String k : new String[]{"object-distance", "actor-distance", "item-distance", "grass-distance"}) {
-                set.put(k, "1.000");
+                set.put(k, "?1.000");
             }
             // Trees: a part of the distant LOD's far limit, not of --tree-distance (1.000
             // drew them out to the LOD's 46 000 units): no row, the flag's distance.
@@ -520,19 +532,22 @@ public final class FalloutEngine {
             // the GPU safe mode): the engine's own counterparts of the effect mods (Vegas
             // Shaders, Vanilla Plus Terrain), whose DLLs cannot run here.
             boolean fx = safe == 0;
-            set.put("terrain-height-blend", fx && fxTerrain ? "1" : "0");
-            set.put("terrain-anti-tiling", fx && fxTerrain ? "1" : "0");
-            set.put("light-shafts", fx && fxShafts ? "1" : "0");
-            set.put("ambient-occlusion", fx && fxAo ? "Performance" : "Off");
+            // First values only, as the rows above: the game's settings (its Graphics Profile)
+            // own them after the first start; the GPU safe mode alone forces them off.
+            String first = fx ? "?" : "";
+            set.put("terrain-height-blend", first + (fx && fxTerrain ? "1" : "0"));
+            set.put("terrain-anti-tiling", first + (fx && fxTerrain ? "1" : "0"));
+            set.put("light-shafts", first + (fx && fxShafts ? "1" : "0"));
+            set.put("ambient-occlusion", first + (fx && fxAo ? "Performance" : "Off"));
             // Cloud shadows: on by default on a strong chip (its settings page has the row),
             // off on the others unless the launcher's switch is on.
-            set.put("cloud-shadows", strong ? (fx ? "?1" : "?0") : fx && fxClouds ? "1" : "0");
-            set.put("heat-haze", fx && fxHaze ? "1" : "0");
-            set.put("desert-haze", fx && fxHaze ? "1" : "0");
-            set.put("water-effects", fx && fxWater ? "1" : "0");
+            set.put("cloud-shadows", strong ? (fx ? "?1" : "0") : first + (fx && fxClouds ? "1" : "0"));
+            set.put("heat-haze", first + (fx && fxHaze ? "1" : "0"));
+            set.put("desert-haze", first + (fx && fxHaze ? "1" : "0"));
+            set.put("water-effects", first + (fx && fxWater ? "1" : "0"));
             set.put("bloom", g.bloom ? "?1" : "?0");
             set.put("anisotropic", g.anisotropy >= 8 ? "?1" : "?0");
-            set.put("water-reflections", "0");
+            set.put("water-reflections", first + "0");
             // The rest of the rows the phone's settings page hides (android_input.rs
             // PHONE_HIDDEN), at their light values.
             set.put("water-mirror", "0");

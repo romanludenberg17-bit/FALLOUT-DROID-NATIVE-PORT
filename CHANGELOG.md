@@ -1,5 +1,35 @@
 # Fallout Droid Native — CHANGELOG
 
+## 2.0.0-alpha47 (346)
+Built; unit tests of the new texture shrink and GPU family code pass. Nothing verified on a
+device: no Android phone or game data here.
+- Texture Quality is never applied while playing: the live re-read of alpha45-46 is removed
+  (module `texture_live.rs` and nvf-assets' `set_mip_skip`/`held`/`reread` deleted). A choice
+  is only kept (`texture_quality.txt`); the row shows "… (after restart)" until the next
+  start, which reads every texture at that quality before the world's are loaded.
+- Very Low and Potato also shrink DXT textures stored without smaller levels (they had none
+  to skip and stayed full size): decoded, box-filtered by the dropped levels (at least 8
+  texels a side), with a mip chain, as RGBA8 (a 1024² DXT1 of 512 KB becomes 32² at Potato).
+  Interface, HUD, Pip-Boy, fonts and distant LOD keep every level as before.
+- Lost GPU device (Adreno 829, both games; Fallout 3 every time ~3 s after its main menu
+  opens over Vault101d, also in alpha8 already): the driver gives no fault data
+  (VK_EXT_device_fault: 0 records). Experiment: Bevy's GPU mesh preprocessing/culling
+  (compute + indirect draws) is off on Adreno 8xx phones, the CPU path Bevy itself uses on
+  Adreno 730 and older; logged `gpu preprocessing: …`; console `fdgpu none|preprocess|culling|auto`
+  chooses for the next start. Not verified.
+- The "pipeline … could not be loaded" errors of alpha46 were the shadow census's own
+  mistake: a pipeline waiting for its shader (Bevy compiles it once the shader is in) was
+  counted as failed. Only real failures are logged now.
+- Graphics profiles: the launcher wrote distances (1.000), light shafts, AO, water effects,
+  water reflections, terrain and haze rows into NVForever.ini at every start, over the
+  game's own choices (a Potato profile read Custom after a restart and drew everything).
+  They are first values only now; the game's settings own them (the GPU safe mode still
+  forces its values).
+- Thermal Adaptive Mode (Normal, Warm, Hot, Critical) from Android's thermal status and
+  headroom: the dynamic resolution's top falls to 85/75/65 % of the chosen resolution and
+  comes back as the phone cools; `thermal:` lines in the run log, the mode in every frame
+  log line; hitch lines name the pipelines compiling at the time.
+
 ## 2.0.0-alpha46 (345)
 Built and checked by compilation only; nothing here verified on a device yet.
 - GPU detection from the Vulkan device (not the phone's name): run log `gpu:` lines with the
