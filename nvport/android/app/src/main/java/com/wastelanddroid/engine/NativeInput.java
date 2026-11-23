@@ -16,6 +16,12 @@ public final class NativeInput {
     /** The render height the player picked in the game's settings (0 the screen's own), or -1. */
     public static native int renderHeightAsk();
 
+    /** The engine's frame time, smoothed (ms; 0 not known yet). */
+    public static native float frameMs();
+
+    /** The game's Dynamic Resolution switch. */
+    public static native boolean dynamicResolution();
+
     /** A whole line for the console: its characters, then Enter. */
     public static void typeLine(String line) {
         try {

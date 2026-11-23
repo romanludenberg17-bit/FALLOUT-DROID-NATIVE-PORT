@@ -1,5 +1,13 @@
 # Fallout Droid Native — CHANGELOG
 
+## 2.0.0-alpha42 (341)
+- Pipeline prewarm off on phones: every mesh of the loaded cells was drawn unculled under the
+  loading screen (frames of 11 s on an 8 Elite, a 61 s screen, then a lost GPU device).
+- Main pass keeps "nearer or equal" depth on phones (no "equal" test against the prepass,
+  no prepass coverage): mobile shader compilers gave holes and flickering texels.
+- Dynamic Resolution (game settings, on by default): 70–100 % of the chosen resolution by
+  the frame time, 8 % steps every 3 s of play.
+
 Only changes that are in the code. "Not verified on a device" marks what was built and
 checked statically but not yet confirmed by a tester.
 

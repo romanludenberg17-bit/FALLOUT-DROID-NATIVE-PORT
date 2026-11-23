@@ -6,6 +6,8 @@
 name = "Русский"
 
 [words]
+"Lowers the resolution by steps (to 70 % of the chosen one) while frames run late, and raises it back when there is room." = "Снижает разрешение шагами (до 70 % выбранного), пока кадры не успевают, и возвращает его, когда появляется запас."
+"Dynamic Resolution" = "Динамическое разрешение"
 "The textures' detail: High keeps every level; Medium, Low, Ultra Low and Potato drop more (less memory). Takes effect at the next start." = "Детализация текстур: Высокое — все уровни; Среднее, Низкое, Ультра низкое и Картошка отбрасывают больше (меньше памяти). Действует со следующего запуска."
 "Ultra Low or Potato: rough textures, no shadows, reflections, water effects or grass; draw distances stay. Textures change at the next start." = "Ультра низкое или Картошка: грубые текстуры, без теней, отражений, эффектов воды и травы; дальность прорисовки остается. Текстуры — со следующего запуска."
 "The height the game is drawn at, scaled to the screen; Native is the screen's own. Lower is faster and softer." = "Высота, в которой рисуется игра, растянутая на экран; «Родное» — разрешение экрана. Ниже — быстрее и мягче."

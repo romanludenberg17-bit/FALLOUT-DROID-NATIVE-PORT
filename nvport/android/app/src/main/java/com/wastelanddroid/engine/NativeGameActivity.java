@@ -169,10 +169,58 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
 
     private int fixedW, fixedH;
 
+    /** Dynamic resolution: the share of the chosen height drawn now (0.7 to 1). */
+    private float drsScale = 1f;
+    private int drsTicks, drsLate, drsEarly;
+
+    /**
+     * Every 3 s of play: frames late for 60 FPS (or the lower cap) twice in a row take the
+     * resolution down 8 %, early ones twice in a row put it back, between 70 % and 100 %.
+     */
+    private void dynamicResolution(int state) {
+        if (++drsTicks < 25) return;
+        drsTicks = 0;
+        boolean on;
+        float ms;
+        try {
+            on = NativeInput.dynamicResolution();
+            ms = NativeInput.frameMs();
+        } catch (UnsatisfiedLinkError e) {
+            return;
+        }
+        if (!on) {
+            if (drsScale != 1f) {
+                drsScale = 1f;
+                fitSurface(mSurfaceView.getWidth(), mSurfaceView.getHeight());
+            }
+            return;
+        }
+        if (state != ScreenKeysOverlay.UI_PLAY || ms <= 0f) return;
+        int cap = FalloutEngine.frameCap(this);
+        float goal = 1000f / Math.min(60, cap > 0 ? cap : 60);
+        drsLate = ms > goal * 1.12f ? drsLate + 1 : 0;
+        drsEarly = ms < goal * 0.8f ? drsEarly + 1 : 0;
+        float was = drsScale;
+        if (drsLate >= 2 && drsScale > 0.7f) {
+            drsScale = Math.max(0.7f, drsScale - 0.08f);
+            drsLate = 0;
+        } else if (drsEarly >= 2 && drsScale < 1f) {
+            drsScale = Math.min(1f, drsScale + 0.08f);
+            drsEarly = 0;
+        }
+        if (drsScale != was && mSurfaceView != null) {
+            android.util.Log.i("NVForever", "dynamic resolution " + Math.round(drsScale * 100) + "% (frame " + ms + " ms, goal " + goal + " ms)");
+            fitSurface(mSurfaceView.getWidth(), mSurfaceView.getHeight());
+        }
+    }
+
     private void fitSurface(int vw, int vh) {
         if (vw <= 0 || vh <= 0) return;
         int target = FalloutEngine.renderHeight(this);
-        int th = Math.min(vh, target <= 0 ? vh : target);
+        if (target <= 0) target = vh;
+        // Dynamic resolution's share of the chosen height (1 when it is off).
+        target = Math.max(240, Math.round(target * drsScale));
+        int th = Math.min(vh, target);
         int tw = Math.round(th * (float) vw / vh);
         tw &= ~1;
         th &= ~1;
@@ -225,6 +273,7 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
                 else if (android.os.SystemClock.uptimeMillis() - engineUpAt > 700) loading.finish();
             }
             if (consoleBar != null) consoleBar.setShown(state == ScreenKeysOverlay.UI_CONSOLE);
+            if (mSurfaceView != null) dynamicResolution(state);
             // The resolution picked in the game's settings: kept, and the surface resized now.
             try {
                 int ask = NativeInput.renderHeightAsk();
