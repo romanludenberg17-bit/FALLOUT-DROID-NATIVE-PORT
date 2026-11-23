@@ -3482,22 +3482,6 @@ index 0000000..46e7d2e
 +        }
 +    }
 +}
-diff --git a/engine/nvforever/src/pipboy_arm.rs b/engine/nvforever/src/pipboy_arm.rs
-index 8d11ee6..69303a3 100644
---- a/engine/nvforever/src/pipboy_arm.rs
-+++ b/engine/nvforever/src/pipboy_arm.rs
-@@ -229,7 +229,10 @@ fn warm_up(params: WarmUp) {
-         loading.pipboy_warming = pip.warming.is_some() || state.teardown;
-         return;
-     }
--    let covered = loading.starting() && !loading.world_held() && !state.start_done && root.is_some();
-+    // [nvport] No warm-up under a phone's loading screen: its screen camera drawn into a
-+    // picture and put away was each time followed, about 2 s later, by a lost device on
-+    // Adreno 8xx (players' reports, alpha41/42). The first raise warms instead.
-+    let covered = !cfg!(target_os = "android") && loading.starting() && !loading.world_held() && !state.start_done && root.is_some();
-     // [design: #1803] Teardown removes the hidden rig from retained phases. Verify
-     // the first real submission too, even when its pipelines were warmed at start.
-     let cold = !state.raise_released && root.is_some() && pip.phase == Phase::Raising && pip.frame == Frame::Device && (!pip.warmed || !state.first_open_done);
 diff --git a/engine/nvforever/src/pipeline_prewarm.rs b/engine/nvforever/src/pipeline_prewarm.rs
 index 681a80b..279a95f 100644
 --- a/engine/nvforever/src/pipeline_prewarm.rs
@@ -3820,27 +3804,21 @@ index 1bc62a8..81a905e 100644
              Transform::IDENTITY,
              layer.clone(),
 diff --git a/engine/nvforever/src/world.rs b/engine/nvforever/src/world.rs
-index b970315..a46cbb5 100644
+index b970315..7cb7525 100644
 --- a/engine/nvforever/src/world.rs
 +++ b/engine/nvforever/src/world.rs
-@@ -819,7 +819,15 @@ pub fn take_cell_work(
+@@ -819,7 +819,9 @@ pub fn take_cell_work(
  ) {
      let free = !streamer.settled || loading.is_some_and(|l| l.unseen_frames());
      models.take_fetched(time.elapsed_secs_f64(), (!free).then_some(TAKE_IN_BUDGET));
 -    let limit = (!free).then(upload_bytes_per_frame);
-+    // [nvport] A phone always has a limit: behind the loading screen too, everything the
-+    // start's cells needed went to the GPU in one frame, and the Adreno driver took the
-+    // long submission for a hang (a lost device 2-3 s after each load at the same places,
-+    // owner's reports). Loading keeps a larger share a frame.
-+    let limit = if cfg!(target_os = "android") {
-+        Some(if free { 64 << 20 } else { 16 << 20 })
-+    } else {
-+        (!free).then(upload_bytes_per_frame)
-+    };
++    // [nvport] A phone sends less a frame while playing; behind the screen, no limit as
++    // upstream (the 11 s frames there were the unculled pipeline prewarm, off on phones).
++    let limit = (!free).then(|| if cfg!(target_os = "android") { 16 << 20 } else { upload_bytes_per_frame() });
      if let Some(mut b) = bytes.filter(|b| b.max_bytes != limit) {
          b.max_bytes = limit;
      }
-@@ -829,7 +837,9 @@ pub fn take_cell_work(
+@@ -829,7 +831,9 @@ pub fn take_cell_work(
  /// is marked changed again ([`respecialize_late_meshes`]): about 2 s at 60 frames a
  /// second [engineering choice: the limit holds back at most a few frames' worth of
  /// assets, and each mark costs the entity one more pipeline lookup].
@@ -3899,6 +3877,54 @@ index 22ad677..df42c57 100644
              {
                  warn!(
                      "Could not set cursor grab mode for window {}: {}",
+diff --git a/engine/vendor/wgpu-hal/src/vulkan/adapter.rs b/engine/vendor/wgpu-hal/src/vulkan/adapter.rs
+index 196daf4..dc3b6d6 100644
+--- a/engine/vendor/wgpu-hal/src/vulkan/adapter.rs
++++ b/engine/vendor/wgpu-hal/src/vulkan/adapter.rs
+@@ -3020,6 +3020,20 @@ impl super::Adapter {
+             })
+         }
+ 
++        // [nvport] VK_EXT_device_fault: on a lost device the driver tells what faulted.
++        let mut fault_features = vk::PhysicalDeviceFaultFeaturesEXT::default();
++        let fault_on = self.phd_capabilities.supports_extension(ext::device_fault::NAME)
++            && self.instance.get_physical_device_properties.as_ref().is_some_and(|gp| {
++                let mut f2 = vk::PhysicalDeviceFeatures2::default().push_next(&mut fault_features);
++                unsafe { gp.get_physical_device_features2(self.raw, &mut f2) };
++                fault_features.device_fault != 0
++            });
++        if fault_on && !enabled_extensions.contains(&ext::device_fault::NAME) {
++            enabled_extensions.push(ext::device_fault::NAME);
++        }
++        let mut fault_features = vk::PhysicalDeviceFaultFeaturesEXT::default().device_fault(true);
++        log::info!("VK_EXT_device_fault: {}", if fault_on { "on" } else { "not supported" });
++
+         let str_pointers = enabled_extensions
+             .iter()
+             .map(|&s| {
+@@ -3031,7 +3045,10 @@ impl super::Adapter {
+         let pre_info = pre_info
+             .queue_create_infos(&family_infos)
+             .enabled_extension_names(&str_pointers);
+-        let info = enabled_phd_features.add_to_device_create(pre_info);
++        let mut info = enabled_phd_features.add_to_device_create(pre_info);
++        if fault_on {
++            info = info.push_next(&mut fault_features);
++        }
+         let raw_device = {
+             profiling::scope!("vkCreateDevice");
+             unsafe {
+@@ -3041,6 +3058,10 @@ impl super::Adapter {
+                     .map_err(map_err)?
+             }
+         };
++        if fault_on {
++            let fault = ext::device_fault::Device::new(&self.instance.raw, &raw_device);
++            let _ = super::DEVICE_FAULT.set((raw_device.handle(), fault.fp().get_device_fault_info_ext));
++        }
+         fn map_err(err: vk::Result) -> crate::DeviceError {
+             match err {
+                 vk::Result::ERROR_TOO_MANY_OBJECTS => crate::DeviceError::OutOfMemory,
 diff --git a/engine/vendor/wgpu-hal/src/vulkan/descriptor.rs b/engine/vendor/wgpu-hal/src/vulkan/descriptor.rs
 index 5961c3c..3f0f658 100644
 --- a/engine/vendor/wgpu-hal/src/vulkan/descriptor.rs
@@ -3972,6 +3998,72 @@ index 5961c3c..3f0f658 100644
          pool.available -= 1;
          bucket.available_sets -= 1;
          bucket.allocated_sets += 1;
+diff --git a/engine/vendor/wgpu-hal/src/vulkan/mod.rs b/engine/vendor/wgpu-hal/src/vulkan/mod.rs
+index c5d8126..b4e3264 100644
+--- a/engine/vendor/wgpu-hal/src/vulkan/mod.rs
++++ b/engine/vendor/wgpu-hal/src/vulkan/mod.rs
+@@ -1713,7 +1713,61 @@ fn get_oom_err(_err: vk::Result) -> crate::DeviceError {
+ 
+ /// Returns [`crate::DeviceError::Lost`] or panics if the `device_lost_panic`
+ /// feature flag is enabled.
++/// [nvport] The device and `vkGetDeviceFaultInfoEXT` when VK_EXT_device_fault is on.
++static DEVICE_FAULT: std::sync::OnceLock<(vk::Device, vk::PFN_vkGetDeviceFaultInfoEXT)> =
++    std::sync::OnceLock::new();
++
++/// [nvport] Logs what the driver says faulted, once per run.
++fn log_device_fault() {
++    static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
++    if DONE.swap(true, std::sync::atomic::Ordering::Relaxed) {
++        return;
++    }
++    let Some(&(device, get)) = DEVICE_FAULT.get() else {
++        log::error!("device lost: VK_EXT_device_fault not available");
++        return;
++    };
++    let text = |d: &[core::ffi::c_char]| {
++        let b: alloc::vec::Vec<u8> = d.iter().take_while(|&&c| c != 0).map(|&c| c as u8).collect();
++        alloc::string::String::from_utf8_lossy(&b).into_owned()
++    };
++    unsafe {
++        let mut counts = vk::DeviceFaultCountsEXT::default();
++        let r = get(device, &mut counts, core::ptr::null_mut());
++        if r != vk::Result::SUCCESS && r != vk::Result::INCOMPLETE {
++            log::error!("device lost: vkGetDeviceFaultInfoEXT counts {r:?}");
++            return;
++        }
++        let mut addrs = alloc::vec![vk::DeviceFaultAddressInfoEXT::default(); counts.address_info_count as usize];
++        let mut vendors = alloc::vec![vk::DeviceFaultVendorInfoEXT::default(); counts.vendor_info_count as usize];
++        counts.vendor_binary_size = 0;
++        let mut info = vk::DeviceFaultInfoEXT::default();
++        info.p_address_infos = addrs.as_mut_ptr();
++        info.p_vendor_infos = vendors.as_mut_ptr();
++        let r = get(device, &mut counts, &mut info);
++        log::error!(
++            "device lost: fault {r:?} \"{}\", {} address(es), {} vendor record(s)",
++            text(&info.description),
++            counts.address_info_count,
++            counts.vendor_info_count
++        );
++        for a in addrs.iter().take(counts.address_info_count as usize) {
++            log::error!(
++                "device lost: address {:?} 0x{:x} precision 0x{:x}",
++                a.address_type, a.reported_address, a.address_precision
++            );
++        }
++        for v in vendors.iter().take(counts.vendor_info_count as usize) {
++            log::error!(
++                "device lost: vendor \"{}\" code 0x{:x} data 0x{:x}",
++                text(&v.description), v.vendor_fault_code, v.vendor_fault_data
++            );
++        }
++    }
++}
++
+ fn get_lost_err() -> crate::DeviceError {
++    log_device_fault();
+     #[cfg(feature = "device_lost_panic")]
+     panic!("Device lost");
+ 
 diff --git a/lang/ru.toml b/lang/ru.toml
 index 69dc72c..0777d24 100644
 --- a/lang/ru.toml

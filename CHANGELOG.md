@@ -1,5 +1,14 @@
 # Fallout Droid Native — CHANGELOG
 
+## 2.0.0-alpha44 (343)
+- Garbage geometry (stretched white/magenta triangles, the large brown sphere) fixed: alpha43's
+  "no Pip-Boy warm-up under the loading screen" is reverted — without the warm-up the hidden
+  Pip-Boy rig stayed in the draw phases with no skin data.
+- Loading screen sends GPU uploads without a limit again (as upstream); 16 MB/frame in play.
+- Lost GPU device: VK_EXT_device_fault is enabled where the driver has it, and on a loss the
+  run log gets the driver's fault description, faulting addresses and vendor codes
+  (`device lost: …` lines) — to find the cause instead of guessing. Not verified on a device.
+
 ## 2.0.0-alpha43 (342)
 - No Pip-Boy warm-up under a phone's loading screen (its screen camera put away was followed
   by a lost GPU device ~2 s later on Adreno 8xx).
