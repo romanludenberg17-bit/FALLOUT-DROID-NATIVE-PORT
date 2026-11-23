@@ -1,37 +1,62 @@
-# Changelog
+# Fallout Droid Native — CHANGELOG
 
-## 1.3.3 (versionCode 29), диагностическая сборка
-- После `Play` нового голоса в лог пишется строка `[dsnd] vol`: итоговое усиление L/R, `SetVolume`/`SetPan`, флаги буфера + 3D-режим, **пиковый уровень данных в буфере** (0 = в буфере тишина), DistanceFactor/Rolloff слушателя.
-- Трассировка (`FNV_TRACE` только для звукового API + `FNV_TRACE_FILES`) включена по умолчанию. Отключается файлом `/sdcard/FalloutDroidNV/notrace`. В релизе снова сделать её опциональной.
+Only changes that are in the code. "Not verified on a device" marks what was built and
+checked statically but not yet confirmed by a tester.
 
-## 1.3.2 (versionCode 28)
-Диагностика: в 1.3.1 видно, что создаются только голоса 24/32 кГц (диалоги), а SFX/UI/музыка до `Play` не доходят.
+## 2.0.0-alpha41 (340)
+- Console `fxtest`: three test cards before the camera (opaque red, blended green, added
+  blue) to find why blended/added effects (muzzle flashes, explosions, blood, decals) are
+  invisible on phones. alpha38's census showed those effects are queued for drawing.
+- Console `fdland off|on`: a child worldspace takes no land from its parent (from the next
+  start) — the experiment for FO3 Megaton's slabs; the run log lists the squares that took
+  the parent's land.
 
-- `FNV_TRACE` теперь фильтруется в нативном коде: в лог попадают только звуковые вызовы (DirectSound*, IGraphBuilder/IMedia*/IBasicAudio) вместе с аргументами и кодом возврата, поэтому трассировка больше не тормозит игру.
-- Маркер `/sdcard/FalloutDroidNV/trace_hle` включает эту трассировку и `FNV_TRACE_FILES` (лог открытия файлов: видно, читаются ли `Sound.bsa` и mp3 музыки).
-- Отчёт `diagAudio` снова пишется в файл, теперь `/sdcard/FalloutDroidNV/audio_diag.txt`, и включает число файлов в `Data/Music`.
+## 2.0.0-alpha40 (339)
+- Game settings: Resolution (360p–1080p, native), applied at once.
+- Texture Quality: High, Medium, Low, Ultra Low, Potato (applied at the next start).
+- Phone Preset: Ultra Low / Potato (textures, no shadows, reflections, water effects,
+  grass, glow; draw distances kept).
 
-## 1.3.1 (versionCode 27)
-Диагностика пропавших звуков меню и UI, инфраструктура нативного кода.
+## 2.0.0-alpha39 (338)
+- Console `fdtest`: a test character (weapons, armour, ammo, perks, S.P.E.C.I.A.L. 10,
+  skills 100, the dog, a trip to the middle of the map). Not verified on a device.
+- Galaxy S25 Ultra profile without the desktop effects (a freeze on going outdoors).
 
-- Весь наш нативный код перенесён в новый исполняемый сегмент `libfnv.so` (`PT_LOAD R+X` по адресу `0x58e0000`, из неиспользуемого `PT_NOTE`). Места больше не ограничены ~800 байтами, старая «пещера» `0x53fb664..` возвращена к оригиналу.
-- DirectSound: обёртка над созданием голоса. Пишет в лог создания голосов (`[dsnd] play buf=… ch bits hz bytes`), отказы (`[dsnd] FAIL …`) и раз в 256 звуков статистику (`[dsnd] stats`: колбэки AAudio, активные и доигравшие голоса, пик микса, минимальное усиление лимитера).
-- Если пул из 256 голосов переполнен, доигравшие однократные голоса освобождаются тем же путём, что и `GetStatus` игры, и создание повторяется (`[dsnd] voice pool full: reclaimed N`).
-- Лаунчер копирует лог игры `last_run.log` в `/sdcard/FalloutDroidNV/last_run.log` (на Android 11+ папка `Android/data` недоступна).
-- Файл `/sdcard/FalloutDroidNV/trace_hle` включает полную трассировку вызовов API игры (`FNV_TRACE=1`). Только для диагностики: игра работает очень медленно.
-- Тесты: сквозная эмуляция `IDirectSoundBuffer8::Play` → микшер → повторный `Play` доигравшего буфера; переполнение пула (`tests/run_all.py`).
+## 2.0.0-alpha38 (337)
+- Run log: transparent-phase census every 10 s.
 
-## 1.3.0 (versionCode 26)
-Звук и стабильность нативной части.
+## 2.0.0-alpha37 (336)
+- A repeated lost GPU device after a start-over retries once with a light picture for that
+  start only; no restart loop, the player's settings untouched.
 
-- **Исправлена порча памяти в libfnv.so (было в 1.2.15).** Аудиостаб хранил счётчики в `.bss` по адресам `0x58d40a0..0x58d40b4`. Там лежат живые переменные: флаги инициализации генератора случайных чисел (MT19937) и кэш `CTR_EL0`, через который `__clear_cache` сбрасывает кэш JIT. Состояние перенесено в новую область за концом `.bss`.
-- **Лимитер теперь действительно работает.** В 1.2.15 хук стоял после жёсткого клиппинга микшера, и «софт-лимитер» получал уже обрезанный сигнал. Теперь клиппинг микшера отключён и применяется пиковый лимитер со связанными каналами: −3 dB, порог −0.5 dBFS, мгновенная атака, восстановление 80 мс. Тихие звуки проходят линейно, без искажений, которые давала формула `x/(1+0.5|x|)`.
-- NaN и Inf из микшера заменяются нулём, а не дают щелчок на полную громкость.
-- AAudio: ёмкость буфера 4096 кадров (~85 мс) и буфер на всю ёмкость вместо 3×burst. Меньше срывов звука из-за задержек колбэка.
-- Из аудиоколбэка убраны раз в секунду `fprintf` в лог и `getenv`/`open` на каждый вызов.
-- **Исправлен Java-поток AudioTrack.** `const/4 10` превращался в −6, и `setPriority(-6)` бросал исключение. Кроме того, `CHANNEL_OUT_STEREO` (12) превращался в −4. Поток в 1.2.15 не запускался ни разу. Теперь это опциональный путь: он включается файлом `/sdcard/FalloutDroidNV/use_audiotrack`. По умолчанию звук идёт через AAudio.
-- Отключено `FNV_TRACE_FILES=1`: отладочное логирование каждого обращения игры к файлам.
-- `FalloutPrefs.ini` больше не сбрасывает громкость пользователя на 1.0 при каждом запуске. Исправляются только значения, равные 0.
-- В `Download/` больше не пишется `fnv_audio_diag.txt` при каждом запуске (диагностика осталась в logcat).
-- Строки оригинала в libfnv.so больше не перезаписываются: новые строки лежат в code cave.
-- Сборка: один скрипт `build_fnv_native.py`, стабы на ассемблере (`native/fnv_stubs.S`), проверка всех изменённых байт по белому списку, корректная перезапись пула строк манифеста, unicorn-тесты в `tests/`.
+## 2.0.0-alpha36 (335)
+- GPU uploads always limited on phones (64 MB/frame loading, 16 MB playing).
+- Late meshes retried up to ~70 s (Megaton walls missing on Mali).
+- Phones never hold shadow cascades; shadow resolution, terrain and fine shadows hidden.
+- Loading overlay removed after its draw (ContentFrameLayout crash).
+- Cloud shadows on by default on strong chips; low class: CAS sharpening, no FXAA.
+
+## 2.0.0-alpha35 (334)
+- mimalloc built with local-dynamic TLS (alpha33/34 did not start); the build refuses a
+  STATIC_TLS engine.
+
+## 2.0.0-alpha33 / 34
+- VATS part highlight drawn in the world pass on phones (no mask camera).
+- Sun light turns in game-minute steps on phones (stable shadow texel grid).
+- Decal quad with tangents; Pip-Boy radio state saved; Rust heap on mimalloc.
+- Strong chips: full graphics rows, no automatic downgrade after a crash; Texture Quality.
+- S25 Ultra profile; body-texture warning for body replacers.
+
+## 2.0.0-alpha29 – alpha32
+- Mali auto-exposure alignment guard; Scudo spare heap; console text bar; save over slots.
+- ETC2 transcoding on GPUs without BC; frame log; big-core threads + ADPF.
+- FOMOD installer, .7z mods, Data root at any depth, replacer gating.
+- Automatic report upload (needs a token); low class 60 FPS cap and 120 Hz display mode.
+
+## Open (handoff)
+- Blended/added effects invisible (decide from `fxtest`).
+- FO3 Megaton land (decide from `fdland off`), missing walls/collision.
+- Shadow flicker that remains, cloud shadows on characters.
+- FO3 iron sights (no sighting node in FO3 weapon models).
+- Repeating GPU device loss a few seconds after a load on Snapdragon 8 Gen 5.
+- Mali/Xclipse profiling from tester frame logs.

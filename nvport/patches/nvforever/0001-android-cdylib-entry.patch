@@ -95,6 +95,32 @@ index 7fe5f8c..83aa51d 100644
  /// The HDR and bloom values of an IMGS DNAM (`skin`: the 152-byte layout with the skin
  /// dimmer at byte 56). HDR at bytes 0-55: eye adapt speed, blur radius, blur passes,
  /// emissive mult, target lum, upper lum clamp, bright scale, bright clamp, lum ramp no
+diff --git a/crates/fnv-world/src/index.rs b/crates/fnv-world/src/index.rs
+index 940b3be..feaee69 100644
+--- a/crates/fnv-world/src/index.rs
++++ b/crates/fnv-world/src/index.rs
+@@ -125,6 +125,11 @@ pub struct WorldIndex {
+ }
+ 
+ /// WRLD PNAM bits [documented: xEdit wbDefinitionsFNV.pas WRLD, schemas/fnv/world.json].
++/// [nvport] Whether `<NVFOREVER_HOME>/parent_land_off` exists (`fdland off`).
++pub fn parent_land_off() -> bool {
++    std::env::var_os("NVFOREVER_HOME").is_some_and(|h| std::path::Path::new(&h).join("parent_land_off").exists())
++}
++
+ pub mod parent_use {
+     pub const LAND: u16 = 1 << 0;
+     pub const LOD: u16 = 1 << 1;
+@@ -252,6 +257,9 @@ impl WorldIndex {
+                     w.climate = p.climate.or(w.climate);
+                 }
+             }
++            // [nvport] `fdland off` (console) leaves the parent's land out, to compare
++            // (FO3's Megaton: slabs of the Wasteland's land over the town).
++            let land = land && !parent_land_off();
+             if land {
+                 let squares: Vec<((i32, i32), u32)> = self.worldspaces[&child].grid.iter().map(|(&g, &c)| (g, c)).collect();
+                 for (g, cell) in squares {
 diff --git a/crates/fnv-world/src/radio.rs b/crates/fnv-world/src/radio.rs
 index e6c8db0..f02aa9f 100644
 --- a/crates/fnv-world/src/radio.rs
@@ -548,7 +574,7 @@ index 4f6f70c..e9b88e5 100644
          drop(decode_span);
          let handle = match result {
 diff --git a/engine/nvf-play/src/console.rs b/engine/nvf-play/src/console.rs
-index 4e8f628..09bdbf3 100644
+index 4e8f628..50c487e 100644
 --- a/engine/nvf-play/src/console.rs
 +++ b/engine/nvf-play/src/console.rs
 @@ -720,6 +720,7 @@ fn typing(
@@ -559,7 +585,7 @@ index 4e8f628..09bdbf3 100644
                      c.print("Quests and info: sq, sqt, movetoqt [n], sqs <quest>, sqv <quest>, sv, caqs, inv, getavinfo <av>, setgs <setting> <value>, cam, qqq, advlevel (level up), poker [casino] (a poker table)");
                      c.print("Toggles: tcl (collision), tai (actors' AI), tdetect, tgm, tscr (scripts), tg (grass), ts (sky), tws (water), tt (trees), tlv (leaves), ToggleLODLand, ToggleNavmesh, tlik (head tracking), temo (emotions), tcg [radius] (collision shapes)");
                      c.print("bat <file> (console lines from a text file), rbat [file] (record lines for bat), scof [file] (write the console to a file), slpm [1-5] (a practice lock), [ref.]mfg expression|phoneme|modifier <id> <0-100>, mfg reset");
-@@ -777,6 +778,18 @@ fn typing(
+@@ -777,6 +778,36 @@ fn typing(
                  return;
              }
              // `bat <file>`: the file's lines run next, in order, as if typed.
@@ -567,6 +593,24 @@ index 4e8f628..09bdbf3 100644
 +            // weapons and armour with ammunition, every S.P.E.C.I.A.L. at 10, skills at 100,
 +            // a high level, god mode off, the dog as a companion, and a trip to the middle
 +            // of the map. Lines the game's data does not have are reported and skipped.
++            "fdland" => {
++                let file = std::env::var_os("NVFOREVER_HOME").map(|h| std::path::PathBuf::from(h).join("parent_land_off"));
++                match (rest.trim(), file) {
++                    ("off", Some(f)) => {
++                        let _ = std::fs::write(&f, b"1");
++                        c.print("fdland: a child worldspace takes no land from its parent from the next start");
++                    }
++                    ("on", Some(f)) => {
++                        let _ = std::fs::remove_file(&f);
++                        c.print("fdland: children take their parent's land again from the next start");
++                    }
++                    _ => c.print(format!("fdland on|off (now {})", if fnv_world::index::parent_land_off() { "off" } else { "on" })),
++                }
++            }
++            "fxtest" => {
++                FX_TEST.store(true, std::sync::atomic::Ordering::Relaxed);
++                c.print("fxtest: three cards before the camera for 20 s: red opaque (left), green blended (middle), blue added (right)");
++            }
 +            "fdtest" => {
 +                let fo3 = std::env::var("NVPORT_GAME").is_ok_and(|g| g == "fo3");
 +                let lines: &[&str] = if fo3 { FDTEST_FO3 } else { FDTEST_FNV };
@@ -578,7 +622,18 @@ index 4e8f628..09bdbf3 100644
              "bat" => {
                  batches += 1;
                  let found = if batches > MAX_BATCHES { Err(format!("bat: more than {MAX_BATCHES} batch files on one line")) } else { batch_lines(rest, &batch_roots(data.as_deref())) };
-@@ -1141,6 +1154,57 @@ pub fn describe(id: u32, d: &PlayData, sim: &SimState, rt: Option<&mut Runtime>)
+@@ -1067,6 +1098,10 @@ pub fn place_name(d: &PlayData, cell: u32) -> String {
+ 
+ /// The player's Extra Console Details tweak: a selected reference's details add its
+ /// base's model [design: docs/design/tweaks.md].
++/// [nvport] `fxtest`: asks the renderer for three test cards before the camera (opaque red,
++/// blended green, added blue), to tell on a phone which kinds of drawing reach the screen.
++pub static FX_TEST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
++
+ static MODEL_DETAILS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+ 
+ /// Set by the Tweaks tab.
+@@ -1141,6 +1176,57 @@ pub fn describe(id: u32, d: &PlayData, sim: &SimState, rt: Option<&mut Runtime>)
  }
  
  /// Where `coc <cell>` goes: the cell's COC spot (interiors and exterior cells alike).
@@ -1005,6 +1060,22 @@ index 5da7865..1a4fd9a 100644
          view_w,
          language: fnv_util::words::generation(),
          search: (matches!(page, Page::Settings { .. }) && view.scope == SettingsScope::Search).then(|| (view.search.query.clone(), view.focus == SettingsFocus::SearchText)),
+diff --git a/engine/nvf-play/src/phys.rs b/engine/nvf-play/src/phys.rs
+index 847c481..c245ba4 100644
+--- a/engine/nvf-play/src/phys.rs
++++ b/engine/nvf-play/src/phys.rs
+@@ -768,6 +768,11 @@ impl PhysState {
+         };
+         let ws = d.index.worldspaces.get(&world);
+         if let Some(w) = ws.filter(|w| w.parent.is_some() && w.parent_flags & !PNAM_USE_MAP_DATA != 0) {
++            // [nvport] Which squares took the parent's land (Megaton's slabs).
++            let taken: Vec<(i32, i32)> = w.grid.iter().filter(|(_, c)| d.index.cells.get(c).is_some_and(|c| c.land_of_parent)).map(|(g, _)| *g).collect();
++            if !taken.is_empty() {
++                info!("worldspace {world:08X}: the parent's land on squares {taken:?}");
++            }
+             let cells = w.grid.values().filter_map(|c| d.index.cells.get(c));
+             let (own, theirs) = cells.fold((0, 0), |(o, t), c| match (c.land, c.land_of_parent) {
+                 (Some(_), false) => (o + 1, t),
 diff --git a/engine/nvf-play/src/quick_loot.rs b/engine/nvf-play/src/quick_loot.rs
 index 8c7cbf9..1266692 100644
 --- a/engine/nvf-play/src/quick_loot.rs
@@ -1457,10 +1528,10 @@ index bbdb0c0..0c6c5d1 100644
  libloading = "0.8.9"
 diff --git a/engine/nvforever/src/android_input.rs b/engine/nvforever/src/android_input.rs
 new file mode 100644
-index 0000000..1e1f301
+index 0000000..3f7a368
 --- /dev/null
 +++ b/engine/nvforever/src/android_input.rs
-@@ -0,0 +1,753 @@
+@@ -0,0 +1,793 @@
 +//! [nvport] Input from the Android launcher (Fallout Droid): on-screen keys, touch look,
 +//! gamepads mapped to PC keys and physical keyboards/mice arrive through JNI
 +//! (`com.wastelanddroid.engine.NativeInput`) and are written as Bevy's own input messages,
@@ -1743,7 +1814,7 @@ index 0000000..1e1f301
 +                transparent_census.after(bevy::render::RenderSystems::PhaseSort).before(bevy::render::RenderSystems::Render),
 +            );
 +        }
-+        app.add_systems(PreUpdate, drain.before(InputSystems)).add_systems(Last, (publish_ui_state, publish_play_flags)).add_systems(PostUpdate, creator_hides_actors).add_systems(PreUpdate, perf_overlay_out_of_menus).add_systems(Last, perf_overlay_out_of_menus).add_systems(PreUpdate, apply_frame_cap).add_systems(Last, frame_log);
++        app.add_systems(PreUpdate, drain.before(InputSystems)).add_systems(Last, (publish_ui_state, publish_play_flags)).add_systems(PostUpdate, creator_hides_actors).add_systems(PreUpdate, perf_overlay_out_of_menus).add_systems(Last, perf_overlay_out_of_menus).add_systems(PreUpdate, apply_frame_cap).add_systems(Last, frame_log).add_systems(Update, fx_test_cards);
 +    }
 +
 +    /// Every plugin has registered its settings rows by now.
@@ -2213,6 +2284,46 @@ index 0000000..1e1f301
 +    let per_view: Vec<usize> = phases.0.values().map(|p| p.items.len()).collect();
 +    info!("render census: transparent items now {total} in {} view(s) {per_view:?}, most in a frame over 10 s {}", per_view.len(), *most);
 +    *most = 0;
++}
++
++/// [nvport] `fxtest` (console): three unlit cards 120 units before the player's camera for
++/// 20 s: opaque red, blended green, added blue. Which of them shows tells whether the
++/// transparent pass reaches the screen at all (players saw no blended or added effect).
++fn fx_test_cards(
++    mut commands: Commands,
++    camera: Query<Entity, With<nvf_play::PlayerCamera>>,
++    mut meshes: ResMut<Assets<Mesh>>,
++    mut materials: ResMut<Assets<StandardMaterial>>,
++    time: Res<Time<Real>>,
++    mut cards: Local<Vec<(Entity, f64)>>,
++) {
++    let now = time.elapsed_secs_f64();
++    cards.retain(|&(e, until)| {
++        if now > until {
++            commands.entity(e).try_despawn();
++            false
++        } else {
++            true
++        }
++    });
++    if !nvf_play::console::FX_TEST.swap(false, Ordering::Relaxed) {
++        return;
++    }
++    let Ok(cam) = camera.single() else { return };
++    let quad = meshes.add(Mesh::from(Rectangle::new(30.0, 30.0)));
++    let kinds = [
++        (Color::srgb(1.0, 0.0, 0.0), AlphaMode::Opaque, -40.0),
++        (Color::srgba(0.0, 1.0, 0.0, 0.8), AlphaMode::Blend, 0.0),
++        (Color::srgb(0.0, 0.3, 1.0), AlphaMode::Add, 40.0),
++    ];
++    for (color, alpha_mode, x) in kinds {
++        let m = materials.add(StandardMaterial { base_color: color, unlit: true, alpha_mode, cull_mode: None, ..default() });
++        let e = commands
++            .spawn((Mesh3d(quad.clone()), MeshMaterial3d(m), Transform::from_xyz(x, 0.0, -120.0), bevy::light::NotShadowCaster, ChildOf(cam)))
++            .id();
++        cards.push((e, now + 20.0));
++    }
++    info!("fxtest: three cards before the camera (red opaque, green blended, blue added)");
 +}
 diff --git a/engine/nvforever/src/blackjack_view.rs b/engine/nvforever/src/blackjack_view.rs
 index 74c2936..063c304 100644
