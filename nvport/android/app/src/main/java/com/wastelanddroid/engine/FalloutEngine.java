@@ -168,9 +168,9 @@ public final class FalloutEngine {
         SharedPreferences ap = Prefs.get(context);
         // The flagship profile is put in once (its values replace the player's then), after
         // which the engine's settings page owns them.
-        boolean flagshipFirst = com.wastelanddroid.game.DeviceProfile.flagshipProfile() && !ap.getBoolean("flagship_v1", false);
+        boolean flagshipFirst = com.wastelanddroid.game.DeviceProfile.flagshipProfile() && !ap.getBoolean("flagship_v2", false);
         if (flagshipFirst) {
-            ap.edit().putBoolean("flagship_v1", true).commit();
+            ap.edit().putBoolean("flagship_v2", true).commit();
             new java.io.File(homeDir(context, game.id), "texture_quality.txt").delete();
         }
         // v27: the class values once more for everyone (a low class without FXAA and with
@@ -395,7 +395,10 @@ public final class FalloutEngine {
                 p.g.bloom = true;
                 p.g.anisotropy = 16;
                 if (p.g.grassDensity <= 0) p.g.grassDensity = 1;
-                p.fxTerrain = p.fxShafts = p.fxAo = p.fxClouds = p.fxHaze = p.fxWater = true;
+                // The engine's desktop effects stay off here too: with all of them the game
+                // froze on going outdoors on this phone (a tester's S25 Ultra, alpha38).
+                p.fxClouds = true;
+                p.fxTerrain = p.fxShafts = p.fxAo = p.fxHaze = p.fxWater = false;
             }
             return p;
         }

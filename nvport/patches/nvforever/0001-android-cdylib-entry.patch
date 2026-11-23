@@ -545,6 +545,95 @@ index 4f6f70c..f49ebf4 100644
          };
          drop(decode_span);
          let handle = match result {
+diff --git a/engine/nvf-play/src/console.rs b/engine/nvf-play/src/console.rs
+index 4e8f628..09bdbf3 100644
+--- a/engine/nvf-play/src/console.rs
++++ b/engine/nvf-play/src/console.rs
+@@ -720,6 +720,7 @@ fn typing(
+                     c.print("A line is a script function: [reference.]Function argument ...  e.g. player.additem 0000000F 100");
+                     c.print("help <text>: records and functions whose name or Editor ID contains it (not case sensitive); \"two words\" for a phrase, several words must all match");
+                     c.print("prid <ref>, coc <cell>, cow <world> <x> <y>, coe <x> <y>, tgm, cls, save <name>, load [name], saves, set <var> to <value>, editor (editor mode on/off), editor select|move|turn|place|delete|undo, editor save <Name.esp>, editor why [topic] (why the selected actor says what it says). Click something to select it; calls without a reference run on it.");
++                    c.print("fdtest: a test character (best weapons and armour, perks, S.P.E.C.I.A.L. 10, skills 100, the dog as a companion, a trip to the middle of the map)");
+                     c.print("Quests and info: sq, sqt, movetoqt [n], sqs <quest>, sqv <quest>, sv, caqs, inv, getavinfo <av>, setgs <setting> <value>, cam, qqq, advlevel (level up), poker [casino] (a poker table)");
+                     c.print("Toggles: tcl (collision), tai (actors' AI), tdetect, tgm, tscr (scripts), tg (grass), ts (sky), tws (water), tt (trees), tlv (leaves), ToggleLODLand, ToggleNavmesh, tlik (head tracking), temo (emotions), tcg [radius] (collision shapes)");
+                     c.print("bat <file> (console lines from a text file), rbat [file] (record lines for bat), scof [file] (write the console to a file), slpm [1-5] (a practice lock), [ref.]mfg expression|phoneme|modifier <id> <0-100>, mfg reset");
+@@ -777,6 +778,18 @@ fn typing(
+                 return;
+             }
+             // `bat <file>`: the file's lines run next, in order, as if typed.
++            // [nvport] `fdtest`: a test character for the owner's playtests: the strongest
++            // weapons and armour with ammunition, every S.P.E.C.I.A.L. at 10, skills at 100,
++            // a high level, god mode off, the dog as a companion, and a trip to the middle
++            // of the map. Lines the game's data does not have are reported and skipped.
++            "fdtest" => {
++                let fo3 = std::env::var("NVPORT_GAME").is_ok_and(|g| g == "fo3");
++                let lines: &[&str] = if fo3 { FDTEST_FO3 } else { FDTEST_FNV };
++                c.print(format!("fdtest: {} lines ({})", lines.len(), if fo3 { "Fallout 3" } else { "New Vegas" }));
++                for l in lines.iter().rev() {
++                    runs.push_front((*l).to_string());
++                }
++            }
+             "bat" => {
+                 batches += 1;
+                 let found = if batches > MAX_BATCHES { Err(format!("bat: more than {MAX_BATCHES} batch files on one line")) } else { batch_lines(rest, &batch_roots(data.as_deref())) };
+@@ -1141,6 +1154,57 @@ pub fn describe(id: u32, d: &PlayData, sim: &SimState, rt: Option<&mut Runtime>)
+ }
+ 
+ /// Where `coc <cell>` goes: the cell's COC spot (interiors and exterior cells alike).
++/// [nvport] `fdtest` for Fallout 3 (Editor IDs of the base game).
++const FDTEST_FO3: &[&str] = &[
++    "player.setlevel 20",
++    "player.setav strength 10", "player.setav perception 10", "player.setav endurance 10", "player.setav charisma 10",
++    "player.setav intelligence 10", "player.setav agility 10", "player.setav luck 10",
++    "player.setav smallguns 100", "player.setav bigguns 100", "player.setav energyweapons 100",
++    "player.setav explosives 100", "player.setav repair 100", "player.setav medicine 100", "player.setav lockpick 100",
++    "player.setav science 100", "player.setav sneak 100", "player.setav speech 100", "player.setav barter 100",
++    "player.setav unarmed 100", "player.setav meleeweapons 100",
++    "player.addperk BetterCriticals", "player.addperk Finesse", "player.addperk Commando", "player.addperk Gunslinger",
++    "player.addperk Sniper", "player.addperk Toughness", "player.addperk GrimReapersSprint", "player.addperk BloodyMess",
++    "player.addperk LifeGiver", "player.addperk Concentratedfire", "player.addperk Paralyzingpalm", "player.addperk Mysteriousstranger",
++    "player.additem f 20000",
++    "player.additem WeapFatMan 1", "player.additem AmmoMiniNuke 30",
++    "player.additem WeapMissileLauncher 1", "player.additem AmmoMissile 50",
++    "player.additem WeapPlasmaRifle 1", "player.additem AmmoMicroFusionCell 600",
++    "player.additem WeapMinigun 1", "player.additem Ammo5mm 2000",
++    "player.additem WeapSniperRifle 1", "player.additem Ammo308Caliber 300",
++    "player.additem WeapCombatShotgun 1", "player.additem AmmoShotgunShell 300",
++    "player.additem WeapAssaultRifle 1", "player.additem Ammo556mm 600",
++    "player.additem Weap10mmPistol 1", "player.additem Ammo10mm 400",
++    "player.additem WeapFlamer 1", "player.additem AmmoFlamerFuel 500",
++    "player.additem ArmorPowerT51b 1", "player.additem ArmorPowerT51bHelmet 1",
++    "player.additem Stimpak 50", "player.additem RadAway 20", "player.additem RadX 20",
++    "cow Wasteland 12 -2",
++    "DogmeatREF.moveto player", "DogmeatREF.SetPlayerTeammate 1",
++];
++
++/// [nvport] `fdtest` for New Vegas.
++const FDTEST_FNV: &[&str] = &[
++    "player.setlevel 30",
++    "player.setav strength 10", "player.setav perception 10", "player.setav endurance 10", "player.setav charisma 10",
++    "player.setav intelligence 10", "player.setav agility 10", "player.setav luck 10",
++    "player.setav guns 100", "player.setav energyweapons 100", "player.setav explosives 100", "player.setav repair 100",
++    "player.setav medicine 100", "player.setav lockpick 100", "player.setav science 100", "player.setav sneak 100",
++    "player.setav speech 100", "player.setav barter 100", "player.setav unarmed 100", "player.setav meleeweapons 100", "player.setav survival 100",
++    "player.addperk BetterCriticals", "player.addperk Finesse", "player.addperk Commando", "player.addperk Gunslinger",
++    "player.addperk Toughness", "player.addperk GrimReapersSprint", "player.addperk BloodyMess", "player.addperk LifeGiver",
++    "player.additem f 20000",
++    "player.additem WeapFatMan 1", "player.additem AmmoMiniNuke 30",
++    "player.additem WeapMissileLauncher 1", "player.additem AmmoMissile 50",
++    "player.additem WeapPlasmaRifle 1", "player.additem AmmoMicroFusionCell 600",
++    "player.additem WeapMinigun 1", "player.additem Ammo5mm 2000",
++    "player.additem WeapSniperRifle 1", "player.additem Ammo308 300",
++    "player.additem WeapNVRiotShotgun 1", "player.additem Ammo12Ga 300",
++    "player.additem WeapNVAntiMaterielRifle 1", "player.additem Ammo50MG 200",
++    "player.additem ArmorPowerT51b 1", "player.additem ArmorPowerT51bHelmet 1",
++    "player.additem Stimpak 50", "player.additem RadAway 20",
++    "coc Freeside01",
++];
++
+ fn coc(sim: &SimState, name: &str) -> Result<(Travel, String), String> {
+     let name = name.trim();
+     if name.is_empty() {
 diff --git a/engine/nvf-play/src/corner_messages.rs b/engine/nvf-play/src/corner_messages.rs
 index b1ba548..8715aa2 100644
 --- a/engine/nvf-play/src/corner_messages.rs
