@@ -1,5 +1,14 @@
 # Fallout Droid Native — CHANGELOG
 
+## 2.0.0-alpha45 (344)
+- Texture Quality in the game's settings: Ultra, High, Medium, Low, Very Low, Potato (0–5 mip
+  levels dropped), applied at once without a restart: every world texture held is read again
+  on a worker thread in batches of 24 and put back under its own handle; the old GPU texture
+  is freed once the materials sampling it are bound again. Interface and distant-LOD textures
+  keep every level. The run log reports the count, the time and the GPU size before/after
+  (`texture quality: …`). Not verified on a device. The names moved one step: the former
+  "High" (0) is now "Ultra".
+
 ## 2.0.0-alpha44 (343)
 - Garbage geometry (stretched white/magenta triangles, the large brown sphere) fixed: alpha43's
   "no Pip-Boy warm-up under the loading screen" is reverted — without the warm-up the hidden

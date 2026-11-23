@@ -381,7 +381,7 @@ index 50054bb..6a35ddf 100644
          return;
      }
 diff --git a/engine/nvf-assets/src/texture.rs b/engine/nvf-assets/src/texture.rs
-index 4f6f70c..e9b88e5 100644
+index 4f6f70c..f2d3d4b 100644
 --- a/engine/nvf-assets/src/texture.rs
 +++ b/engine/nvf-assets/src/texture.rs
 @@ -128,7 +128,7 @@ pub(crate) fn worker_texture(
@@ -393,7 +393,7 @@ index 4f6f70c..e9b88e5 100644
          decoded.image.texture_descriptor.label = Some(folder_label(path));
          Ok(decoded)
      })
-@@ -232,34 +232,165 @@ pub fn dds_image_top(bytes: &[u8], srgb: bool, bc_supported: bool) -> Result<Ima
+@@ -232,34 +232,195 @@ pub fn dds_image_top(bytes: &[u8], srgb: bool, bc_supported: bool) -> Result<Ima
  }
  
  fn dds_texture(bytes: &[u8], usage: TextureUsage, bc_supported: bool, top_only: bool) -> Result<DecodedTexture, String> {
@@ -493,21 +493,51 @@ index 4f6f70c..e9b88e5 100644
 +/// original's iTexMipMapSkip): each level quarters the texture's memory. Interface
 +/// textures keep every level (menus cut pictures out of them by pixel rectangles).
 +pub fn mip_skip_for(path: &str) -> u32 {
-+    static SKIP: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
-+    let skip = *SKIP.get_or_init(|| std::env::var("NVF_TEX_MIP_SKIP").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(0).min(6));
-+    if skip == 0 {
-+        return 0;
-+    }
-+    let p = path.to_ascii_lowercase();
-+    if p.contains("interface\\") || p.contains("interface/") || p.contains("menus") || p.contains("fonts") {
-+        return 0;
-+    }
-+    // The distant LOD's textures are low already (one picture for a whole block of cells):
-+    // a skipped level smeared the far landscape and buildings.
-+    if p.contains("\\lod\\") || p.contains("/lod/") || p.contains("_lod") || p.contains("lod_") || p.contains("\\lod") {
++    let skip = mip_skip();
++    if skip == 0 || !skips_levels(path) {
 +        return 0;
 +    }
 +    skip
++}
++
++static MIP_SKIP: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
++
++/// [nvport] The mip levels world textures drop now: `NVF_TEX_MIP_SKIP` at the start, then
++/// the in-game Texture Quality ([`set_mip_skip`], applied live by nvforever `texture_live`).
++pub fn mip_skip() -> u32 {
++    use std::sync::atomic::Ordering::Relaxed;
++    let v = MIP_SKIP.load(Relaxed);
++    if v != u32::MAX {
++        return v;
++    }
++    let from_env = std::env::var("NVF_TEX_MIP_SKIP").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(0u32).min(6);
++    let _ = MIP_SKIP.compare_exchange(u32::MAX, from_env, Relaxed, Relaxed);
++    MIP_SKIP.load(Relaxed)
++}
++
++pub fn set_mip_skip(levels: u32) {
++    MIP_SKIP.store(levels.min(6), std::sync::atomic::Ordering::Relaxed);
++}
++
++/// [nvport] Whether a texture drops levels at a lower quality: interface textures keep
++/// every level (menus cut pictures out of them by pixel rectangles), and so does the
++/// distant LOD (one picture for a whole block of cells: a skipped level smeared the far
++/// landscape and buildings).
++pub fn skips_levels(path: &str) -> bool {
++    let p = path.to_ascii_lowercase();
++    if p.contains("interface\\") || p.contains("interface/") || p.contains("menus") || p.contains("fonts") {
++        return false;
++    }
++    !(p.contains("\\lod\\") || p.contains("/lod/") || p.contains("_lod") || p.contains("lod_") || p.contains("\\lod"))
++}
++
++/// [nvport] A held texture read and decoded again at the skip of now (live Texture
++/// Quality), for a worker thread: `path` is the resolved path the cache keeps.
++pub fn reread(path: &str, usage: TextureUsage, data: &GameData, bc_supported: bool) -> Result<Image, String> {
++    let bytes = data.read(path).ok_or_else(|| "not in any archive".to_string())?;
++    let mut decoded = dds_texture_skip(&bytes, usage, bc_supported, false, mip_skip_for(path))?;
++    decoded.image.texture_descriptor.label = Some(folder_label(path));
++    Ok(decoded.image)
 +}
 +
 +fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, top_only: bool, skip: u32) -> Result<DecodedTexture, String> {
@@ -568,7 +598,7 @@ index 4f6f70c..e9b88e5 100644
              } else {
                  let f = match (dds.format, srgb) {
                      (Format::Dxt1, true) => TextureFormat::Bc1RgbaUnormSrgb,
-@@ -293,7 +424,7 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
+@@ -293,7 +454,7 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
              } else {
                  let mut out = Vec::new();
                  for (m, level) in levels.iter().enumerate() {
@@ -577,7 +607,7 @@ index 4f6f70c..e9b88e5 100644
                      let values = fnv_dds::decode_bc4(dds.format, lw, lh, level).ok_or("invalid BC4 block data")?;
                      if signed {
                          out.extend(values.into_iter().map(|v| (v * 127.0).round() as i8 as u8));
-@@ -314,7 +445,7 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
+@@ -314,7 +475,7 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
              } else {
                  let mut out = Vec::new();
                  for (m, level) in levels.iter().enumerate() {
@@ -586,7 +616,7 @@ index 4f6f70c..e9b88e5 100644
                      let pixels = fnv_dds::decode_bc5(dds.format, lw, lh, level).ok_or("invalid BC5 block data")?;
                      for [r, g] in pixels {
                          if usage == TextureUsage::Normal {
-@@ -354,7 +485,9 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
+@@ -354,7 +515,9 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
      let lacks_alpha = dds.alpha_opaque()
          || matches!(dds.format, Format::Bc5U | Format::Bc5S | Format::Bc4U | Format::Bc4S)
          || (dds.format == Format::Dxt1 && dds.header.dx10.is_some())
@@ -597,7 +627,23 @@ index 4f6f70c..e9b88e5 100644
      Ok(DecodedTexture { image: img, lacks_alpha })
  }
  
-@@ -627,14 +760,14 @@ impl TextureCache {
+@@ -528,6 +691,15 @@ impl TextureCache {
+             .collect()
+     }
+ 
++    /// [nvport] Every texture held (plain and clamped copies): resolved path, usage, handle.
++    pub fn held(&self) -> Vec<(String, TextureUsage, Handle<Image>)> {
++        self.map
++            .iter()
++            .chain(self.clamped.iter())
++            .filter_map(|((path, usage), h)| h.as_ref().map(|(h, _)| (path.clone(), *usage, h.clone())))
++            .collect()
++    }
++
+     /// Changes to the cache so far ([`Self::snapshot`]).
+     pub fn generation(&self) -> u64 {
+         self.generation
+@@ -627,14 +799,14 @@ impl TextureCache {
                  return Some(h);
              }
          }
@@ -1570,10 +1616,10 @@ index bbdb0c0..0c6c5d1 100644
  libloading = "0.8.9"
 diff --git a/engine/nvforever/src/android_input.rs b/engine/nvforever/src/android_input.rs
 new file mode 100644
-index 0000000..2905344
+index 0000000..c83e5db
 --- /dev/null
 +++ b/engine/nvforever/src/android_input.rs
-@@ -0,0 +1,850 @@
+@@ -0,0 +1,851 @@
 +//! [nvport] Input from the Android launcher (Fallout Droid): on-screen keys, touch look,
 +//! gamepads mapped to PC keys and physical keyboards/mice arrive through JNI
 +//! (`com.wastelanddroid.engine.NativeInput`) and are written as Bevy's own input messages,
@@ -1902,8 +1948,8 @@ index 0000000..2905344
 +
 +/// The texture quality choices: the mip levels each drops (Ultra Low an eighth of the
 +/// detail, Potato a thirty-second: hardly more than a colour).
-+const TEXTURE_SKIPS: [i32; 5] = [0, 1, 2, 3, 5];
-+const TEXTURE_NAMES: [&str; 5] = ["High", "Medium", "Low", "Ultra Low", "Potato"];
++const TEXTURE_SKIPS: [i32; 6] = [0, 1, 2, 3, 4, 5];
++const TEXTURE_NAMES: [&str; 6] = ["Ultra", "High", "Medium", "Low", "Very Low", "Potato"];
 +
 +fn texture_quality() -> i32 {
 +    let q = TEXTURE_QUALITY.load(Ordering::Relaxed);
@@ -1926,7 +1972,8 @@ index 0000000..2905344
 +        if let Some(f) = texture_quality_file() {
 +            let _ = std::fs::write(f, q.to_string());
 +        }
-+        info!("android: texture quality {q} (mip levels dropped) from the next start");
++        nvf_assets::texture::set_mip_skip(q.max(0) as u32);
++        info!("android: texture quality {q} (mip levels dropped), applied now");
 +    }
 +}
 +
@@ -2064,7 +2111,7 @@ index 0000000..2905344
 +            "texture-quality",
 +            "Graphics",
 +            "Texture Quality",
-+            "The textures' detail: High keeps every level; Medium, Low, Ultra Low and Potato drop more (less memory). Takes effect at the next start.",
++            "The textures' detail: Ultra keeps every level; each step down drops one more (a quarter of the memory), Potato five. Applied at once: the textures are read again in the background.",
 +            Slider::choice(
 +                TEXTURE_SKIPS.len(),
 +                |_| choice_part(texture_index(texture_quality()), TEXTURE_SKIPS.len()),
@@ -2952,10 +2999,10 @@ index fa89874..4f55058 100644
          let baked = match result {
              Ok(Some(b)) => b,
 diff --git a/engine/nvforever/src/main.rs b/engine/nvforever/src/main.rs
-index a6cf138..473ba46 100644
+index a6cf138..805ae30 100644
 --- a/engine/nvforever/src/main.rs
 +++ b/engine/nvforever/src/main.rs
-@@ -82,6 +82,10 @@ mod haze;
+@@ -82,6 +82,11 @@ mod haze;
  mod fly;
  mod foot_ik;
  mod anti_lag;
@@ -2963,10 +3010,11 @@ index a6cf138..473ba46 100644
 +mod android_input;
 +#[cfg(target_os = "android")]
 +mod phone_cpu;
++mod texture_live;
  mod dlss;
  mod dlss_download;
  mod nv_low_latency;
-@@ -985,6 +989,20 @@ fn report_archives(data: Res<GameData>, world: Res<WorldData>) {
+@@ -985,6 +990,20 @@ fn report_archives(data: Res<GameData>, world: Res<WorldData>) {
      for d in &world.dropped_plugins {
          warn!("{d}");
      }
@@ -2987,7 +3035,7 @@ index a6cf138..473ba46 100644
  }
  
  /// Arguments that choose a world or a mode. A command line with none of them is the game
-@@ -1040,6 +1058,8 @@ fn task_pools(placed: Option<usize>) -> TaskPoolPlugin {
+@@ -1040,6 +1059,8 @@ fn task_pools(placed: Option<usize>) -> TaskPoolPlugin {
      if let Some(n) = placed {
          task_pool_options.max_total_threads = n;
      }
@@ -2996,7 +3044,7 @@ index a6cf138..473ba46 100644
      if let Some(n) = std::env::var("NVF_PLAY_TEST_ASYNC_THREADS").ok().and_then(|v| v.parse::<usize>().ok()) {
          task_pool_options.async_compute.min_threads = n;
          task_pool_options.async_compute.max_threads = n;
-@@ -1061,12 +1081,164 @@ fn parse_smoothing(value: &str) -> Result<nvf_play::smooth_terrain::Smoothing, S
+@@ -1061,12 +1082,164 @@ fn parse_smoothing(value: &str) -> Result<nvf_play::smooth_terrain::Smoothing, S
  #[global_allocator]
  static ALLOCATOR: crash::SaysWhenEmpty = crash::SaysWhenEmpty;
  
@@ -3162,7 +3210,7 @@ index a6cf138..473ba46 100644
      if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(std::path::Path::to_path_buf)) {
          line = with_schemas_beside(line, &dir);
          let functions = dir.join("schemas").join("script").join("functions.json");
-@@ -1075,7 +1247,15 @@ fn main() -> AppExit {
+@@ -1075,7 +1248,15 @@ fn main() -> AppExit {
              std::env::set_var("NVF_PLAY_SCRIPT_FUNCTIONS", &functions);
          }
      }
@@ -3179,12 +3227,13 @@ index a6cf138..473ba46 100644
      let _ = COMMAND_LINE.set(line);
      // Taking over a load: tell the old run at once that this run takes part (#1903).
      let handoff_marked = args.handoff.as_deref().map(handoff::mark_started);
-@@ -2326,6 +2506,8 @@ fn main() -> AppExit {
+@@ -2326,6 +2507,9 @@ fn main() -> AppExit {
              s.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
          });
      }
 +    #[cfg(target_os = "android")]
 +    app.add_plugins((android_input::AndroidInputPlugin, phone_cpu::PhoneCpuPlugin));
++    app.add_plugins(texture_live::TextureLivePlugin);
      let exit = app.run();
      // The app and its renderer are gone; Streamline shut down before the device and instance it
      // used (dlss/, "Shutdown"). Nothing when Streamline was not loaded.
@@ -3686,6 +3735,146 @@ index 5a7c1e2..5f62ce4 100644
              AmbientLight { color: Color::WHITE, brightness: 150.0, ..default() },
              Transform::from_translation(to(eye)).looking_at(to(aim), Vec3::Y),
              layer.clone(),
+diff --git a/engine/nvforever/src/texture_live.rs b/engine/nvforever/src/texture_live.rs
+new file mode 100644
+index 0000000..eeac409
+--- /dev/null
++++ b/engine/nvforever/src/texture_live.rs
+@@ -0,0 +1,134 @@
++//! [nvport] Texture Quality applied live, without a restart. When the mip levels the
++//! textures drop change (`nvf_assets::texture::set_mip_skip`), every world texture the
++//! cache holds is read again on a worker thread, a batch at a time, and put back under its
++//! own handle: the GPU uploads it (inside the frame's upload limit) and drops the old
++//! texture once the materials that sampled it are bound again (marked changed here).
++//! Interface and distant-LOD textures keep every level and are not read again; a texture
++//! whose format would change keeps its current picture (never a half-made material).
++
++use bevy::image::CompressedImageFormatSupport;
++use bevy::prelude::*;
++use bevy::tasks::{futures::check_ready, AsyncComputeTaskPool, Task};
++use nvf_assets::release::{image_bytes, material_images};
++use nvf_assets::texture::{self, TextureUsage};
++use nvf_assets::{GameData, NifMaterial, TextureCache};
++use std::collections::{HashSet, VecDeque};
++use std::time::Instant;
++
++/// Textures read again per worker task (one task at a time, so the frame never waits).
++const BATCH: usize = 24;
++
++type Done = Vec<(Handle<Image>, Result<Image, String>)>;
++
++#[derive(Resource, Default)]
++struct Reread {
++    /// The skip the held textures are at; `None` until the first frame.
++    applied: Option<u32>,
++    queue: VecDeque<(String, TextureUsage, Handle<Image>)>,
++    task: Option<Task<Done>>,
++    total: usize,
++    done: usize,
++    kept: usize,
++    bytes_before: u64,
++    bytes_after: u64,
++    started: Option<Instant>,
++}
++
++pub struct TextureLivePlugin;
++
++impl Plugin for TextureLivePlugin {
++    fn build(&self, app: &mut App) {
++        app.init_resource::<Reread>().add_systems(Update, reread);
++    }
++}
++
++fn reread(
++    mut state: ResMut<Reread>,
++    cache: Option<Res<TextureCache>>,
++    data: Option<Res<GameData>>,
++    formats: Option<Res<CompressedImageFormatSupport>>,
++    mut images: ResMut<Assets<Image>>,
++    mut materials: ResMut<Assets<NifMaterial>>,
++) {
++    let (Some(cache), Some(data)) = (cache, data) else { return };
++    let skip = texture::mip_skip();
++    let applied = *state.applied.get_or_insert(skip);
++    // A new choice: start over from every texture held now (a batch on its way finishes
++    // first; what it brings back is at the skip it was read at, and read again here).
++    if applied != skip && state.task.is_none() {
++        state.applied = Some(skip);
++        state.queue = cache.held().into_iter().filter(|(path, _, _)| texture::skips_levels(path)).collect();
++        state.total = state.queue.len();
++        state.done = 0;
++        state.kept = 0;
++        state.bytes_before = 0;
++        state.bytes_after = 0;
++        state.started = Some(Instant::now());
++        info!("texture quality: {} textures to read again at {skip} mip level(s) dropped (was {applied})", state.total);
++    }
++    if let Some(task) = state.task.as_mut() {
++        let Some(done) = check_ready(task) else { return };
++        state.task = None;
++        let mut changed = HashSet::new();
++        for (handle, result) in done {
++            match result {
++                Ok(mut image) => {
++                    if let Some(old) = images.get(&handle) {
++                        if old.texture_descriptor.format != image.texture_descriptor.format {
++                            state.kept += 1;
++                            continue;
++                        }
++                        // The sampler as it is now (anisotropy, clamped edges).
++                        image.sampler = old.sampler.clone();
++                        state.bytes_before += image_bytes(old);
++                    }
++                    state.bytes_after += image_bytes(&image);
++                    if images.insert(handle.id(), image).is_ok() {
++                        changed.insert(handle.id());
++                        state.done += 1;
++                    }
++                }
++                Err(e) => {
++                    state.kept += 1;
++                    warn!("texture quality: kept {e}");
++                }
++            }
++        }
++        if !changed.is_empty() {
++            let touched: Vec<_> = materials
++                .iter()
++                .filter(|(_, m)| material_images(m).any(|h| changed.contains(&h.id())))
++                .map(|(id, _)| id)
++                .collect();
++            for id in touched {
++                let _ = materials.get_mut(id);
++            }
++        }
++        if state.queue.is_empty() {
++            let secs = state.started.map_or(0.0, |t| t.elapsed().as_secs_f32());
++            info!(
++                "texture quality: {} of {} textures read again in {secs:.1} s, {} kept; their GPU size {} MB -> {} MB",
++                state.done,
++                state.total,
++                state.kept,
++                state.bytes_before >> 20,
++                state.bytes_after >> 20
++            );
++        }
++    }
++    if state.task.is_none() && !state.queue.is_empty() {
++        let n = BATCH.min(state.queue.len());
++        let batch: Vec<_> = state.queue.drain(..n).collect();
++        let data = data.clone();
++        let bc = texture::bc_supported_or_known(formats.as_deref());
++        state.task = Some(AsyncComputeTaskPool::get().spawn(async move {
++            batch
++                .into_iter()
++                .map(|(path, usage, handle)| {
++                    let r = texture::reread(&path, usage, &data, bc).map_err(|e| format!("{path}: {e}"));
++                    (handle, r)
++                })
++                .collect()
++        }));
++    }
++}
 diff --git a/engine/nvforever/src/vats_highlight.rs b/engine/nvforever/src/vats_highlight.rs
 index 6d465f5..a11ab69 100644
 --- a/engine/nvforever/src/vats_highlight.rs
@@ -4065,7 +4254,7 @@ index c5d8126..b4e3264 100644
      panic!("Device lost");
  
 diff --git a/lang/ru.toml b/lang/ru.toml
-index 69dc72c..0777d24 100644
+index 69dc72c..3d63ea5 100644
 --- a/lang/ru.toml
 +++ b/lang/ru.toml
 @@ -6,6 +6,569 @@
@@ -4969,7 +5158,7 @@ index 69dc72c..0777d24 100644
  "Quality of Life" = "Удобство"
  "Menus" = "Меню"
  "Cheats" = "Читы"
-@@ -530,23 +1093,200 @@ name = "Русский"
+@@ -530,23 +1093,203 @@ name = "Русский"
  # [design, #2014, #2317, #2662, #2688, #2149, #2169, #2403] Rows main registers without a Russian line.
  "On: when choices appear the view returns to the speaker (with the close-up off). Needs \"Turn to Each Other\"." = "Вкл.: когда появляются варианты ответа, вид возвращается к собеседнику (при выключенном приближении). Нужен «Поворот друг к другу в диалоге»."
  "Grass fires" = "Пожары в траве"
@@ -5178,3 +5367,6 @@ index 69dc72c..0777d24 100644
 +"Hazel" = "Ореховый"
 +"Gray" = "Серый"
 +"Violet" = "Фиолетовый"
++"Ultra" = "Ультра"
++"Very Low" = "Очень низкое"
++"The textures' detail: Ultra keeps every level; each step down drops one more (a quarter of the memory), Potato five. Applied at once: the textures are read again in the background." = "Детализация текстур: Ультра — все уровни; каждая ступень ниже отбрасывает ещё один (в 4 раза меньше памяти), Картошка — пять. Применяется сразу: текстуры перечитываются в фоне."
