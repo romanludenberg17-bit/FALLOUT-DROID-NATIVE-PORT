@@ -225,6 +225,15 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
                 else if (android.os.SystemClock.uptimeMillis() - engineUpAt > 700) loading.finish();
             }
             if (consoleBar != null) consoleBar.setShown(state == ScreenKeysOverlay.UI_CONSOLE);
+            // The resolution picked in the game's settings: kept, and the surface resized now.
+            try {
+                int ask = NativeInput.renderHeightAsk();
+                if (ask >= 0 && mSurfaceView != null) {
+                    com.wastelanddroid.util.Prefs.get(NativeGameActivity.this).edit().putInt(FalloutEngine.RENDER_HEIGHT_PICK, ask).apply();
+                    fitSurface(mSurfaceView.getWidth(), mSurfaceView.getHeight());
+                }
+            } catch (UnsatisfiedLinkError ignored) {
+            }
             if (overlay != null) {
                 overlay.setUiState(state);
                 try {

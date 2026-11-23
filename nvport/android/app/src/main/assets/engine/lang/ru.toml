@@ -6,6 +6,14 @@
 name = "Русский"
 
 [words]
+"The textures' detail: High keeps every level; Medium, Low, Ultra Low and Potato drop more (less memory). Takes effect at the next start." = "Детализация текстур: Высокое — все уровни; Среднее, Низкое, Ультра низкое и Картошка отбрасывают больше (меньше памяти). Действует со следующего запуска."
+"Ultra Low or Potato: rough textures, no shadows, reflections, water effects or grass; draw distances stay. Textures change at the next start." = "Ультра низкое или Картошка: грубые текстуры, без теней, отражений, эффектов воды и травы; дальность прорисовки остается. Текстуры — со следующего запуска."
+"The height the game is drawn at, scaled to the screen; Native is the screen's own. Lower is faster and softer." = "Высота, в которой рисуется игра, растянутая на экран; «Родное» — разрешение экрана. Ниже — быстрее и мягче."
+"Native" = "Родное"
+"Potato" = "Картошка"
+"Ultra Low" = "Ультра низкое"
+"Choose" = "Выбрать"
+"Phone Preset" = "Пресет для телефона"
 "The textures' detail: High keeps every level, Medium and Low drop one or two (less memory). Takes effect at the next start." = "Детализация текстур: Высокое — все уровни, Среднее и Низкое отбрасывают один или два (меньше памяти). Действует со следующего запуска."
 "Texture Quality" = "Качество текстур"
 # [nvport] The pause menu's save page (pause.rs): saving over a save.

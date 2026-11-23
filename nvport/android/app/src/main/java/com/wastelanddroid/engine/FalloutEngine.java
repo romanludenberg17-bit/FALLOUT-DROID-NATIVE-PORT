@@ -42,6 +42,8 @@ public final class FalloutEngine {
     public static final String GPU_SAFE = "gpu_safe_level";
     /** One start with the light picture after a repeated lost device (NativeGameActivity). */
     public static final String RECOVERY_LITE = "recovery_lite_once";
+    /** The render height picked in the game's settings (0 the screen's own; unset: the class's). */
+    public static final String RENDER_HEIGHT_PICK = "render_height_pick";
     /** The game's process (manifest: NativeGameActivity android:process). */
     public static final String GAME_PROCESS_SUFFIX = ":game";
     /** Bumped when the bundled engine data (schemas) changes. */
@@ -188,10 +190,12 @@ public final class FalloutEngine {
         int mip = profile.mipSkip;
         try {
             java.io.File tq = new java.io.File(homeDir(context, game.id), "texture_quality.txt");
-            if (tq.isFile()) mip = Math.max(0, Math.min(2, Integer.parseInt(readText(tq).trim())));
+            if (tq.isFile()) mip = Math.max(0, Math.min(6, Integer.parseInt(readText(tq).trim())));
         } catch (Exception ignored) {
         }
         args.add("env:NVF_TEX_MIP_SKIP=" + mip);
+        // The resolution row of the game's settings shows the height in use (0: native).
+        args.add("env:NVPORT_RENDER_HEIGHT=" + Math.max(0, renderHeight(context)));
         // Snapdragon 7+ Gen 2 and up, and every high class chip: the engine's settings page
         // shows the graphics rows again and the player's choices there stand.
         if (strongGraphics(context)) args.add("env:NVPORT_FULL_GFX=1");
@@ -690,6 +694,12 @@ public final class FalloutEngine {
                 return prefs.getInt(GPU_SAFE, 0) >= 2 ? Math.min(h, 660) : h;
             } catch (NumberFormatException ignored) {
             }
+        }
+        // The player's pick in the game's settings wins (0: the screen's own size).
+        if (prefs.contains(RENDER_HEIGHT_PICK)) {
+            int pick = prefs.getInt(RENDER_HEIGHT_PICK, -1);
+            if (pick == 0) return -1;
+            if (pick > 0) return prefs.getInt(GPU_SAFE, 0) >= 2 ? Math.min(pick, 660) : pick;
         }
         com.wastelanddroid.game.DeviceProfile.Quality q = quality(context);
         int base = com.wastelanddroid.game.DeviceProfile.flagshipProfile() ? 1080

@@ -314,7 +314,7 @@ index 7df5242..f1ca354 100644
              out: DeferredAssets::default(),
          }
 diff --git a/engine/nvf-assets/src/texture.rs b/engine/nvf-assets/src/texture.rs
-index 4f6f70c..f49ebf4 100644
+index 4f6f70c..e9b88e5 100644
 --- a/engine/nvf-assets/src/texture.rs
 +++ b/engine/nvf-assets/src/texture.rs
 @@ -128,7 +128,7 @@ pub(crate) fn worker_texture(
@@ -326,7 +326,7 @@ index 4f6f70c..f49ebf4 100644
          decoded.image.texture_descriptor.label = Some(folder_label(path));
          Ok(decoded)
      })
-@@ -232,34 +232,163 @@ pub fn dds_image_top(bytes: &[u8], srgb: bool, bc_supported: bool) -> Result<Ima
+@@ -232,34 +232,165 @@ pub fn dds_image_top(bytes: &[u8], srgb: bool, bc_supported: bool) -> Result<Ima
  }
  
  fn dds_texture(bytes: &[u8], usage: TextureUsage, bc_supported: bool, top_only: bool) -> Result<DecodedTexture, String> {
@@ -427,7 +427,7 @@ index 4f6f70c..f49ebf4 100644
 +/// textures keep every level (menus cut pictures out of them by pixel rectangles).
 +pub fn mip_skip_for(path: &str) -> u32 {
 +    static SKIP: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
-+    let skip = *SKIP.get_or_init(|| std::env::var("NVF_TEX_MIP_SKIP").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(0).min(3));
++    let skip = *SKIP.get_or_init(|| std::env::var("NVF_TEX_MIP_SKIP").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(0).min(6));
 +    if skip == 0 {
 +        return 0;
 +    }
@@ -456,12 +456,14 @@ index 4f6f70c..f49ebf4 100644
 +    // [nvport] A GPU without BC formats (Mali) gets DXT decoded to RGBA8 here: 4 to 8 times
 +    // the bytes, so a phone drops one more level for it.
 +    let cpu_dxt = !bc_supported && !etc2_ok() && matches!(dds.format, Format::Dxt1 | Format::Dxt3 | Format::Dxt5);
-+    let skip = if cpu_dxt && cfg!(target_os = "android") && !top_only { (skip + 1).min(3) } else { skip };
++    let skip = if cpu_dxt && cfg!(target_os = "android") && !top_only { (skip + 1).min(6) } else { skip };
 +    let mut base = 0u32;
 +    if !top_only {
 +        while base < skip && (base as usize + 1) < dds.levels[0].len() {
 +            let (nw, nh) = dds.header.level_dims(base + 1);
-+            if nw < 64 || nh < 64 || nw % 4 != 0 || nh % 4 != 0 {
++            // [nvport] Ultra Low and Potato (4 and more levels) go down to 8 texels a side.
++            let least = if skip >= 4 { 8 } else { 64 };
++            if nw < least || nh < least || nw % 4 != 0 || nh % 4 != 0 {
 +                break;
 +            }
 +            base += 1;
@@ -499,7 +501,7 @@ index 4f6f70c..f49ebf4 100644
              } else {
                  let f = match (dds.format, srgb) {
                      (Format::Dxt1, true) => TextureFormat::Bc1RgbaUnormSrgb,
-@@ -293,7 +422,7 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
+@@ -293,7 +424,7 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
              } else {
                  let mut out = Vec::new();
                  for (m, level) in levels.iter().enumerate() {
@@ -508,7 +510,7 @@ index 4f6f70c..f49ebf4 100644
                      let values = fnv_dds::decode_bc4(dds.format, lw, lh, level).ok_or("invalid BC4 block data")?;
                      if signed {
                          out.extend(values.into_iter().map(|v| (v * 127.0).round() as i8 as u8));
-@@ -314,7 +443,7 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
+@@ -314,7 +445,7 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
              } else {
                  let mut out = Vec::new();
                  for (m, level) in levels.iter().enumerate() {
@@ -517,7 +519,7 @@ index 4f6f70c..f49ebf4 100644
                      let pixels = fnv_dds::decode_bc5(dds.format, lw, lh, level).ok_or("invalid BC5 block data")?;
                      for [r, g] in pixels {
                          if usage == TextureUsage::Normal {
-@@ -354,7 +483,9 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
+@@ -354,7 +485,9 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
      let lacks_alpha = dds.alpha_opaque()
          || matches!(dds.format, Format::Bc5U | Format::Bc5S | Format::Bc4U | Format::Bc4S)
          || (dds.format == Format::Dxt1 && dds.header.dx10.is_some())
@@ -528,7 +530,7 @@ index 4f6f70c..f49ebf4 100644
      Ok(DecodedTexture { image: img, lacks_alpha })
  }
  
-@@ -627,14 +758,14 @@ impl TextureCache {
+@@ -627,14 +760,14 @@ impl TextureCache {
                  return Some(h);
              }
          }
@@ -1406,13 +1408,15 @@ index c1b5bc6..9a6a482 100644
  }
  
 diff --git a/engine/nvf-play/src/settings_layout.rs b/engine/nvf-play/src/settings_layout.rs
-index 2695b68..61f6f33 100644
+index 2695b68..e54cd0f 100644
 --- a/engine/nvf-play/src/settings_layout.rs
 +++ b/engine/nvf-play/src/settings_layout.rs
-@@ -421,6 +421,7 @@ mod tests {
+@@ -421,6 +421,9 @@ mod tests {
          ("neon-glow", "Graphics"),
          ("sharpen", "Graphics"),
          ("anisotropic", "Graphics"),
++        ("phone-preset", "Graphics"),
++        ("render-resolution", "Graphics"),
 +        ("texture-quality", "Graphics"),
          ("terrain-height-blend", "Graphics"),
          ("terrain-anti-tiling", "Graphics"),
@@ -1453,10 +1457,10 @@ index bbdb0c0..0c6c5d1 100644
  libloading = "0.8.9"
 diff --git a/engine/nvforever/src/android_input.rs b/engine/nvforever/src/android_input.rs
 new file mode 100644
-index 0000000..0e1b7f8
+index 0000000..1e1f301
 --- /dev/null
 +++ b/engine/nvforever/src/android_input.rs
-@@ -0,0 +1,634 @@
+@@ -0,0 +1,753 @@
 +//! [nvport] Input from the Android launcher (Fallout Droid): on-screen keys, touch look,
 +//! gamepads mapped to PC keys and physical keyboards/mice arrive through JNI
 +//! (`com.wastelanddroid.engine.NativeInput`) and are written as Bevy's own input messages,
@@ -1732,6 +1736,7 @@ index 0000000..0e1b7f8
 +impl Plugin for AndroidInputPlugin {
 +    fn build(&self, app: &mut App) {
 +        texture_quality_row(app);
++        phone_rows(app);
 +        if let Some(render) = app.get_sub_app_mut(bevy::render::RenderApp) {
 +            render.add_systems(
 +                bevy::render::Render,
@@ -1782,15 +1787,142 @@ index 0000000..0e1b7f8
 +    std::env::var_os("NVFOREVER_HOME").map(|h| std::path::PathBuf::from(h).join("texture_quality.txt"))
 +}
 +
++/// The texture quality choices: the mip levels each drops (Ultra Low an eighth of the
++/// detail, Potato a thirty-second: hardly more than a colour).
++const TEXTURE_SKIPS: [i32; 5] = [0, 1, 2, 3, 5];
++const TEXTURE_NAMES: [&str; 5] = ["High", "Medium", "Low", "Ultra Low", "Potato"];
++
 +fn texture_quality() -> i32 {
 +    let q = TEXTURE_QUALITY.load(Ordering::Relaxed);
 +    if q >= 0 {
 +        return q;
 +    }
 +    let from_file = texture_quality_file().and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| t.trim().parse::<i32>().ok());
-+    let q = from_file.or_else(|| std::env::var("NVF_TEX_MIP_SKIP").ok().and_then(|v| v.trim().parse().ok())).unwrap_or(1).clamp(0, 2);
++    let q = from_file.or_else(|| std::env::var("NVF_TEX_MIP_SKIP").ok().and_then(|v| v.trim().parse().ok())).unwrap_or(1).clamp(0, 6);
 +    TEXTURE_QUALITY.store(q, Ordering::Relaxed);
 +    q
++}
++
++fn texture_index(skip: i32) -> usize {
++    TEXTURE_SKIPS.iter().position(|&s| s >= skip).unwrap_or(TEXTURE_SKIPS.len() - 1)
++}
++
++fn set_texture_skip(q: i32) {
++    if q != texture_quality() {
++        TEXTURE_QUALITY.store(q, Ordering::Relaxed);
++        if let Some(f) = texture_quality_file() {
++            let _ = std::fs::write(f, q.to_string());
++        }
++        info!("android: texture quality {q} (mip levels dropped) from the next start");
++    }
++}
++
++/// [nvport] The render resolution the player picks in the game (the surface's height;
++/// 0 the screen's own): the activity polls it (`NativeInput.renderHeightAsk`) and resizes
++/// the surface at once.
++static RENDER_HEIGHT_ASK: AtomicI32 = AtomicI32::new(-1);
++static RENDER_HEIGHT_NOW: AtomicI32 = AtomicI32::new(-1);
++const RENDER_HEIGHTS: [i32; 9] = [360, 480, 540, 600, 660, 720, 810, 900, 1080];
++
++fn render_height() -> i32 {
++    let h = RENDER_HEIGHT_NOW.load(Ordering::Relaxed);
++    if h >= 0 {
++        return h;
++    }
++    let h = std::env::var("NVPORT_RENDER_HEIGHT").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(720);
++    RENDER_HEIGHT_NOW.store(h, Ordering::Relaxed);
++    h
++}
++
++/// `NativeInput.renderHeightAsk()`: the height the player picked since the last call
++/// (0 the screen's own), or -1.
++#[unsafe(no_mangle)]
++pub extern "C" fn Java_com_wastelanddroid_engine_NativeInput_renderHeightAsk(_e: JEnv, _c: JClass) -> i32 {
++    RENDER_HEIGHT_ASK.swap(-1, Ordering::Relaxed)
++}
++
++/// Turn a switch row off, or pick a list row's choice, by key (a hidden or locked row is
++/// left as it is: the launcher holds it).
++fn row_off(world: &mut World, key: &str, choice: Option<&str>) {
++    let Some(i) = world.get_resource::<nvf_play::settings::Settings>().and_then(|s| s.index(key)) else { return };
++    match choice {
++        Some(name) => {
++            nvf_play::settings::pick(world, i, name);
++        }
++        None => {
++            let on = world.get_resource::<nvf_play::settings::Settings>().and_then(|s| s.list().get(i).copied()).is_some_and(|s| s.slider.is_none() && (s.get)(world));
++            if on {
++                nvf_play::settings::flip(world, i);
++            }
++        }
++    }
++}
++
++/// [nvport] The phone presets (Ultra Low, Potato): the textures at that quality, no
++/// shadows, reflections, water effects, grass or glow; draw distances untouched.
++fn phone_preset(world: &mut World, potato: bool) {
++    set_texture_skip(if potato { 5 } else { 3 });
++    row_off(world, "sun-shadows", Some("Off"));
++    row_off(world, "ambient-occlusion", Some("Off"));
++    row_off(world, "anti-aliasing", Some(if potato { "Off" } else { "FXAA" }));
++    for key in [
++        "grass", "water-reflections", "water-effects", "water-mirror", "light-shafts", "cloud-shadows", "fine-shadows",
++        "terrain-shadows", "bloom", "glow", "neon-glow", "eye-adaptation", "heat-haze", "desert-haze",
++        "terrain-height-blend", "terrain-anti-tiling", "mesh-terrain-blend",
++    ] {
++        row_off(world, key, None);
++    }
++    info!("android: {} preset: textures, no shadows, reflections, water effects, grass or glow; distances kept", if potato { "Potato" } else { "Ultra Low" });
++}
++
++fn phone_rows(app: &mut App) {
++    use nvf_play::settings::{add_setting, choice_index, choice_part, Setting, Slider};
++    add_setting(
++        app,
++        Setting::slider(
++            "render-resolution",
++            "Graphics",
++            "Resolution",
++            "The height the game is drawn at, scaled to the screen; Native is the screen's own. Lower is faster and softer.",
++            Slider::choice(
++                RENDER_HEIGHTS.len() + 1,
++                |_| {
++                    let h = render_height();
++                    let i = if h <= 0 { RENDER_HEIGHTS.len() } else { RENDER_HEIGHTS.iter().position(|&x| x >= h).unwrap_or(RENDER_HEIGHTS.len() - 1) };
++                    choice_part(i, RENDER_HEIGHTS.len() + 1)
++                },
++                |_, v| {
++                    let i = choice_index(v, RENDER_HEIGHTS.len() + 1);
++                    let h = RENDER_HEIGHTS.get(i).copied().unwrap_or(0);
++                    if h != render_height() {
++                        RENDER_HEIGHT_NOW.store(h, Ordering::Relaxed);
++                        RENDER_HEIGHT_ASK.store(h, Ordering::Relaxed);
++                        info!("android: render resolution {}", if h == 0 { "native".to_string() } else { format!("{h}p") });
++                    }
++                },
++                |v| RENDER_HEIGHTS.get(choice_index(v, RENDER_HEIGHTS.len() + 1)).map_or_else(|| "Native".to_string(), |h| format!("{h}p")),
++            ),
++        ),
++    );
++    add_setting(
++        app,
++        Setting::slider(
++            "phone-preset",
++            "Graphics",
++            "Phone Preset",
++            "Ultra Low or Potato: rough textures, no shadows, reflections, water effects or grass; draw distances stay. Textures change at the next start.",
++            Slider::choice(
++                3,
++                |_| choice_part(0, 3),
++                |w, v| match choice_index(v, 3) {
++                    1 => phone_preset(w, false),
++                    2 => phone_preset(w, true),
++                    _ => {}
++                },
++                |v| ["Choose", "Ultra Low", "Potato"][choice_index(v, 3).min(2)].to_string(),
++            ),
++        ),
++    );
 +}
 +
 +fn texture_quality_row(app: &mut App) {
@@ -1801,21 +1933,12 @@ index 0000000..0e1b7f8
 +            "texture-quality",
 +            "Graphics",
 +            "Texture Quality",
-+            "The textures' detail: High keeps every level, Medium and Low drop one or two (less memory). Takes effect at the next start.",
++            "The textures' detail: High keeps every level; Medium, Low, Ultra Low and Potato drop more (less memory). Takes effect at the next start.",
 +            Slider::choice(
-+                3,
-+                |_| choice_part(texture_quality() as usize, 3),
-+                |_, v| {
-+                    let q = choice_index(v, 3) as i32;
-+                    if q != texture_quality() {
-+                        TEXTURE_QUALITY.store(q, Ordering::Relaxed);
-+                        if let Some(f) = texture_quality_file() {
-+                            let _ = std::fs::write(f, q.to_string());
-+                        }
-+                        info!("android: texture quality {q} (mip levels dropped) from the next start");
-+                    }
-+                },
-+                |v| ["High", "Medium", "Low"][choice_index(v, 3).min(2)].to_string(),
++                TEXTURE_SKIPS.len(),
++                |_| choice_part(texture_index(texture_quality()), TEXTURE_SKIPS.len()),
++                |_, v| set_texture_skip(TEXTURE_SKIPS[choice_index(v, TEXTURE_SKIPS.len()).min(TEXTURE_SKIPS.len() - 1)]),
++                |v| TEXTURE_NAMES[choice_index(v, TEXTURE_SKIPS.len()).min(TEXTURE_SKIPS.len() - 1)].to_string(),
 +            ),
 +        ),
 +    );
@@ -3606,13 +3729,21 @@ index 5961c3c..3f0f658 100644
          bucket.available_sets -= 1;
          bucket.allocated_sets += 1;
 diff --git a/lang/ru.toml b/lang/ru.toml
-index 69dc72c..b8bb821 100644
+index 69dc72c..65a2e16 100644
 --- a/lang/ru.toml
 +++ b/lang/ru.toml
-@@ -6,6 +6,559 @@
+@@ -6,6 +6,567 @@
  name = "Русский"
  
  [words]
++"The textures' detail: High keeps every level; Medium, Low, Ultra Low and Potato drop more (less memory). Takes effect at the next start." = "Детализация текстур: Высокое — все уровни; Среднее, Низкое, Ультра низкое и Картошка отбрасывают больше (меньше памяти). Действует со следующего запуска."
++"Ultra Low or Potato: rough textures, no shadows, reflections, water effects or grass; draw distances stay. Textures change at the next start." = "Ультра низкое или Картошка: грубые текстуры, без теней, отражений, эффектов воды и травы; дальность прорисовки остается. Текстуры — со следующего запуска."
++"The height the game is drawn at, scaled to the screen; Native is the screen's own. Lower is faster and softer." = "Высота, в которой рисуется игра, растянутая на экран; «Родное» — разрешение экрана. Ниже — быстрее и мягче."
++"Native" = "Родное"
++"Potato" = "Картошка"
++"Ultra Low" = "Ультра низкое"
++"Choose" = "Выбрать"
++"Phone Preset" = "Пресет для телефона"
 +"The textures' detail: High keeps every level, Medium and Low drop one or two (less memory). Takes effect at the next start." = "Детализация текстур: Высокое — все уровни, Среднее и Низкое отбрасывают один или два (меньше памяти). Действует со следующего запуска."
 +"Texture Quality" = "Качество текстур"
 +# [nvport] The pause menu's save page (pause.rs): saving over a save.
@@ -4169,7 +4300,7 @@ index 69dc72c..b8bb821 100644
  # [design, #2200; engine/nvf-play/src/pause.rs] NVForever's device selection.
  "Automatic Input Switching" = "Автоматическая смена устройства ввода"
  "On: a controller button, stick or trigger selects Controller; a key or mouse click selects Keyboard and Mouse (mouse motion does not). Off: choose Input Device yourself." = "Вкл.: кнопка, стик или курок геймпада выбирает геймпад; клавиша или щелчок мыши — клавиатуру и мышь (движение мыши — нет). Выкл.: выбирайте устройство сами."
-@@ -18,7 +571,7 @@ name = "Русский"
+@@ -18,7 +579,7 @@ name = "Русский"
  "Close In on the Speaker" = "Приближение к говорящему"
  "On: in a conversation the view closes in on the speaker, the background out of focus; the mouse moves only the cursor. Off: you can look around." = "Вкл.: в разговоре взгляд приближается к говорящему, фон размыт; мышь двигает только курсор. Выкл.: можно осматриваться."
  "Goodbye hint" = "Подсказка «Goodbye»"
@@ -4178,7 +4309,7 @@ index 69dc72c..b8bb821 100644
  "Aim assist" = "Помощь в прицеливании"
  "Controller only. On: the right stick turns slower over a nearby hostile, and aiming down the sights pulls the view onto one near the crosshair." = "Только для геймпада. Вкл.: правый стик поворачивает медленнее над ближним врагом, а прицеливание наводит взгляд на врага рядом с перекрестием."
  "Controller" = "Геймпад"
-@@ -31,20 +584,20 @@ name = "Русский"
+@@ -31,20 +592,20 @@ name = "Русский"
  "Kill camera" = "Камера убийства"
  "When a VATS shot kills its last mark, a camera shows the kill. Last enemy: only when no other enemy still fights you. Every kill: always. Off: never." = "Когда выстрел в VATS убивает последнюю цель, камера показывает убийство. Последний враг: только когда с вами больше никто не сражается. Каждое убийство: всегда. Выкл.: никогда."
  "V.A.T.S. style" = "Стиль V.A.T.S."
@@ -4204,7 +4335,7 @@ index 69dc72c..b8bb821 100644
  "Interface" = "Интерфейс"
  "Reverb" = "Реверберация"
  "World sounds echo as the place you are in does (a cave, a hall, a small room). Off: they do not." = "Звуки мира отражаются так, как в месте, где вы находитесь (пещера, зал, маленькая комната). Выкл.: без отражений."
-@@ -62,11 +615,11 @@ name = "Русский"
+@@ -62,11 +623,11 @@ name = "Русский"
  "Effects" = "Эффекты"
  "Every other sound: weapons, impacts, menus, doors and the sounds of places." = "Все прочие звуки: оружие, удары, меню, двери и звуки мест."
  "Radio" = "Радио"
@@ -4219,7 +4350,7 @@ index 69dc72c..b8bb821 100644
  "Audio" = "Звук"
  "Tweaks" = "Твики"
  "Game" = "Общие"
-@@ -79,9 +632,9 @@ name = "Русский"
+@@ -79,9 +640,9 @@ name = "Русский"
  "Keyboard search" = "Поиск с клавиатуры"
  "No settings here." = "Здесь нет настроек."
  "No results." = "Ничего не найдено."
@@ -4231,7 +4362,7 @@ index 69dc72c..b8bb821 100644
  "Button style" = "Вид кнопок"
  "The names and pictures of the controller's buttons in prompts and hints. Auto: a PlayStation's when the controller says it is one, else an Xbox's." = "Названия и значки кнопок геймпада в подсказках. Авто: как у PlayStation, когда геймпад сообщает, что он такой, иначе как у Xbox."
  "Light and noise gauges while sneaking" = "Шкалы света и шума в скрытности"
-@@ -100,13 +653,13 @@ name = "Русский"
+@@ -100,13 +661,13 @@ name = "Русский"
  "Hardcore mode" = "Режим хардкор"
  "On: you need water, food and sleep, stimpaks heal over time, ammo has weight, crippled limbs need a doctor's bag or a doctor. Off: none of that." = "Вкл.: нужны вода, еда и сон, стимуляторы лечат постепенно, патроны имеют вес, покалеченным конечностям нужна докторская сумка или доктор. Выкл.: ничего этого нет."
  "HUD red" = "HUD: красный"
@@ -4248,7 +4379,7 @@ index 69dc72c..b8bb821 100644
  "HUD scale" = "Масштаб HUD"
  "Size of the in-game HUD, independent of menu scale. Takes effect at the next start." = "Размер HUD в игре, не зависящий от масштаба меню. Вступает в силу при следующем запуске."
  "Menu scale" = "Масштаб меню"
-@@ -128,58 +681,58 @@ name = "Русский"
+@@ -128,58 +689,58 @@ name = "Русский"
  "Monitor" = "Монитор"
  "The display the game opens on in full screen (the first display until you pick one)." = "Экран, на котором игра открывается в полноэкранном режиме (первый экран, пока вы не выберете другой)."
  "Body in first person" = "Тело от первого лица"
@@ -4320,7 +4451,7 @@ index 69dc72c..b8bb821 100644
  "DLSS model" = "Модель DLSS"
  "Which DLSS model rebuilds the picture (NVIDIA calls them presets). Default, recommended: NVIDIA picks per mode. Only while DLSS draws." = "Какая модель DLSS восстанавливает картинку (NVIDIA называет их пресетами). По умолчанию, рекомендуется: NVIDIA выбирает по режиму. Только пока рисует DLSS."
  "Default" = "По умолчанию"
-@@ -206,42 +759,42 @@ name = "Русский"
+@@ -206,42 +767,42 @@ name = "Русский"
  "How far from you items lying in the world are drawn, as a part of the farthest the loaded cells reach." = "Как далеко от вас рисуются предметы, лежащие в мире, как доля самой большой дальности загруженных ячеек."
  "Shadow distance" = "Дальность теней"
  "Grass distance" = "Дальность травы"
@@ -4374,7 +4505,7 @@ index 69dc72c..b8bb821 100644
  "Off (upscaling active)" = "Выкл. (работает масштабирование)"
  "DLSS (restart)" = "DLSS (перезапуск)"
  "Needs an upscaler" = "Нужно масштабирование"
-@@ -249,7 +802,7 @@ name = "Русский"
+@@ -249,7 +810,7 @@ name = "Русский"
  "DLSS needs Windows" = "DLSS работает только в Windows"
  "DLSS needs the Vulkan renderer" = "Для DLSS нужна отрисовка через Vulkan"
  "DLSS files missing: choose Download DLSS… in this list, or put them in the dlss folder beside nvforever.exe, then restart" = "Нет файлов DLSS: выберите «Скачать DLSS…» в этом списке или положите их в папку dlss рядом с nvforever.exe и перезапустите"
@@ -4383,7 +4514,7 @@ index 69dc72c..b8bb821 100644
  "A file in the dlss folder is not from the tested NVIDIA release (Streamline 2.14.16)" = "Файл в папке dlss не из проверенного выпуска NVIDIA (Streamline 2.14.16)"
  "DLSS did not start (the log says why)" = "DLSS не запустился (причина в журнале)"
  "A graphics card the game may use cannot run DLSS" = "Видеокарта, которую может выбрать игра, не поддерживает DLSS"
-@@ -267,7 +820,7 @@ name = "Русский"
+@@ -267,7 +828,7 @@ name = "Русский"
  "Needs vsync off" = "Нужна выключенная вертикальная синхронизация"
  "Needs DLSS frame generation" = "Нужна генерация кадров DLSS"
  "Frames made between the real ones: smoother motion, input a little later. FSR 3.1 needs FSR upscaling; DLSS an RTX 40 or newer. Not in the original." = "Кадры между настоящими: движение плавнее, отклик чуть позже. FSR 3.1 нужно масштабирование FSR, DLSS — RTX 40 или новее. Нет в оригинале."
@@ -4392,7 +4523,7 @@ index 69dc72c..b8bb821 100644
  "{choice} at a limit of {limit}: {real} real frames a second, which can feel choppy. Fewer generated frames, or a limit up to the display's refresh rate, give more." = "{choice} при пределе {limit}: {real} настоящих кадров в секунду, это может выглядеть рывками. Меньше сгенерированных кадров или предел до частоты экрана дадут больше."
  "Controls" = "Управление"
  "HUD colour" = "Цвет HUD"
-@@ -296,7 +849,7 @@ name = "Русский"
+@@ -296,7 +857,7 @@ name = "Русский"
  "Back" = "Назад"
  "Defaults" = "По умолчанию"
  "Warning" = "Внимание"
@@ -4401,7 +4532,7 @@ index 69dc72c..b8bb821 100644
  "Are you sure you want to quit?" = "Вы действительно хотите выйти?"
  "Main Menu" = "Главное меню"
  "Exit Game" = "Выйти из игры"
-@@ -318,7 +871,7 @@ name = "Русский"
+@@ -318,7 +879,7 @@ name = "Русский"
  "Cross" = "Крест"
  "Arrows" = "Стрелки"
  "Amber" = "Янтарный"
@@ -4410,7 +4541,7 @@ index 69dc72c..b8bb821 100644
  "Blue" = "Синий"
  "White" = "Белый"
  "Custom" = "Свой"
-@@ -345,7 +898,7 @@ name = "Русский"
+@@ -345,7 +906,7 @@ name = "Русский"
  "Downloading DLSS… {percent}%" = "Загрузка DLSS… {percent}%"
  "Upscaling by NVIDIA Corporation, through NVIDIA Streamline" = "Масштабирование: NVIDIA Corporation, через NVIDIA Streamline"
  "Download DLSS" = "Скачать DLSS"
@@ -4419,7 +4550,7 @@ index 69dc72c..b8bb821 100644
  "NVIDIA's RTX SDKs licence for nvngx_dlss.dll and nvngx_dlssg.dll" = "Лицензия NVIDIA RTX SDK для nvngx_dlss.dll и nvngx_dlssg.dll"
  "Lines {first} to {last} of {total}. PgUp, PgDn, the arrow keys or the mouse wheel scroll." = "Строки {first}-{last} из {total}. Прокрутка: PgUp, PgDn, стрелки или колесо мыши."
  "I accept starts the download; the game goes on meanwhile." = "«Принимаю» начинает загрузку; игра тем временем продолжается."
-@@ -358,11 +911,11 @@ name = "Русский"
+@@ -358,11 +919,11 @@ name = "Русский"
  "Checking the files..." = "Проверка файлов..."
  "Putting the files in the dlss folder..." = "Файлы кладутся в папку dlss..."
  "{fetched} MB of {total} MB" = "{fetched} МБ из {total} МБ"
@@ -4433,7 +4564,7 @@ index 69dc72c..b8bb821 100644
  "Installed in {folder}." = "Установлено в {folder}."
  "Close" = "Закрыть"
  "DLSS was not downloaded" = "DLSS не скачан"
-@@ -370,7 +923,7 @@ name = "Русский"
+@@ -370,7 +931,7 @@ name = "Русский"
  "GitHub answered with an error (HTTP {status})." = "GitHub ответил ошибкой (HTTP {status})."
  "What GitHub sent was not NVIDIA's expected archive; nothing was kept." = "GitHub прислал не тот архив NVIDIA, что ожидался; ничего не сохранено."
  "{name} did not match the tested release; nothing was kept." = "{name} не совпал с проверенным выпуском; ничего не сохранено."
@@ -4442,7 +4573,7 @@ index 69dc72c..b8bb821 100644
  "The dlss folder already holds {name}, which was left as it is: remove it, or copy the files by hand." = "В папке dlss уже есть {name}, он оставлен как есть: удалите его или скопируйте файлы вручную."
  "The files could not be written to the dlss folder." = "Не удалось записать файлы в папку dlss."
  "The download stopped on an internal error; the log says more." = "Загрузка остановилась из-за внутренней ошибки; подробности в журнале."
-@@ -406,7 +959,7 @@ name = "Русский"
+@@ -406,7 +967,7 @@ name = "Русский"
  # [design, the menu overhaul (docs/design/settings-page.md); engine/nvf-play/src/settings_layout.rs,
  # pause.rs] The settings page's categories, the Tweaks tab's groups and categories, the page's
  # own words and the Menu font row (owner 2026-11-16: the page read in English and as ? in Russian).
@@ -4451,7 +4582,7 @@ index 69dc72c..b8bb821 100644
  "Frame Rate" = "Частота кадров"
  "Upscaling and Anti-Aliasing" = "Масштабирование и сглаживание"
  "Frame Generation and Latency" = "Генерация кадров и задержка"
-@@ -431,22 +984,22 @@ name = "Русский"
+@@ -431,22 +992,22 @@ name = "Русский"
  "World Interaction" = "Взаимодействие с миром"
  "Quick Loot" = "Быстрый лут"
  "Enabled" = "Включено"
@@ -4479,7 +4610,7 @@ index 69dc72c..b8bb821 100644
  "Search (a body or container)" = "Обыскать"
  "Empty" = "Пусто"
  "ITEM" = "ПРЕДМЕТ"
-@@ -457,7 +1010,7 @@ name = "Русский"
+@@ -457,7 +1018,7 @@ name = "Русский"
  "Report a Bug" = "Сообщить об ошибке"
  "Previous Category" = "Предыдущая категория"
  "Next Category" = "Следующая категория"
@@ -4488,7 +4619,7 @@ index 69dc72c..b8bb821 100644
  "Which group of tweaks the list shows: Enter or a click opens the groups, Left and Right step. The search finds every tweak." = "Какую группу твиков показывает список: Enter или щелчок открывает группы, Влево и Вправо листают. Поиск находит любой твик."
  "Category" = "Категория"
  "Press a key..." = "Нажмите клавишу..."
-@@ -470,9 +1023,9 @@ name = "Русский"
+@@ -470,9 +1031,9 @@ name = "Русский"
  "Vertical Sensitivity" = "Вертикальная чувствительность"
  "Aim Sensitivity" = "Чувствительность при прицеливании"
  "Menu font" = "Шрифт меню"
@@ -4500,7 +4631,7 @@ index 69dc72c..b8bb821 100644
  "Quality of Life" = "Удобство"
  "Menus" = "Меню"
  "Cheats" = "Читы"
-@@ -530,23 +1083,200 @@ name = "Русский"
+@@ -530,23 +1091,200 @@ name = "Русский"
  # [design, #2014, #2317, #2662, #2688, #2149, #2169, #2403] Rows main registers without a Russian line.
  "On: when choices appear the view returns to the speaker (with the close-up off). Needs \"Turn to Each Other\"." = "Вкл.: когда появляются варианты ответа, вид возвращается к собеседнику (при выключенном приближении). Нужен «Поворот друг к другу в диалоге»."
  "Grass fires" = "Пожары в траве"

@@ -13,6 +13,9 @@ public final class NativeInput {
     /** One character typed into the console bar (Android's keyboard commits text, not keys). */
     public static native void typeChar(int codePoint);
 
+    /** The render height the player picked in the game's settings (0 the screen's own), or -1. */
+    public static native int renderHeightAsk();
+
     /** A whole line for the console: its characters, then Enter. */
     public static void typeLine(String line) {
         try {
