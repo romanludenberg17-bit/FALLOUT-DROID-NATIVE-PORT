@@ -293,6 +293,8 @@ public final class ModManager {
                     throw new IOException("Реплейсеры тел и одежды доступны на Snapdragon 7+ Gen 2 и мощнее (ваш чип: " + r.detail + ")");
                 case ArchiveInstaller.ERR_RAR:
                     throw new IOException("Архивы .rar не поддерживаются — перепакуйте в .zip или .7z");
+                case ArchiveInstaller.ERR_LAYOUT:
+                    throw new IOException("В архиве нет папок Data (meshes, textures…) — только варианты; распакуйте нужный вариант по инструкции мода");
                 case ArchiveInstaller.ERR_EMPTY:
                     throw new IOException("В архиве не найдено файлов для папки Data");
                 default:

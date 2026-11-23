@@ -1,5 +1,16 @@
 # Fallout Droid Native — CHANGELOG
 
+## 2.0.0-alpha43 (342)
+- No Pip-Boy warm-up under a phone's loading screen (its screen camera put away was followed
+  by a lost GPU device ~2 s later on Adreno 8xx).
+- A child worldspace with Use Land Data takes the parent's land on every square, its own
+  never read, as the original does (TESWorldSpace::FindParentFile, f3_decomp) — FO3 Megaton.
+- Mod installer: RAR 1.5–4 (junrar), an archive inside an archive, archives without Data
+  folders refused with a message instead of being put loose in Data.
+
+## Fallout Droid NV Classic 1.3.4 (30) — the static-recompile port
+- API tracing opt-in again (/sdcard/FalloutDroidNV/trace), off by default.
+
 ## 2.0.0-alpha42 (341)
 - Pipeline prewarm off on phones: every mesh of the loaded cells was drawn unculled under the
   loading screen (frames of 11 s on an 8 Elite, a 61 s screen, then a lost GPU device).

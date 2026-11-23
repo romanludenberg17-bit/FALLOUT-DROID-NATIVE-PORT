@@ -1,8 +1,8 @@
 plugins { id 'com.android.application' }
 
 // Version: bump on every release (see PORT_PROGRESS.md).
-def fdVersionName = "2.0.0-alpha42"
-def fdVersionCode = 341
+def fdVersionName = "2.0.0-alpha43"
+def fdVersionCode = 342
 
 android {
     namespace 'com.wastelanddroid'
@@ -41,4 +41,6 @@ dependencies {
     // [nvport] .7z mod archives (LZMA/LZMA2): commons-compress + xz.
     implementation 'org.apache.commons:commons-compress:1.27.1'
     implementation 'org.tukaani:xz:1.10'
+    // [nvport] .rar mod archives (RAR 1.5-4.x; RAR5 is not read).
+    implementation 'com.github.junrar:junrar:7.5.5'
 }

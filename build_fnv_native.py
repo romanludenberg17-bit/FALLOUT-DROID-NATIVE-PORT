@@ -17,8 +17,8 @@ import json, lzma, os, shutil, struct, subprocess, sys, tempfile, zipfile
 from pathlib import Path
 
 # ---------------------------------------------------------------- version ----
-VERSION_NAME = "1.3.3"
-VERSION_CODE = 29
+VERSION_NAME = "1.3.4"
+VERSION_CODE = 30
 
 BASE = Path(__file__).resolve().parent
 WORK = BASE / "FalloutNVNativeWork"

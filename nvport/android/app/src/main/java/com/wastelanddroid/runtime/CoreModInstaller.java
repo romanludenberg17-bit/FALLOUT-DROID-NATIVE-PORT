@@ -212,7 +212,7 @@ public class CoreModInstaller {
                 for (File file3 : fileArrListFiles) {
                     if (file3.isFile()) {
                         String name = file3.getName();
-                        if (name.toLowerCase().endsWith(".zip") || name.toLowerCase().endsWith(".7z")) {
+                        if (name.toLowerCase().endsWith(".zip") || name.toLowerCase().endsWith(".7z") || name.toLowerCase().endsWith(".rar")) {
                             if (i2 != 0) {
                                 sb.append(",");
                             }

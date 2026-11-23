@@ -96,7 +96,7 @@ index 7fe5f8c..83aa51d 100644
  /// dimmer at byte 56). HDR at bytes 0-55: eye adapt speed, blur radius, blur passes,
  /// emissive mult, target lum, upper lum clamp, bright scale, bright clamp, lum ramp no
 diff --git a/crates/fnv-world/src/index.rs b/crates/fnv-world/src/index.rs
-index 940b3be..feaee69 100644
+index 940b3be..8b2b68a 100644
 --- a/crates/fnv-world/src/index.rs
 +++ b/crates/fnv-world/src/index.rs
 @@ -125,6 +125,11 @@ pub struct WorldIndex {
@@ -111,7 +111,7 @@ index 940b3be..feaee69 100644
  pub mod parent_use {
      pub const LAND: u16 = 1 << 0;
      pub const LOD: u16 = 1 << 1;
-@@ -252,6 +257,9 @@ impl WorldIndex {
+@@ -252,12 +257,17 @@ impl WorldIndex {
                      w.climate = p.climate.or(w.climate);
                  }
              }
@@ -121,6 +121,17 @@ index 940b3be..feaee69 100644
              if land {
                  let squares: Vec<((i32, i32), u32)> = self.worldspaces[&child].grid.iter().map(|(&g, &c)| (g, c)).collect();
                  for (g, cell) in squares {
+-                    if self.cells.get(&cell).is_some_and(|c| c.land.is_some()) {
+-                        continue;
+-                    }
++                    // [nvport] The original reads a child's land from its parent's files
++                    // only when Use Land Data is set, its own LAND never consulted
++                    // [decompiled: FO3/FNV TESWorldSpace::FindParentFile @0x00585ee0,
++                    // momusdigital/f3_decomp]: the parent's land wins on every square it
++                    // has one (FO3 Megaton's own land differs on 2 squares).
+                     let Some(theirs) = p.grid.get(&g).and_then(|c| self.cells.get(c)).and_then(|c| c.land) else { continue };
+                     if let Some(c) = self.cells.get_mut(&cell) {
+                         c.land = Some(theirs);
 diff --git a/crates/fnv-world/src/radio.rs b/crates/fnv-world/src/radio.rs
 index e6c8db0..f02aa9f 100644
 --- a/crates/fnv-world/src/radio.rs
@@ -3471,6 +3482,22 @@ index 0000000..46e7d2e
 +        }
 +    }
 +}
+diff --git a/engine/nvforever/src/pipboy_arm.rs b/engine/nvforever/src/pipboy_arm.rs
+index 8d11ee6..69303a3 100644
+--- a/engine/nvforever/src/pipboy_arm.rs
++++ b/engine/nvforever/src/pipboy_arm.rs
+@@ -229,7 +229,10 @@ fn warm_up(params: WarmUp) {
+         loading.pipboy_warming = pip.warming.is_some() || state.teardown;
+         return;
+     }
+-    let covered = loading.starting() && !loading.world_held() && !state.start_done && root.is_some();
++    // [nvport] No warm-up under a phone's loading screen: its screen camera drawn into a
++    // picture and put away was each time followed, about 2 s later, by a lost device on
++    // Adreno 8xx (players' reports, alpha41/42). The first raise warms instead.
++    let covered = !cfg!(target_os = "android") && loading.starting() && !loading.world_held() && !state.start_done && root.is_some();
+     // [design: #1803] Teardown removes the hidden rig from retained phases. Verify
+     // the first real submission too, even when its pipelines were warmed at start.
+     let cold = !state.raise_released && root.is_some() && pip.phase == Phase::Raising && pip.frame == Frame::Device && (!pip.warmed || !state.first_open_done);
 diff --git a/engine/nvforever/src/pipeline_prewarm.rs b/engine/nvforever/src/pipeline_prewarm.rs
 index 681a80b..279a95f 100644
 --- a/engine/nvforever/src/pipeline_prewarm.rs

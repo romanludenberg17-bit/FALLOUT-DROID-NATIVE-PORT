@@ -27,7 +27,7 @@ import org.apache.commons.compress.archivers.sevenz.SevenZFile;
  */
 public final class ArchiveInstaller {
     public static final String OK = "OK", ERR = "ERR", ERR_RAR = "ERR_RAR", ERR_HTML = "ERR_HTML",
-            ERR_EMPTY = "ERR_EMPTY", ERR_REPLACER = "ERR_REPLACER", ERR_FORMAT = "ERR_FORMAT";
+            ERR_EMPTY = "ERR_EMPTY", ERR_REPLACER = "ERR_REPLACER", ERR_FORMAT = "ERR_FORMAT", ERR_LAYOUT = "ERR_LAYOUT";
 
     public static final class Result {
         public String code = ERR;
@@ -102,6 +102,36 @@ public final class ArchiveInstaller {
                             v.entry(ze.getName().replace('\\', '/'), in);
                         }
                     }
+                }
+            }
+        };
+    }
+
+    /** RAR 1.5-4.x (junrar); a RAR5 archive fails to open and is reported as such. */
+    private static Archive rar(File f) {
+        return new Archive() {
+            public List<String> names() throws IOException {
+                List<String> out = new ArrayList<>();
+                try (com.github.junrar.Archive z = new com.github.junrar.Archive(f)) {
+                    for (com.github.junrar.rarfile.FileHeader h : z.getFileHeaders()) {
+                        if (!h.isDirectory()) out.add(h.getFileName().replace('\\', '/'));
+                    }
+                } catch (com.github.junrar.exception.RarException e) {
+                    throw new IOException("RAR: " + e.getMessage(), e);
+                }
+                return out;
+            }
+
+            public void each(Visitor v) throws IOException {
+                try (com.github.junrar.Archive z = new com.github.junrar.Archive(f)) {
+                    for (com.github.junrar.rarfile.FileHeader h : z.getFileHeaders()) {
+                        if (h.isDirectory()) continue;
+                        try (InputStream in = z.getInputStream(h)) {
+                            v.entry(h.getFileName().replace('\\', '/'), in);
+                        }
+                    }
+                } catch (com.github.junrar.exception.RarException e) {
+                    throw new IOException("RAR: " + e.getMessage(), e);
                 }
             }
         };
@@ -184,6 +214,15 @@ public final class ArchiveInstaller {
         return sb.toString();
     }
 
+    /** Whether any entry names a file Data takes at its own level (a plugin or archive). */
+    private static boolean hasDataFiles(List<String> names) {
+        for (String n : names) {
+            String l = n.toLowerCase(Locale.ROOT);
+            if (l.endsWith(".esp") || l.endsWith(".esm") || l.endsWith(".bsa") || l.endsWith(".dds") || l.endsWith(".nif")) return true;
+        }
+        return false;
+    }
+
     /** Body, skeleton or worn-model files (meshes/textures of characters, armor, clothes). */
     public static boolean isBodyOrArmorReplacer(List<String> dataPaths) {
         for (String p : dataPaths) {
@@ -208,7 +247,7 @@ public final class ArchiveInstaller {
             switch (kind) {
                 case "zip": a = zip(archive); break;
                 case "7z": a = sevenZ(archive); break;
-                case "rar": r.code = ERR_RAR; return r;
+                case "rar": a = rar(archive); break;
                 case "html": r.code = ERR_HTML; return r;
                 default: r.code = ERR_FORMAT; return r;
             }
@@ -216,6 +255,33 @@ public final class ArchiveInstaller {
             if (names.isEmpty()) {
                 r.code = ERR_EMPTY;
                 return r;
+            }
+            // An archive whose payload is another archive (a .7z or .zip inside, nothing for
+            // Data beside it, e.g. "MEGATON_TEX_PACK_DEFAULT_RES.7z" + a read-me): that one.
+            if (dataRoot(names).isEmpty() && !hasDataFiles(names)) {
+                String inner = null;
+                for (String n : names) {
+                    String l = n.toLowerCase(Locale.ROOT);
+                    if (l.endsWith(".7z") || l.endsWith(".zip") || l.endsWith(".rar")) {
+                        inner = inner == null ? n : "";
+                    }
+                }
+                if (inner != null && !inner.isEmpty()) {
+                    final String want = inner;
+                    File tmp = new File(archive.getParentFile(), archive.getName() + ".inner");
+                    a.each((name, in) -> {
+                        if (name.equals(want)) {
+                            try (FileOutputStream fo = new FileOutputStream(tmp)) {
+                                copy(in, fo);
+                            }
+                        }
+                    });
+                    try {
+                        return install(tmp, dataDir, backupDir);
+                    } finally {
+                        tmp.delete();
+                    }
+                }
             }
             // A FOMOD installer: its defaults.
             String fomodName = null;
@@ -251,6 +317,19 @@ public final class ArchiveInstaller {
             if (plan == null) {
                 plan = new HashMap<>();
                 String root = dataRoot(names);
+                // No Data folders anywhere (only option folders with bare textures): where
+                // they go is the author's read-me's to say; nothing is put loose in Data.
+                if (root.isEmpty()) {
+                    boolean topLevel = false;
+                    for (String n : names) {
+                        String first = n.split("/")[0];
+                        if (dataLike(first, !n.contains("/"))) topLevel = true;
+                    }
+                    if (!topLevel) {
+                        r.code = ERR_LAYOUT;
+                        return r;
+                    }
+                }
                 for (String n : names) {
                     String l = n.toLowerCase(Locale.ROOT);
                     if (l.contains("__macosx/") || l.endsWith(".ds_store") || l.startsWith("fomod/") || l.contains("/fomod/")) continue;
@@ -318,7 +397,8 @@ public final class ArchiveInstaller {
             if (!r.files.isEmpty()) r.needsBodyTextures = missingBodyTextures(r.files, dataDir);
             return r;
         } catch (Throwable t) {
-            r.code = ERR;
+            // A RAR the reader cannot open (RAR5): its own message.
+            r.code = String.valueOf(t).contains("RAR") ? ERR_RAR : ERR;
             r.detail = String.valueOf(t);
             return r;
         }

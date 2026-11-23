@@ -5884,8 +5884,9 @@ window.__fdExternalModDone = function(res) {
     if (res === 'NO_DIR') msg = 'Сначала выберите папку Fallout: New Vegas!';
     else if (res === 'ERR_REPLACER') msg = 'Реплейсеры тел и одежды доступны на Snapdragon 7+ Gen 2 и мощнее' + (window.__fdChip ? ' (ваш чип: ' + window.__fdChip + ')' : '') + '.';
     else if (res === 'ERR_EMPTY') msg = 'В архиве не найдено файлов для папки Data.';
+    else if (res === 'ERR_LAYOUT') msg = 'В архиве нет папок Data (meshes, textures…), только варианты — распакуйте нужный по инструкции мода.';
     else if (res === 'ERR_FORMAT') msg = 'Неизвестный формат архива — нужен .zip или .7z.';
-    else if (res === 'ERR_RAR') msg = 'Этот файл в формате .rar — нужен .zip или .7z архив.';
+    else if (res === 'ERR_RAR') msg = 'Этот .rar в формате RAR5 — перепакуйте в .zip или .7z.';
     else if (res === 'ERR_HTML') msg = 'Войдите в аккаунт Nexus Mods внутри окна и нажмите Slow Download.';
     if (typeof showToast === 'function') showToast(msg);
   }
