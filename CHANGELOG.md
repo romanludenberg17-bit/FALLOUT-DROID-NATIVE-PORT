@@ -1,5 +1,27 @@
 # Fallout Droid Native — CHANGELOG
 
+## 2.0.0-alpha48 (347)
+Built; the script engine's host tests pass (194 of 194); the NVCS skeletons parse with the
+engine's NIF reader. Nothing below verified on a device yet.
+- alpha47's CPU mesh preparation on Adreno 8xx is kept: the tester's Fallout 3 runs since
+  then start and play without a lost GPU device (alpha8-46 lost it at the main menu).
+- Impact decals: projected again (Bevy's forward decals, clipped by the depth they land on)
+  instead of alpha24-47's flat quads lifted off the surface, which stood off curved bodies
+  as squares. Console `fddecals flat|projected` chooses for the next start.
+- Water: the run log says once whether the water pipeline reads the depth prepass
+  (`water: pipeline DEPTH_PREPASS …`); without it the water takes everything behind it
+  for open sky and draws its deep colour opaque (the turquoise "glass").
+- Name menu (both games): an on-screen keyboard under the box on phones, drawn like the
+  box's own Ok button (its font, the HUD colour: amber in New Vegas, green in Fallout 3,
+  bracket outlines): digits, ЙЦУКЕН / QWERTY (a key switches), space, hyphen, rub out.
+- Fallout 3 keeps its crosshair while aiming, as the original (its aim only zooms).
+- Script extenders: mods see FOSE 1.3 beta 2 (its last release; GetFOSEVersion/Revision/Beta
+  were missing) and xNVSE 6 at revision and beta 99 (GetNVSEVersionFull 6.9999), so "at
+  least" checks pass. Functions NVForever does not have stay logged by name.
+- A dead actor made a radio (an Enclave eyebot's broadcast) goes silent.
+- Run log: every body part data's explode chances and flags, once, at the first
+  dismember roll (to compare a robot's with a human's; the eyebot's wreck did not explode).
+
 ## 2.0.0-alpha47 (346)
 Built; unit tests of the new texture shrink and GPU family code pass. Nothing verified on a
 device: no Android phone or game data here.

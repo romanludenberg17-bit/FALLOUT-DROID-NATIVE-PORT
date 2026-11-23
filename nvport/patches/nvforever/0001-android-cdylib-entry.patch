@@ -66,6 +66,46 @@ index bf36d9e..5968bf0 100644
      }
  }
  
+diff --git a/crates/fnv-script/src/vm.rs b/crates/fnv-script/src/vm.rs
+index d7cea9d..11a2607 100644
+--- a/crates/fnv-script/src/vm.rs
++++ b/crates/fnv-script/src/vm.rs
+@@ -2980,11 +2980,18 @@ impl Vm<'_, '_> {
+             // [decision: the owner, 2026-10-26; observed: 6 / 4 / 9 split as version,
+             // revision, beta in the original]. A plugin without a module here is
+             // absent: IsPluginInstalled 0, GetPluginVersion -1 [documented: -1 when absent].
++            // [nvport] Mods always see the newest extender (the owner, alpha48): xNVSE 6 with
++            // a revision and a beta above any release, so a mod's "at least 6.x.y" check
++            // passes. The major version stays 6 (mods test `GetNVSEVersion == 6` too).
++            // Functions newer than NVForever's are still absent and logged by name.
+             "getnvseversion" => XVal::Num(6.0),
+-            "getnvserevision" => XVal::Num(4.0),
+-            // [observed: GetNVSEBeta 9 under 6.4.9, the third number; owner 2026-10-26:
+-            // target 6.4.9].
+-            "getnvsebeta" => XVal::Num(9.0),
++            "getnvserevision" => XVal::Num(99.0),
++            "getnvsebeta" => XVal::Num(99.0),
++            // [nvport] Fallout 3's FOSE: 1.3 beta 2, its last release (mods check
++            // GetFOSEVersion before calling its functions; NVForever builds them by name).
++            "getfoseversion" => XVal::Num(1.0),
++            "getfoserevision" => XVal::Num(3.0),
++            "getfosebeta" => XVal::Num(2.0),
+             // JIP LN and the other plugins whose functions NVForever builds
+             // (`jip::PLUGINS`): reported installed at the version their functions follow.
+             "isplugininstalled" | "getpluginversion" => {
+diff --git a/crates/fnv-script/src/vm/jip.rs b/crates/fnv-script/src/vm/jip.rs
+index eea137f..0b3a8ef 100644
+--- a/crates/fnv-script/src/vm/jip.rs
++++ b/crates/fnv-script/src/vm/jip.rs
+@@ -293,7 +293,7 @@ impl Vm<'_, '_> {
+             // owner's install, though its page says 0; GetNVSEVersionFull 6.49 on xNVSE
+             // 6.4.9].
+             "getlnversion" | "getjiplnversion" => num(JIP_VERSION),
+-            "getnvseversionfull" => num(6.49),
++            "getnvseversionfull" => num(6.9999), // [nvport] as GetNVSERevision/Beta 99 (vm.rs)
+             // [documented: GetLocalGravity; observed: X 0, Z -98.1] SetLocalGravityVector is
+             // not built, so the cell's gravity is the default.
+             "getlocalgravity" => {
 diff --git a/crates/fnv-world/src/imagespace.rs b/crates/fnv-world/src/imagespace.rs
 index 7fe5f8c..83aa51d 100644
 --- a/crates/fnv-world/src/imagespace.rs
@@ -738,8 +778,186 @@ index 4f6f70c..206bb01 100644
  #[cfg(test)]
  mod tests {
      use super::first_person_texture;
+diff --git a/engine/nvf-play/src/chargen.rs b/engine/nvf-play/src/chargen.rs
+index 2f5989d..90881f7 100644
+--- a/engine/nvf-play/src/chargen.rs
++++ b/engine/nvf-play/src/chargen.rs
+@@ -51,7 +51,7 @@ use fnv_game::game::menus;
+ use fnv_game::Game;
+ use fnv_sim::FormId;
+ use lists::{ListButton, ListMenu, ListRow, ListView};
+-use name::{NameMenu, OkButton};
++use name::{KeyCap, NameMenu, OkButton};
+ use nvf_assets::GameData;
+ 
+ /// Whether a script's menu is drawn by this module (else by `crate::script_hud`).
+@@ -349,6 +349,7 @@ fn input(
+     rows: Query<(&PointerState, &ListRow), Changed<PointerState>>,
+     buttons: Query<(&PointerState, &ListButton), Changed<PointerState>>,
+     ok: Query<&PointerState, (Changed<PointerState>, With<OkButton>)>,
++    keycaps: Query<(&PointerState, &KeyCap), Changed<PointerState>>,
+     script: Option<ResMut<ScriptState>>,
+     sim: Option<ResMut<SimState>>,
+     mut sounds: MessageWriter<UiSound>,
+@@ -377,6 +378,7 @@ fn input(
+         ops.push((op, "test aid NVF_PLAY_TEST_CHARGEN"));
+     }
+     let mut hover_ok = None;
++    let mut relayout = false;
+     let mut hover_button = Vec::new();
+     match st.open.as_ref() {
+         Some(OpenMenu::Name(m)) => {
+@@ -401,6 +403,26 @@ fn input(
+                     ops.push((Op::Done, "click"));
+                 }
+             }
++            // [nvport] The on-screen keyboard's keys (chargen/name.rs `KeyCap`).
++            for (i, cap) in &keycaps {
++                if *i != PointerState::Pressed {
++                    continue;
++                }
++                match *cap {
++                    KeyCap::Char(ch) => {
++                        let t = name::key_text(ch, &m.text);
++                        if fnv_util::text::encodable(&t) {
++                            ops.push((Op::Type(t), "on-screen key"));
++                        }
++                    }
++                    KeyCap::Space => ops.push((Op::Type(" ".into()), "on-screen key")),
++                    KeyCap::Back => ops.push((Op::Backspace, "on-screen key")),
++                    KeyCap::Layout => {
++                        name::toggle_layout();
++                        relayout = true;
++                    }
++                }
++            }
+         }
+         Some(OpenMenu::List(m)) => {
+             // Drawn from its tiles the rows' place and the scroll are the drawing's; while it
+@@ -485,6 +507,9 @@ fn input(
+     }
+     // The pointer over a button draws its box.
+     let st: &mut ChargenMenus = &mut st;
++    if relayout {
++        st.dirty = true;
++    }
+     match st.open.as_mut() {
+         Some(OpenMenu::Name(m)) => {
+             if let Some(over) = hover_ok.filter(|&o| o != m.hover_ok) {
+diff --git a/engine/nvf-play/src/chargen/name.rs b/engine/nvf-play/src/chargen/name.rs
+index 2ea26c6..bb9eb07 100644
+--- a/engine/nvf-play/src/chargen/name.rs
++++ b/engine/nvf-play/src/chargen/name.rs
+@@ -79,6 +79,97 @@ impl ScriptInput {
+ #[derive(Component, Clone, Copy, Debug)]
+ pub struct OkButton;
+ 
++/// [nvport] A key of the on-screen keyboard drawn under the box on a touch screen (a
++/// phone has no keys; the system keyboard is not the game's look). The keys are drawn as
++/// the box's Ok button is: its font, its amber, a bracket outline [design, the owner:
++/// "in the game's style, from the same font and textures as the menus"].
++#[derive(Component, Clone, Copy, Debug, PartialEq)]
++pub enum KeyCap {
++    Char(char),
++    Back,
++    Space,
++    Layout,
++}
++
++/// The keyboard's layout: 0 not chosen yet, 1 Latin, 2 Cyrillic (the start: Cyrillic
++/// with the Cyrillic code page, `NVF_CODE_PAGE=1251`).
++static LAYOUT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
++
++pub fn cyrillic() -> bool {
++    use std::sync::atomic::Ordering::Relaxed;
++    match LAYOUT.load(Relaxed) {
++        0 => {
++            let cyr = std::env::var("NVF_CODE_PAGE").is_ok_and(|v| v.trim() == "1251");
++            LAYOUT.store(if cyr { 2 } else { 1 }, Relaxed);
++            cyr
++        }
++        v => v == 2,
++    }
++}
++
++pub fn toggle_layout() {
++    let next = if cyrillic() { 1 } else { 2 };
++    LAYOUT.store(next, std::sync::atomic::Ordering::Relaxed);
++}
++
++/// Whether the keyboard is drawn: on Android, or with `NVF_ONSCREEN_KEYS=1`.
++pub fn on_screen_keys() -> bool {
++    cfg!(target_os = "android") || std::env::var("NVF_ONSCREEN_KEYS").is_ok_and(|v| v == "1")
++}
++
++const ROWS_LATIN: [&str; 4] = ["1234567890", "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"];
++const ROWS_CYRILLIC: [&str; 4] = ["1234567890", "ЙЦУКЕНГШЩЗХ", "ФЫВАПРОЛДЖЭ", "ЯЧСМИТЬБЮЪ"];
++/// A key's side, the room between keys and between the box and the keys (menu units).
++const KEY: f32 = 62.0;
++const KEY_GAP: f32 = 8.0;
++const KEYS_BELOW: f32 = 24.0;
++
++/// What a key types: a letter in lower case after the first, as a name is written.
++pub fn key_text(cap: char, so_far: &str) -> String {
++    if so_far.is_empty() || so_far.ends_with(' ') || so_far.ends_with('-') {
++        cap.to_string()
++    } else {
++        cap.to_lowercase().collect()
++    }
++}
++
++fn spawn_keys(p: &mut ChildSpawnerCommands, m: &NameMenu, c: &mut Ctx, size: Vec2) {
++    let bright = amber(255.0);
++    let frame = amber(150.0);
++    let digits_only = m.script.as_ref().is_some_and(|s| s.digits_only);
++    let rows: &[&str] = if digits_only { &["1234567890"] } else if cyrillic() { &ROWS_CYRILLIC } else { &ROWS_LATIN };
++    let mut key = |p: &mut ChildSpawnerCommands, c: &mut Ctx, x: f32, y: f32, w: f32, label: &str, cap: KeyCap| {
++        c.outline(p, x, y, w, KEY, frame);
++        c.text(p, Which::Body, label, x + w / 2.0, y + (KEY - BODY_H) / 2.0, Align::Centre, bright);
++        p.spawn((Button, cap, at(x, y, w, KEY)));
++    };
++    let mut y = size.y + KEYS_BELOW;
++    for (i, row) in rows.iter().enumerate() {
++        let caps: Vec<char> = row.chars().collect();
++        let last = i + 1 == rows.len();
++        let extra = if last { 1.5 * KEY + KEY_GAP } else { 0.0 };
++        let w = caps.len() as f32 * (KEY + KEY_GAP) - KEY_GAP + extra;
++        let mut x = (size.x - w) / 2.0;
++        for ch in caps {
++            key(p, c, x, y, KEY, &ch.to_string(), KeyCap::Char(ch));
++            x += KEY + KEY_GAP;
++        }
++        if last {
++            key(p, c, x, y, 1.5 * KEY, "<", KeyCap::Back);
++        }
++        y += KEY + KEY_GAP;
++    }
++    if !digits_only {
++        // The bottom row: the layout, a space and a hyphen.
++        let (lw, sw, hw) = (1.5 * KEY, 5.0 * KEY, KEY);
++        let w = lw + sw + hw + 2.0 * KEY_GAP;
++        let x = (size.x - w) / 2.0;
++        key(p, c, x, y, lw, if cyrillic() { "EN" } else { "RU" }, KeyCap::Layout);
++        key(p, c, x + lw + KEY_GAP, y, sw, if cyrillic() { "Пробел" } else { "Space" }, KeyCap::Space);
++        key(p, c, x + lw + sw + 2.0 * KEY_GAP, y, hw, "-", KeyCap::Char('-'));
++    }
++}
++
+ impl NameMenu {
+     /// The menu offering `offered`, its words from the running game's strings (or
+     /// NVForever's labels alone without one).
+@@ -184,6 +275,9 @@ pub fn spawn(root: &mut ChildSpawnerCommands, m: &NameMenu, c: &mut Ctx) {
+         }
+         c.text(p, Which::Body, &m.ok, ok_x + ok_w - BUTTON_PAD, ok_y + BUTTON_PAD, Align::Right, color);
+         p.spawn((Button, OkButton, at(ok_x, ok_y, ok_w, ok_h)));
++        if on_screen_keys() {
++            spawn_keys(p, m, c, size);
++        }
+     });
+ }
+ 
 diff --git a/engine/nvf-play/src/console.rs b/engine/nvf-play/src/console.rs
-index 4e8f628..a44f48f 100644
+index 4e8f628..139afb6 100644
 --- a/engine/nvf-play/src/console.rs
 +++ b/engine/nvf-play/src/console.rs
 @@ -720,6 +720,7 @@ fn typing(
@@ -750,7 +968,7 @@ index 4e8f628..a44f48f 100644
                      c.print("Quests and info: sq, sqt, movetoqt [n], sqs <quest>, sqv <quest>, sv, caqs, inv, getavinfo <av>, setgs <setting> <value>, cam, qqq, advlevel (level up), poker [casino] (a poker table)");
                      c.print("Toggles: tcl (collision), tai (actors' AI), tdetect, tgm, tscr (scripts), tg (grass), ts (sky), tws (water), tt (trees), tlv (leaves), ToggleLODLand, ToggleNavmesh, tlik (head tracking), temo (emotions), tcg [radius] (collision shapes)");
                      c.print("bat <file> (console lines from a text file), rbat [file] (record lines for bat), scof [file] (write the console to a file), slpm [1-5] (a practice lock), [ref.]mfg expression|phoneme|modifier <id> <0-100>, mfg reset");
-@@ -777,6 +778,69 @@ fn typing(
+@@ -777,6 +778,81 @@ fn typing(
                  return;
              }
              // `bat <file>`: the file's lines run next, in order, as if typed.
@@ -805,6 +1023,18 @@ index 4e8f628..a44f48f 100644
 +                    )),
 +                }
 +            }
++            // [nvport] `fddecals projected|flat`: how impact decals are drawn from the next
++            // start (nvforever decals.rs).
++            "fddecals" => {
++                let file = std::env::var_os("NVFOREVER_HOME").map(|h| std::path::PathBuf::from(h).join("decals.txt"));
++                match (rest.trim(), file) {
++                    (m @ ("projected" | "flat"), Some(f)) => {
++                        let _ = std::fs::write(&f, m);
++                        c.print(format!("fddecals: {m} from the next start"));
++                    }
++                    _ => c.print("fddecals projected|flat"),
++                }
++            }
 +            "fxtest" => {
 +                FX_TEST.store(true, std::sync::atomic::Ordering::Relaxed);
 +                c.print("fxtest: three cards before the camera for 20 s: red opaque (left), green blended (middle), blue added (right)");
@@ -820,7 +1050,7 @@ index 4e8f628..a44f48f 100644
              "bat" => {
                  batches += 1;
                  let found = if batches > MAX_BATCHES { Err(format!("bat: more than {MAX_BATCHES} batch files on one line")) } else { batch_lines(rest, &batch_roots(data.as_deref())) };
-@@ -1067,6 +1131,12 @@ pub fn place_name(d: &PlayData, cell: u32) -> String {
+@@ -1067,6 +1143,12 @@ pub fn place_name(d: &PlayData, cell: u32) -> String {
  
  /// The player's Extra Console Details tweak: a selected reference's details add its
  /// base's model [design: docs/design/tweaks.md].
@@ -833,7 +1063,7 @@ index 4e8f628..a44f48f 100644
  static MODEL_DETAILS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
  
  /// Set by the Tweaks tab.
-@@ -1141,6 +1211,57 @@ pub fn describe(id: u32, d: &PlayData, sim: &SimState, rt: Option<&mut Runtime>)
+@@ -1141,6 +1223,57 @@ pub fn describe(id: u32, d: &PlayData, sim: &SimState, rt: Option<&mut Runtime>)
  }
  
  /// Where `coc <cell>` goes: the cell's COC spot (interiors and exterior cells alike).
@@ -998,6 +1228,32 @@ index 8d81a9d..dbd9c13 100644
      let line = first_line(face, s);
      let w = line.width * scale;
      let x = match align {
+diff --git a/engine/nvf-play/src/dismember.rs b/engine/nvf-play/src/dismember.rs
+index cd59334..1c88324 100644
+--- a/engine/nvf-play/src/dismember.rs
++++ b/engine/nvf-play/src/dismember.rs
+@@ -92,6 +92,21 @@ pub fn resolve(
+         };
+         let Some(data) = c.forms.body_parts.get(&data_id) else { continue };
+         let Some(part) = data.parts.get(k.part) else { continue };
++        // [nvport] Once per body part data: every part's explode chance and flags (BPND),
++        // to compare a robot's (an Enclave eyebot's wreck stayed whole) with a human's.
++        {
++            static SAID: std::sync::Mutex<Option<std::collections::HashSet<u32>>> = std::sync::Mutex::new(None);
++            if let Ok(mut said) = SAID.lock() {
++                if said.get_or_insert_with(Default::default).insert(data_id.0) {
++                    let list: Vec<String> = data
++                        .parts
++                        .iter()
++                        .map(|p| format!("{} explode {}% {:?}", p.name.as_deref().unwrap_or("?"), p.explodable_chance_percent, p.flags))
++                        .collect();
++                    info!("dismember: body part data {data_id}: {}", list.join("; "));
++                }
++            }
++        }
+         if rt.game.limb_gone(k.target, part.location()) {
+             continue;
+         }
 diff --git a/engine/nvf-play/src/interface.rs b/engine/nvf-play/src/interface.rs
 index 085d7ff..c1df072 100644
 --- a/engine/nvf-play/src/interface.rs
@@ -1355,10 +1611,25 @@ index 8c7cbf9..1266692 100644
  }
  
 diff --git a/engine/nvf-play/src/radio.rs b/engine/nvf-play/src/radio.rs
-index ce7bea4..afa1f08 100644
+index ce7bea4..e4497cb 100644
 --- a/engine/nvf-play/src/radio.rs
 +++ b/engine/nvf-play/src/radio.rs
-@@ -1253,6 +1253,7 @@ impl Plugin for RadioPlugin {
+@@ -908,6 +908,14 @@ fn play(
+         for (&actor, &station_ref) in &rt.game.radio.npc_radios {
+             let Some(base) = places.base_of(station_ref.0) else { continue };
+             let Some(s) = sim.world.peek(actor) else { continue };
++            // [nvport] A dead actor broadcasts nothing (an Enclave eyebot's radio went on
++            // from its wreck, a player's report).
++            if rt.game.is_dead(actor) {
++                if radio.silent.insert(actor.0) {
++                    info!("radio: {actor} is dead: silent");
++                }
++                continue;
++            }
+             let here = match (space, s.cell) {
+                 (Space::Interior(c), Some(cell)) => c == cell.0,
+                 (Space::World(w), Some(cell)) => pw.index.cells.get(&cell.0).and_then(|c| c.world) == Some(w),
+@@ -1253,6 +1261,7 @@ impl Plugin for RadioPlugin {
              .add_systems(Update, (pipboy_controls, play).chain().after(crate::PlaySet::Scripts))
              .add_systems(Last, (release_files, report));
          crate::save::add_save_hook(app, RECEIVED_SAVE_HOOK);
@@ -1366,7 +1637,7 @@ index ce7bea4..afa1f08 100644
      }
  }
  
-@@ -1274,6 +1275,36 @@ pub const RECEIVED_SAVE_HOOK: crate::save::SaveHook = crate::save::SaveHook {
+@@ -1274,6 +1283,36 @@ pub const RECEIVED_SAVE_HOOK: crate::save::SaveHook = crate::save::SaveHook {
      }),
  };
  
@@ -1404,7 +1675,7 @@ index ce7bea4..afa1f08 100644
  mod tests {
      use super::*;
 diff --git a/engine/nvf-play/src/reticle.rs b/engine/nvf-play/src/reticle.rs
-index 4cf8199..9cd994b 100644
+index 4cf8199..9ba9a5c 100644
 --- a/engine/nvf-play/src/reticle.rs
 +++ b/engine/nvf-play/src/reticle.rs
 @@ -541,7 +541,7 @@ fn draw(
@@ -1424,7 +1695,19 @@ index 4cf8199..9cd994b 100644
      ),
      data: Option<Res<GameData>>,
      mut images: ResMut<Assets<Image>>,
-@@ -666,7 +667,13 @@ fn draw(
+@@ -610,7 +611,10 @@ fn draw(
+     let reloading = tweaks.as_ref().is_some_and(|t| t.hide_crosshair_reloading) && anim.as_ref().is_some_and(|a| a.reload.is_some());
+     // The player's tweak keeps it down the iron sights (a scope still hides it) [design: docs/design/tweaks.md].
+     let keep = tweaks.as_ref().is_some_and(|t| t.crosshair_when_aiming);
+-    let sights = (sights.is_some_and(|s| s.0) && !keep) || scoped || reloading;
++    // [nvport] Fallout 3 keeps its crosshair while aiming, as the original (its aim only
++    // zooms the view; its weapon models have no sighting nodes to aim with).
++    let fo3 = std::env::var("NVPORT_GAME").is_ok_and(|g| g == "fo3");
++    let sights = (sights.is_some_and(|s| s.0) && !keep && !fo3) || scoped || reloading;
+     if sights != logged.2 {
+         logged.2 = sights;
+         info!("crosshair: {}", if !sights { "shown again" } else if scoped { "hidden by the scope" } else { "hidden down the true iron sights" });
+@@ -666,7 +670,14 @@ fn draw(
      // The player's tweaks: no crosshair in first or in third person (the prompt stays)
      // [design: docs/design/tweaks.md].
      let third = control.as_ref().is_some_and(|c| c.third_person_view());
@@ -1432,9 +1715,10 @@ index 4cf8199..9cd994b 100644
 +    // [nvport] Down the sights in first person, as the original: no crosshair while the view
 +    // zooms to the weapon's Sight FOV (the gun's own sights aim).
 +    // Fallout 3 has no iron sights (its aim only zooms the view): the crosshair stays there.
-+    // Both games: aiming in first person looks down the sights (true iron sights, Fallout 3
-+    // too), the crosshair gone.
-+    let sighting = !third && aim.as_ref().is_some_and(|a| a.share() > 0.05);
++    // New Vegas: aiming in first person looks down the sights (true iron sights), the
++    // crosshair gone; Fallout 3 keeps it (alpha48: back to the original).
++    let fo3 = std::env::var("NVPORT_GAME").is_ok_and(|g| g == "fo3");
++    let sighting = !third && !fo3 && aim.as_ref().is_some_and(|a| a.share() > 0.05);
 +    let view_hidden = sighting || tweaks.as_ref().is_some_and(|t| if third { t.hide_crosshair_third } else { t.hide_crosshair_first });
      let gap = spread.max(CROSS_REST);
      for (b, mut v, mut node, mut image) in &mut bars {
@@ -2870,10 +3154,10 @@ index 012291e..0734019 100644
  /// file. Nothing here allocates (there is no memory), and the log's lock is never waited on
  /// (the failing allocation can be the log's own).
 diff --git a/engine/nvforever/src/decals.rs b/engine/nvforever/src/decals.rs
-index f9dd8cb..c9b42dd 100644
+index f9dd8cb..5630bba 100644
 --- a/engine/nvforever/src/decals.rs
 +++ b/engine/nvforever/src/decals.rs
-@@ -91,9 +91,17 @@ const MISSES_LOGGED: u32 = 8;
+@@ -91,9 +91,30 @@ const MISSES_LOGGED: u32 = 8;
  #[derive(Component)]
  struct Decal {
      age: f32,
@@ -2883,16 +3167,29 @@ index f9dd8cb..c9b42dd 100644
 +    flat: Option<Handle<StandardMaterial>>,
  }
  
-+/// [nvport] Android draws decals as flat quads lifted off the surface: a forward decal reads
-+/// the depth it is drawn against, and the phones' drivers showed none of them.
-+const FLAT_DECALS: bool = cfg!(target_os = "android");
++/// [nvport] Flat quads lifted off the surface instead of forward decals: only when asked
++/// (`fddecals flat`, `<home>/decals.txt`). alpha24-47 drew them on every phone, as forward
++/// decals showed none then (a forward decal reads the depth prepass it is drawn against);
++/// flat quads stand off curved surfaces (bodies) as squares and pictures in the air. Since
++/// alpha47 the phones prepare meshes on the CPU (Adreno 8xx), and forward decals are the
++/// default again, as upstream.
++fn flat_decals() -> bool {
++    static FLAT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
++    *FLAT.get_or_init(|| {
++        let flat = std::env::var_os("NVFOREVER_HOME")
++            .and_then(|h| std::fs::read_to_string(std::path::Path::new(&h).join("decals.txt")).ok())
++            .is_some_and(|t| t.trim() == "flat");
++        info!("decals: {}", if flat { "flat quads (fddecals flat)" } else { "forward decals projected on the depth prepass" });
++        flat
++    })
++}
 +/// How far a flat decal lies off its surface, in game units.
 +const FLAT_LIFT: f32 = 0.4;
 +
  /// A live decal: its entity, texture set and where it was put (game space).
  struct Live {
      entity: Entity,
-@@ -193,6 +201,7 @@ fn place(
+@@ -193,6 +214,7 @@ fn place(
      sfx: Option<Res<Sfx>>,
      mut models: ModelCtx,
      mut materials: ResMut<Assets<ForwardDecalMaterial<StandardMaterial>>>,
@@ -2900,7 +3197,7 @@ index f9dd8cb..c9b42dd 100644
      mut st: ResMut<Decals>,
      root: Query<(Entity, &GlobalTransform), With<WorldRoot>>,
      (rigs, nodes): (Query<&ActorRig>, Query<&GlobalTransform>),
-@@ -340,8 +349,7 @@ fn place(
+@@ -340,8 +362,7 @@ fn place(
              _ => (0.0, false),
          };
          let [r, g, b] = data.color;
@@ -2910,7 +3207,7 @@ index f9dd8cb..c9b42dd 100644
                  base_color: Color::srgb_u8(r, g, b),
                  base_color_texture: Some(base),
                  specular_texture: normal.clone().filter(|_| masked),
-@@ -354,15 +362,23 @@ fn place(
+@@ -354,15 +375,23 @@ fn place(
                  uv_transform: quarter((st.rng.next_f32() * 4.0) as u32),
                  alpha_mode: AlphaMode::Blend,
                  ..default()
@@ -2918,7 +3215,7 @@ index f9dd8cb..c9b42dd 100644
 -            extension: ForwardDecalMaterialExt { depth_fade_factor: if hit.actor.is_some() { data.depth.clamp(1.0, ACTOR_DEPTH) } else { data.depth.max(MIN_DEPTH) } },
 -        });
 +            };
-+        let (material, flat) = if FLAT_DECALS {
++        let (material, flat) = if flat_decals() {
 +            let m = StandardMaterial { depth_bias: 8.0, ..base_material };
 +            (None, Some(flat_materials.add(m)))
 +        } else {
@@ -2933,12 +3230,12 @@ index f9dd8cb..c9b42dd 100644
          let spin = st.rng.next_f32() * std::f32::consts::TAU;
          // The decal's quad lies in its xz plane, facing +y.
 -        let game_place = Transform { translation: point, rotation: Quat::from_rotation_arc(Vec3::Y, normal_dir) * Quat::from_rotation_y(spin), scale: Vec3::new(side, 1.0, side) };
-+        let lifted = if FLAT_DECALS { point + normal_dir * FLAT_LIFT } else { point };
++        let lifted = if flat_decals() { point + normal_dir * FLAT_LIFT } else { point };
 +        let game_place = Transform { translation: lifted, rotation: Quat::from_rotation_arc(Vec3::Y, normal_dir) * Quat::from_rotation_y(spin), scale: Vec3::new(side, 1.0, side) };
          let (parent, place) = match bone {
              None => match cell {
                  Some((e, origin)) => (e, Transform { translation: point - origin, ..game_place }),
-@@ -373,9 +389,26 @@ fn place(
+@@ -373,9 +402,26 @@ fn place(
                  (e, Transform::from_matrix(Mat4::from(g.affine().inverse() * world)))
              }
          };
@@ -2968,7 +3265,7 @@ index f9dd8cb..c9b42dd 100644
          if st.reported.insert(hit.impact) {
              info!(
                  "decals: {} leaves {} ({}) on {}: side {side:.0} of {:.0}-{:.0}, depth {:.0}",
-@@ -416,6 +449,7 @@ fn fade(
+@@ -416,6 +462,7 @@ fn fade(
      mut st: ResMut<Decals>,
      mut decals: Query<(Entity, &mut Decal)>,
      mut materials: ResMut<Assets<ForwardDecalMaterial<StandardMaterial>>>,
@@ -2976,7 +3273,7 @@ index f9dd8cb..c9b42dd 100644
  ) {
      let dt = time.delta_secs();
      st.clock += dt;
-@@ -429,9 +463,12 @@ fn fade(
+@@ -429,9 +476,12 @@ fn fade(
              commands.entity(e).try_despawn();
              gone.push(e);
          } else if left < DECAL_FADE {
@@ -4772,6 +5069,31 @@ index 1bc62a8..81a905e 100644
              AmbientLight { color: AMBIENT_COLOR, brightness: AMBIENT * unit, ..default() },
              Transform::IDENTITY,
              layer.clone(),
+diff --git a/engine/nvforever/src/water.rs b/engine/nvforever/src/water.rs
+index e90016b..7a391d4 100644
+--- a/engine/nvforever/src/water.rs
++++ b/engine/nvforever/src/water.rs
+@@ -185,6 +185,20 @@ impl Material for WaterMaterial {
+     ) -> Result<(), SpecializedMeshPipelineError> {
+         // Visible from below as well.
+         descriptor.primitive.cull_mode = None;
++        // [nvport] Once: whether this view's water pipeline reads the depth prepass. Without
++        // DEPTH_PREPASS the water takes every pixel for open sky behind it and draws its deep
++        // colour fully opaque (the "turquoise glass" of the players' screenshots).
++        static SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
++        if !SAID.swap(true, std::sync::atomic::Ordering::Relaxed) {
++            let defs = descriptor.fragment.as_ref().map(|f| f.shader_defs.clone()).unwrap_or_default();
++            let has = |n: &str| defs.iter().any(|d| matches!(d, bevy::shader::ShaderDefVal::Bool(k, true) if k == n));
++            info!(
++                "water: pipeline DEPTH_PREPASS {}, MULTISAMPLED {}, samples {}",
++                has("DEPTH_PREPASS"),
++                has("MULTISAMPLED"),
++                descriptor.multisample.count
++            );
++        }
+         // Not in the depth prepass: the ambient occlusion's texels under the water are the
+         // bed's (and within the lighting's distance tolerance of shallow water), so it does
+         // not read them (ssao_lighting.rs).
 diff --git a/engine/nvforever/src/world.rs b/engine/nvforever/src/world.rs
 index b970315..7cb7525 100644
 --- a/engine/nvforever/src/world.rs
