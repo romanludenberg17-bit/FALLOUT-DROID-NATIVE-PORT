@@ -1364,10 +1364,10 @@ index bbdb0c0..0c6c5d1 100644
  libloading = "0.8.9"
 diff --git a/engine/nvforever/src/android_input.rs b/engine/nvforever/src/android_input.rs
 new file mode 100644
-index 0000000..f726282
+index 0000000..0e1b7f8
 --- /dev/null
 +++ b/engine/nvforever/src/android_input.rs
-@@ -0,0 +1,612 @@
+@@ -0,0 +1,634 @@
 +//! [nvport] Input from the Android launcher (Fallout Droid): on-screen keys, touch look,
 +//! gamepads mapped to PC keys and physical keyboards/mice arrive through JNI
 +//! (`com.wastelanddroid.engine.NativeInput`) and are written as Bevy's own input messages,
@@ -1643,6 +1643,12 @@ index 0000000..f726282
 +impl Plugin for AndroidInputPlugin {
 +    fn build(&self, app: &mut App) {
 +        texture_quality_row(app);
++        if let Some(render) = app.get_sub_app_mut(bevy::render::RenderApp) {
++            render.add_systems(
++                bevy::render::Render,
++                transparent_census.after(bevy::render::RenderSystems::PhaseSort).before(bevy::render::RenderSystems::Render),
++            );
++        }
 +        app.add_systems(PreUpdate, drain.before(InputSystems)).add_systems(Last, (publish_ui_state, publish_play_flags)).add_systems(PostUpdate, creator_hides_actors).add_systems(PreUpdate, perf_overlay_out_of_menus).add_systems(Last, perf_overlay_out_of_menus).add_systems(PreUpdate, apply_frame_cap).add_systems(Last, frame_log);
 +    }
 +
@@ -1979,6 +1985,22 @@ index 0000000..f726282
 +        log.ms = sorted;
 +        log.ms.clear();
 +    }
++}
++
++/// [nvport] Players saw no muzzle flashes, explosions, blood or decals (every blended or
++/// additive thing) while opaque ones showed: every 10 s, the items in each view's
++/// transparent phase, so a report tells "never queued" from "queued but not seen".
++fn transparent_census(phases: Res<bevy::render::render_phase::ViewSortedRenderPhases<bevy::core_pipeline::core_3d::Transparent3d>>, mut last: Local<Option<std::time::Instant>>, mut most: Local<usize>) {
++    let total: usize = phases.0.values().map(|p| p.items.len()).sum();
++    *most = (*most).max(total);
++    let now = std::time::Instant::now();
++    if last.is_some_and(|t| now.duration_since(t).as_secs() < 10) {
++        return;
++    }
++    *last = Some(now);
++    let per_view: Vec<usize> = phases.0.values().map(|p| p.items.len()).collect();
++    info!("render census: transparent items now {total} in {} view(s) {per_view:?}, most in a frame over 10 s {}", per_view.len(), *most);
++    *most = 0;
 +}
 diff --git a/engine/nvforever/src/blackjack_view.rs b/engine/nvforever/src/blackjack_view.rs
 index 74c2936..063c304 100644
