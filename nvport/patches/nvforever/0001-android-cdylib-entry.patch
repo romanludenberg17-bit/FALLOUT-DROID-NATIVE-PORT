@@ -661,7 +661,7 @@ index 4f6f70c..f2d3d4b 100644
          drop(decode_span);
          let handle = match result {
 diff --git a/engine/nvf-play/src/console.rs b/engine/nvf-play/src/console.rs
-index 4e8f628..50c487e 100644
+index 4e8f628..8a0ca6b 100644
 --- a/engine/nvf-play/src/console.rs
 +++ b/engine/nvf-play/src/console.rs
 @@ -720,6 +720,7 @@ fn typing(
@@ -672,7 +672,7 @@ index 4e8f628..50c487e 100644
                      c.print("Quests and info: sq, sqt, movetoqt [n], sqs <quest>, sqv <quest>, sv, caqs, inv, getavinfo <av>, setgs <setting> <value>, cam, qqq, advlevel (level up), poker [casino] (a poker table)");
                      c.print("Toggles: tcl (collision), tai (actors' AI), tdetect, tgm, tscr (scripts), tg (grass), ts (sky), tws (water), tt (trees), tlv (leaves), ToggleLODLand, ToggleNavmesh, tlik (head tracking), temo (emotions), tcg [radius] (collision shapes)");
                      c.print("bat <file> (console lines from a text file), rbat [file] (record lines for bat), scof [file] (write the console to a file), slpm [1-5] (a practice lock), [ref.]mfg expression|phoneme|modifier <id> <0-100>, mfg reset");
-@@ -777,6 +778,36 @@ fn typing(
+@@ -777,6 +778,53 @@ fn typing(
                  return;
              }
              // `bat <file>`: the file's lines run next, in order, as if typed.
@@ -694,6 +694,23 @@ index 4e8f628..50c487e 100644
 +                    _ => c.print(format!("fdland on|off (now {})", if fnv_world::index::parent_land_off() { "off" } else { "on" })),
 +                }
 +            }
++            // [nvport] `fdshadows off|sun|cloud|both`: the four shadow tests (nvforever
++            // shadow_census.rs sets the Sun shadows and Cloud shadows rows and marks the log).
++            "fdshadows" => {
++                let ask = match rest.trim() {
++                    "off" => 1,
++                    "sun" => 2,
++                    "cloud" => 3,
++                    "both" => 4,
++                    _ => 0,
++                };
++                if ask == 0 {
++                    c.print("fdshadows off|sun|cloud|both");
++                } else {
++                    SHADOW_TEST.store(ask, std::sync::atomic::Ordering::Relaxed);
++                    c.print(format!("fdshadows: test {ask} ({}); the run log's 'shadow census' lines every 10 s", rest.trim()));
++                }
++            }
 +            "fxtest" => {
 +                FX_TEST.store(true, std::sync::atomic::Ordering::Relaxed);
 +                c.print("fxtest: three cards before the camera for 20 s: red opaque (left), green blended (middle), blue added (right)");
@@ -709,18 +726,20 @@ index 4e8f628..50c487e 100644
              "bat" => {
                  batches += 1;
                  let found = if batches > MAX_BATCHES { Err(format!("bat: more than {MAX_BATCHES} batch files on one line")) } else { batch_lines(rest, &batch_roots(data.as_deref())) };
-@@ -1067,6 +1098,10 @@ pub fn place_name(d: &PlayData, cell: u32) -> String {
+@@ -1067,6 +1115,12 @@ pub fn place_name(d: &PlayData, cell: u32) -> String {
  
  /// The player's Extra Console Details tweak: a selected reference's details add its
  /// base's model [design: docs/design/tweaks.md].
 +/// [nvport] `fxtest`: asks the renderer for three test cards before the camera (opaque red,
 +/// blended green, added blue), to tell on a phone which kinds of drawing reach the screen.
++/// [nvport] `fdshadows`'s ask: 1 off, 2 sun, 3 cloud, 4 both (nvforever shadow_census.rs).
++pub static SHADOW_TEST: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 +pub static FX_TEST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 +
  static MODEL_DETAILS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
  
  /// Set by the Tweaks tab.
-@@ -1141,6 +1176,57 @@ pub fn describe(id: u32, d: &PlayData, sim: &SimState, rt: Option<&mut Runtime>)
+@@ -1141,6 +1195,57 @@ pub fn describe(id: u32, d: &PlayData, sim: &SimState, rt: Option<&mut Runtime>)
  }
  
  /// Where `coc <cell>` goes: the cell's COC spot (interiors and exterior cells alike).
@@ -1616,10 +1635,10 @@ index bbdb0c0..0c6c5d1 100644
  libloading = "0.8.9"
 diff --git a/engine/nvforever/src/android_input.rs b/engine/nvforever/src/android_input.rs
 new file mode 100644
-index 0000000..c83e5db
+index 0000000..07a72b6
 --- /dev/null
 +++ b/engine/nvforever/src/android_input.rs
-@@ -0,0 +1,851 @@
+@@ -0,0 +1,853 @@
 +//! [nvport] Input from the Android launcher (Fallout Droid): on-screen keys, touch look,
 +//! gamepads mapped to PC keys and physical keyboards/mice arrive through JNI
 +//! (`com.wastelanddroid.engine.NativeInput`) and are written as Bevy's own input messages,
@@ -1895,6 +1914,7 @@ index 0000000..c83e5db
 +impl Plugin for AndroidInputPlugin {
 +    fn build(&self, app: &mut App) {
 +        texture_quality_row(app);
++        crate::phone_profiles::register(app);
 +        phone_rows(app);
 +        if let Some(render) = app.get_sub_app_mut(bevy::render::RenderApp) {
 +            render.add_systems(
@@ -1952,14 +1972,9 @@ index 0000000..c83e5db
 +const TEXTURE_NAMES: [&str; 6] = ["Ultra", "High", "Medium", "Low", "Very Low", "Potato"];
 +
 +fn texture_quality() -> i32 {
-+    let q = TEXTURE_QUALITY.load(Ordering::Relaxed);
-+    if q >= 0 {
-+        return q;
-+    }
-+    let from_file = texture_quality_file().and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| t.trim().parse::<i32>().ok());
-+    let q = from_file.or_else(|| std::env::var("NVF_TEX_MIP_SKIP").ok().and_then(|v| v.trim().parse().ok())).unwrap_or(1).clamp(0, 6);
-+    TEXTURE_QUALITY.store(q, Ordering::Relaxed);
-+    q
++    // The engine's value of now: `NVF_TEX_MIP_SKIP` (the launcher's copy of the file) at
++    // the start, then each choice; a failed job's putting back shows at once.
++    nvf_assets::texture::mip_skip() as i32
 +}
 +
 +fn texture_index(skip: i32) -> usize {
@@ -2116,7 +2131,13 @@ index 0000000..c83e5db
 +                TEXTURE_SKIPS.len(),
 +                |_| choice_part(texture_index(texture_quality()), TEXTURE_SKIPS.len()),
 +                |_, v| set_texture_skip(TEXTURE_SKIPS[choice_index(v, TEXTURE_SKIPS.len()).min(TEXTURE_SKIPS.len() - 1)]),
-+                |v| TEXTURE_NAMES[choice_index(v, TEXTURE_SKIPS.len()).min(TEXTURE_SKIPS.len() - 1)].to_string(),
++                |v| {
++                    let name = TEXTURE_NAMES[choice_index(v, TEXTURE_SKIPS.len()).min(TEXTURE_SKIPS.len() - 1)];
++                    match crate::texture_live::progress() {
++                        Some((done, total)) => format!("{name} ({done}/{total})"),
++                        None => name.to_string(),
++                    }
++                },
 +            ),
 +        ),
 +    );
@@ -2867,6 +2888,233 @@ index 9493eaa..cbbeece 100644
              Core3d,
              // FSR restores the depth prepass to display resolution before this
              // mask meters the complete screen.
+diff --git a/engine/nvforever/src/gpu_report.rs b/engine/nvforever/src/gpu_report.rs
+new file mode 100644
+index 0000000..ab9a6fb
+--- /dev/null
++++ b/engine/nvforever/src/gpu_report.rs
+@@ -0,0 +1,221 @@
++//! [nvport] What GPU the game runs on, read from the Vulkan device itself (not from the
++//! phone's maker or chip name), logged once at the start:
++//!
++//! `gpu: <name>, vendor 0x… (<family>), device 0x…, <type>, driver "<driver>" "<info>"`
++//! `gpu: Vulkan <api> (driver version 0x…), <n> device extensions enabled; device fault …, memory budget …`
++//! `gpu: heap <i>: <size> MB <flags>, budget <b> MB, this process <u> MB` (when VK_EXT_memory_budget is on)
++//!
++//! The family is chosen by the PCI vendor id the driver reports [documented: Khronos
++//! vendor ids / PCI-SIG: 0x5143 Qualcomm, 0x13B5 ARM, 0x144D Samsung, 0x1010 Imagination,
++//! 0x1AE0 Google]: Adreno, Mali, Xclipse (Samsung's RDNA GPUs in Exynos 2200 and later),
++//! PowerVR (MediaTek's and others' IMG GPUs), and anything else stays "other" — an unknown
++//! GPU is never taken for a Mali. It is kept in `<home>/gpu_family.txt` for the launcher
++//! (its next start's defaults) and in [`GpuFamily`] for the engine.
++
++use bevy::prelude::*;
++use bevy::render::renderer::{RenderAdapterInfo, RenderDevice};
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
++pub enum Family {
++    Adreno,
++    Mali,
++    Xclipse,
++    PowerVr,
++    Software,
++    #[default]
++    Other,
++}
++
++impl Family {
++    pub fn name(self) -> &'static str {
++        match self {
++            Family::Adreno => "adreno",
++            Family::Mali => "mali",
++            Family::Xclipse => "xclipse",
++            Family::PowerVr => "powervr",
++            Family::Software => "software",
++            Family::Other => "other",
++        }
++    }
++}
++
++/// The GPU family of this run ([`family_of`]).
++#[derive(Resource, Clone, Copy, Debug, Default)]
++pub struct GpuFamily(pub Family);
++
++pub fn family_of(vendor: u32, name: &str) -> Family {
++    let n = name.to_ascii_lowercase();
++    match vendor {
++        0x5143 => Family::Adreno,
++        0x13B5 => Family::Mali,
++        0x144D => Family::Xclipse,
++        0x1010 => Family::PowerVr,
++        0x1AE0 => Family::Software,
++        // Some drivers report no PCI vendor: then only an unambiguous name decides.
++        _ if n.contains("adreno") => Family::Adreno,
++        _ if n.starts_with("mali") || n.contains("immortalis") => Family::Mali,
++        _ if n.contains("xclipse") => Family::Xclipse,
++        _ if n.contains("powervr") || n.starts_with("img ") => Family::PowerVr,
++        _ if n.contains("swiftshader") || n.contains("llvmpipe") => Family::Software,
++        _ => Family::Other,
++    }
++}
++
++pub struct GpuReportPlugin;
++
++impl Plugin for GpuReportPlugin {
++    fn build(&self, app: &mut App) {
++        app.init_resource::<GpuFamily>().add_systems(Startup, report).add_systems(Update, memory_line);
++    }
++}
++
++fn report(adapter: Option<Res<RenderAdapterInfo>>, device: Option<Res<RenderDevice>>, mut family: ResMut<GpuFamily>) {
++    let Some(a) = adapter else {
++        warn!("gpu: the adapter's description is not available");
++        return;
++    };
++    family.0 = family_of(a.vendor, &a.name);
++    info!(
++        "gpu: {}, vendor 0x{:04x} ({}), device 0x{:04x}, {:?}, {:?}, driver \"{}\" \"{}\"",
++        a.name,
++        a.vendor,
++        family.0.name(),
++        a.device,
++        a.device_type,
++        a.backend,
++        a.driver,
++        a.driver_info
++    );
++    if let Some(home) = std::env::var_os("NVFOREVER_HOME") {
++        let _ = std::fs::write(std::path::Path::new(&home).join("gpu_family.txt"), family.0.name());
++    }
++    let Some(device) = device else {
++        warn!("gpu: no render device to read the Vulkan details from");
++        return;
++    };
++    vulkan_details(&device);
++}
++
++fn vulkan_details(device: &RenderDevice) {
++    use ash::vk;
++    let wgpu_device = device.wgpu_device();
++    // SAFETY: only reads through the hal device, which stays alive in the guard.
++    let Some(hal) = (unsafe { wgpu_device.as_hal::<wgpu::hal::api::Vulkan>() }) else {
++        info!("gpu: not the Vulkan backend; no Vulkan details");
++        return;
++    };
++    let instance = hal.shared_instance().raw_instance();
++    let phd = hal.raw_physical_device();
++    // SAFETY: the physical device belongs to this instance.
++    let props = unsafe { instance.get_physical_device_properties(phd) };
++    let v = props.api_version;
++    let ext = hal.enabled_device_extensions();
++    let has = |n: &std::ffi::CStr| ext.contains(&n);
++    let names: Vec<String> = ext.iter().map(|e| e.to_string_lossy().into_owned()).collect();
++    info!(
++        "gpu: Vulkan {}.{}.{} (driver version 0x{:x}), {} device extensions enabled; device fault {}, memory budget {}, robustness2 {}",
++        vk::api_version_major(v),
++        vk::api_version_minor(v),
++        vk::api_version_patch(v),
++        props.driver_version,
++        ext.len(),
++        if has(ash::ext::device_fault::NAME) { "on" } else { "not available" },
++        if has(ash::ext::memory_budget::NAME) { "on" } else { "not available" },
++        if has(ash::ext::robustness2::NAME) { "on" } else { "not available" },
++    );
++    info!("gpu: extensions {}", names.join(" "));
++    let budget_on = has(ash::ext::memory_budget::NAME);
++    let mut budget = vk::PhysicalDeviceMemoryBudgetPropertiesEXT::default();
++    let mut mem = vk::PhysicalDeviceMemoryProperties2::default();
++    if budget_on {
++        mem = mem.push_next(&mut budget);
++    }
++    // SAFETY: Vulkan 1.1 core (wgpu requires it); the budget struct only when enabled.
++    unsafe { instance.get_physical_device_memory_properties2(phd, &mut mem) };
++    let n = mem.memory_properties.memory_heap_count as usize;
++    let heaps: Vec<_> = mem.memory_properties.memory_heaps[..n].to_vec();
++    for (i, h) in heaps.iter().enumerate() {
++        let local = if h.flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL) { "device-local" } else { "host" };
++        if budget_on {
++            info!(
++                "gpu: heap {i}: {} MB {local}, budget {} MB, this process {} MB",
++                h.size >> 20,
++                budget.heap_budget[i] >> 20,
++                budget.heap_usage[i] >> 20
++            );
++        } else {
++            info!("gpu: heap {i}: {} MB {local}, budget not available (no VK_EXT_memory_budget)", h.size >> 20);
++        }
++    }
++}
++
++/// Every 30 s of real time, the three memory figures, each named by its source and never
++/// standing in for another:
++/// `memory: Vulkan budget <b> MB, Vulkan usage <u> MB (driver, VK_EXT_memory_budget, device-local heaps) | wgpu <a> MB allocated, <r> MB reserved (wgpu's allocator report) | process RAM <rss> MB (/proc/self/statm)`
++/// with "not available" where a source gives nothing.
++fn memory_line(time: Res<Time<Real>>, device: Option<Res<RenderDevice>>, mut next: Local<f64>) {
++    let now = time.elapsed_secs_f64();
++    if now < *next {
++        return;
++    }
++    *next = now + 30.0;
++    let na = || "not available".to_string();
++    let vk = device.as_deref().and_then(vulkan_budget).map_or_else(
++        || "Vulkan budget not available".to_string(),
++        |(b, u)| format!("Vulkan budget {} MB, Vulkan usage {} MB (driver, VK_EXT_memory_budget, device-local heaps)", b >> 20, u >> 20),
++    );
++    let wgpu = device.as_deref().and_then(|d| d.wgpu_device().generate_allocator_report()).map_or_else(
++        || format!("wgpu allocator {}", na()),
++        |r| format!("wgpu {} MB allocated, {} MB reserved (wgpu's allocator report)", r.total_allocated_bytes >> 20, r.total_reserved_bytes >> 20),
++    );
++    let rss = std::fs::read_to_string("/proc/self/statm")
++        .ok()
++        .and_then(|t| t.split_whitespace().nth(1)?.parse::<u64>().ok())
++        .map_or_else(na, |p| format!("{} MB", (p * 4096) >> 20));
++    info!("memory: {vk} | {wgpu} | process RAM {rss} (/proc/self/statm)");
++}
++
++/// The device-local heaps' budget and this process's usage, bytes, from the driver.
++fn vulkan_budget(device: &RenderDevice) -> Option<(u64, u64)> {
++    use ash::vk;
++    let wgpu_device = device.wgpu_device();
++    // SAFETY: only reads through the hal device, which stays alive in the guard.
++    let hal = unsafe { wgpu_device.as_hal::<wgpu::hal::api::Vulkan>() }?;
++    if !hal.enabled_device_extensions().contains(&ash::ext::memory_budget::NAME) {
++        return None;
++    }
++    let instance = hal.shared_instance().raw_instance();
++    let mut budget = vk::PhysicalDeviceMemoryBudgetPropertiesEXT::default();
++    let mut mem = vk::PhysicalDeviceMemoryProperties2::default().push_next(&mut budget);
++    // SAFETY: the extension is enabled (checked above); Vulkan 1.1 core.
++    unsafe { instance.get_physical_device_memory_properties2(hal.raw_physical_device(), &mut mem) };
++    let n = mem.memory_properties.memory_heap_count as usize;
++    let heaps = mem.memory_properties.memory_heaps[..n].to_vec();
++    let mut b = 0;
++    let mut u = 0;
++    for (i, h) in heaps.iter().enumerate() {
++        if h.flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL) {
++            b += budget.heap_budget[i];
++            u += budget.heap_usage[i];
++        }
++    }
++    Some((b, u))
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn families_by_vendor_and_name() {
++        assert_eq!(family_of(0x5143, "Adreno (TM) 830"), Family::Adreno);
++        assert_eq!(family_of(0x13B5, "Mali-G57 MC2"), Family::Mali);
++        assert_eq!(family_of(0x144D, "Samsung Xclipse 940"), Family::Xclipse);
++        assert_eq!(family_of(0x1010, "PowerVR B-Series BXM-8-256"), Family::PowerVr);
++        assert_eq!(family_of(0, "Mali-G68"), Family::Mali);
++        // An unknown GPU stays unknown, never a Mali.
++        assert_eq!(family_of(0x10DE, "NVIDIA GeForce"), Family::Other);
++        assert_eq!(family_of(0, "Maleficent GPU"), Family::Other);
++        assert_eq!(family_of(0, "Immortalis-G720"), Family::Mali);
++    }
++}
 diff --git a/engine/nvforever/src/graphics.rs b/engine/nvforever/src/graphics.rs
 index d73236a..7c75f11 100644
 --- a/engine/nvforever/src/graphics.rs
@@ -2999,10 +3247,10 @@ index fa89874..4f55058 100644
          let baked = match result {
              Ok(Some(b)) => b,
 diff --git a/engine/nvforever/src/main.rs b/engine/nvforever/src/main.rs
-index a6cf138..805ae30 100644
+index a6cf138..e8e62e5 100644
 --- a/engine/nvforever/src/main.rs
 +++ b/engine/nvforever/src/main.rs
-@@ -82,6 +82,11 @@ mod haze;
+@@ -82,6 +82,15 @@ mod haze;
  mod fly;
  mod foot_ik;
  mod anti_lag;
@@ -3011,10 +3259,14 @@ index a6cf138..805ae30 100644
 +#[cfg(target_os = "android")]
 +mod phone_cpu;
 +mod texture_live;
++mod gpu_report;
++mod shadow_census;
++#[cfg(target_os = "android")]
++mod phone_profiles;
  mod dlss;
  mod dlss_download;
  mod nv_low_latency;
-@@ -985,6 +990,20 @@ fn report_archives(data: Res<GameData>, world: Res<WorldData>) {
+@@ -985,6 +994,20 @@ fn report_archives(data: Res<GameData>, world: Res<WorldData>) {
      for d in &world.dropped_plugins {
          warn!("{d}");
      }
@@ -3035,7 +3287,7 @@ index a6cf138..805ae30 100644
  }
  
  /// Arguments that choose a world or a mode. A command line with none of them is the game
-@@ -1040,6 +1059,8 @@ fn task_pools(placed: Option<usize>) -> TaskPoolPlugin {
+@@ -1040,6 +1063,8 @@ fn task_pools(placed: Option<usize>) -> TaskPoolPlugin {
      if let Some(n) = placed {
          task_pool_options.max_total_threads = n;
      }
@@ -3044,7 +3296,7 @@ index a6cf138..805ae30 100644
      if let Some(n) = std::env::var("NVF_PLAY_TEST_ASYNC_THREADS").ok().and_then(|v| v.parse::<usize>().ok()) {
          task_pool_options.async_compute.min_threads = n;
          task_pool_options.async_compute.max_threads = n;
-@@ -1061,12 +1082,164 @@ fn parse_smoothing(value: &str) -> Result<nvf_play::smooth_terrain::Smoothing, S
+@@ -1061,12 +1086,164 @@ fn parse_smoothing(value: &str) -> Result<nvf_play::smooth_terrain::Smoothing, S
  #[global_allocator]
  static ALLOCATOR: crash::SaysWhenEmpty = crash::SaysWhenEmpty;
  
@@ -3210,7 +3462,7 @@ index a6cf138..805ae30 100644
      if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(std::path::Path::to_path_buf)) {
          line = with_schemas_beside(line, &dir);
          let functions = dir.join("schemas").join("script").join("functions.json");
-@@ -1075,7 +1248,15 @@ fn main() -> AppExit {
+@@ -1075,7 +1252,15 @@ fn main() -> AppExit {
              std::env::set_var("NVF_PLAY_SCRIPT_FUNCTIONS", &functions);
          }
      }
@@ -3227,13 +3479,13 @@ index a6cf138..805ae30 100644
      let _ = COMMAND_LINE.set(line);
      // Taking over a load: tell the old run at once that this run takes part (#1903).
      let handoff_marked = args.handoff.as_deref().map(handoff::mark_started);
-@@ -2326,6 +2507,9 @@ fn main() -> AppExit {
+@@ -2326,6 +2511,9 @@ fn main() -> AppExit {
              s.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
          });
      }
 +    #[cfg(target_os = "android")]
 +    app.add_plugins((android_input::AndroidInputPlugin, phone_cpu::PhoneCpuPlugin));
-+    app.add_plugins(texture_live::TextureLivePlugin);
++    app.add_plugins((texture_live::TextureLivePlugin, gpu_report::GpuReportPlugin, shadow_census::ShadowCensusPlugin));
      let exit = app.run();
      // The app and its renderer are gone; Streamline shut down before the device and instance it
      // used (dlss/, "Shutdown"). Nothing when Streamline was not loaded.
@@ -3531,6 +3783,317 @@ index 0000000..46e7d2e
 +        }
 +    }
 +}
+diff --git a/engine/nvforever/src/phone_profiles.rs b/engine/nvforever/src/phone_profiles.rs
+new file mode 100644
+index 0000000..fd8efdf
+--- /dev/null
++++ b/engine/nvforever/src/phone_profiles.rs
+@@ -0,0 +1,305 @@
++//! [nvport] Graphics Profile (Ultra, High, Medium, Low, Potato) on a phone: one row over
++//! the real rows of the settings page. Taking a profile sets each of its rows through the
++//! row's own setter, exactly as a change on the page would, so every row applies itself
++//! (live where the row is live; the texture quality is read again in the background,
++//! `texture_live`) and keeps itself in `NVForever.ini` — nothing is kept twice.
++//!
++//! The row reads the first profile all of whose rows hold its values; else **Custom**: a
++//! change to any of those rows shows Custom at once, and moving it back shows the profile
++//! again. Rows hidden or disabled on this phone are left out of both the setting and the
++//! reading. **Reset to Default** takes this phone's default profile ([`default_profile`]).
++//!
++//! What each profile sets: texture quality (mip levels dropped), render resolution,
++//! dynamic resolution, sun shadows and their distance, object/actor/item/grass/tree
++//! (distant LOD) distances, grass, water mirror/reflections/effects, bloom, glow, eye
++//! adaptation, light shafts, cloud shadows, ambient occlusion, anisotropic filtering and
++//! anti-aliasing.
++
++use bevy::prelude::*;
++use nvf_play::settings::{self, choice_index, choice_part, Settings};
++
++/// How a profile wants a row.
++#[derive(Clone, Copy, Debug)]
++enum Want {
++    /// A switch row.
++    On(bool),
++    /// A slider row's part.
++    Part(f32),
++    /// A row made with `Slider::choice`: (index, count).
++    Nth(usize, usize),
++    /// A list row's choice by name.
++    Pick(&'static str),
++}
++use Want::*;
++
++/// Render resolution row: `RENDER_HEIGHTS` (360 … 1080, nine) and Native last.
++const RES: usize = 10;
++const RES_480: Want = Nth(1, RES);
++const RES_600: Want = Nth(3, RES);
++const RES_720: Want = Nth(5, RES);
++const RES_1080: Want = Nth(8, RES);
++const RES_NATIVE: Want = Nth(9, RES);
++/// Texture quality row: Ultra 0 … Potato 5 levels dropped.
++const TEX: usize = 6;
++
++pub const NAMES: [&str; 5] = ["Ultra", "High", "Medium", "Low", "Potato"];
++const CUSTOM: usize = 5;
++const RESET: usize = 6;
++const POSITIONS: usize = 7;
++
++type Profile = &'static [(&'static str, Want)];
++
++const ULTRA: Profile = &[
++    ("texture-quality", Nth(0, TEX)),
++    ("render-resolution", RES_NATIVE),
++    ("dynamic-resolution", On(true)),
++    ("sun-shadows", Pick("Quality")),
++    ("shadow-distance", Pick("100%")),
++    ("object-distance", Part(1.0)),
++    ("actor-distance", Part(1.0)),
++    ("item-distance", Part(1.0)),
++    ("tree-distance", Part(1.0)),
++    ("grass", On(true)),
++    ("grass-distance", Part(1.0)),
++    ("water-mirror", On(true)),
++    ("water-reflections", On(true)),
++    ("water-effects", On(true)),
++    ("bloom", On(true)),
++    ("glow", On(true)),
++    ("eye-adaptation", On(true)),
++    ("light-shafts", On(true)),
++    ("cloud-shadows", On(true)),
++    ("ambient-occlusion", Pick("Performance")),
++    ("anisotropic", On(true)),
++    ("anti-aliasing", Pick("2x")),
++];
++
++const HIGH: Profile = &[
++    ("texture-quality", Nth(1, TEX)),
++    ("render-resolution", RES_1080),
++    ("dynamic-resolution", On(true)),
++    ("sun-shadows", Pick("Performance")),
++    ("shadow-distance", Pick("80%")),
++    ("object-distance", Part(0.8)),
++    ("actor-distance", Part(0.8)),
++    ("item-distance", Part(0.8)),
++    ("tree-distance", Part(0.8)),
++    ("grass", On(true)),
++    ("grass-distance", Part(0.8)),
++    ("water-mirror", On(true)),
++    ("water-reflections", On(true)),
++    ("water-effects", On(true)),
++    ("bloom", On(true)),
++    ("glow", On(true)),
++    ("eye-adaptation", On(true)),
++    ("light-shafts", On(false)),
++    ("cloud-shadows", On(true)),
++    ("ambient-occlusion", Pick("Off")),
++    ("anisotropic", On(true)),
++    ("anti-aliasing", Pick("FXAA")),
++];
++
++const MEDIUM: Profile = &[
++    ("texture-quality", Nth(2, TEX)),
++    ("render-resolution", RES_720),
++    ("dynamic-resolution", On(true)),
++    ("sun-shadows", Pick("Performance")),
++    ("shadow-distance", Pick("60%")),
++    ("object-distance", Part(0.6)),
++    ("actor-distance", Part(0.6)),
++    ("item-distance", Part(0.6)),
++    ("tree-distance", Part(0.6)),
++    ("grass", On(true)),
++    ("grass-distance", Part(0.5)),
++    ("water-mirror", On(false)),
++    ("water-reflections", On(true)),
++    ("water-effects", On(true)),
++    ("bloom", On(true)),
++    ("glow", On(true)),
++    ("eye-adaptation", On(true)),
++    ("light-shafts", On(false)),
++    ("cloud-shadows", On(false)),
++    ("ambient-occlusion", Pick("Off")),
++    ("anisotropic", On(true)),
++    ("anti-aliasing", Pick("FXAA")),
++];
++
++const LOW: Profile = &[
++    ("texture-quality", Nth(3, TEX)),
++    ("render-resolution", RES_600),
++    ("dynamic-resolution", On(true)),
++    ("sun-shadows", Pick("Off")),
++    ("object-distance", Part(0.45)),
++    ("actor-distance", Part(0.5)),
++    ("item-distance", Part(0.4)),
++    ("tree-distance", Part(0.45)),
++    ("grass", On(false)),
++    ("water-mirror", On(false)),
++    ("water-reflections", On(false)),
++    ("water-effects", On(false)),
++    ("bloom", On(false)),
++    ("glow", On(false)),
++    ("eye-adaptation", On(false)),
++    ("light-shafts", On(false)),
++    ("cloud-shadows", On(false)),
++    ("ambient-occlusion", Pick("Off")),
++    ("anisotropic", On(false)),
++    ("anti-aliasing", Pick("FXAA")),
++];
++
++const POTATO: Profile = &[
++    ("texture-quality", Nth(5, TEX)),
++    ("render-resolution", RES_480),
++    ("dynamic-resolution", On(true)),
++    ("sun-shadows", Pick("Off")),
++    ("object-distance", Part(0.3)),
++    ("actor-distance", Part(0.4)),
++    ("item-distance", Part(0.25)),
++    ("tree-distance", Part(0.3)),
++    ("grass", On(false)),
++    ("water-mirror", On(false)),
++    ("water-reflections", On(false)),
++    ("water-effects", On(false)),
++    ("bloom", On(false)),
++    ("glow", On(false)),
++    ("eye-adaptation", On(false)),
++    ("light-shafts", On(false)),
++    ("cloud-shadows", On(false)),
++    ("ambient-occlusion", Pick("Off")),
++    ("anisotropic", On(false)),
++    ("anti-aliasing", Pick("Off")),
++];
++
++const PROFILES: [Profile; 5] = [ULTRA, HIGH, MEDIUM, LOW, POTATO];
++
++/// This phone's default profile: High on the chips that get the full graphics rows
++/// (`NVPORT_FULL_GFX`, the launcher's strong class), else by the RAM: Medium from 6 GB,
++/// Low from 4 GB, Potato under that.
++pub fn default_profile() -> usize {
++    if std::env::var("NVPORT_FULL_GFX").is_ok_and(|v| v == "1") {
++        return 1;
++    }
++    let ram_mb = std::fs::read_to_string("/proc/meminfo").ok().and_then(|t| {
++        t.lines().find(|l| l.starts_with("MemTotal:")).and_then(|l| l.split_whitespace().nth(1)?.parse::<u64>().ok()).map(|kb| kb / 1024)
++    });
++    match ram_mb {
++        Some(mb) if mb >= 5600 => 2,
++        Some(mb) if mb >= 3500 => 3,
++        Some(_) => 4,
++        None => 3,
++    }
++}
++
++/// Whether row `key` holds `want` now; `None`: no such row here, or out of reach.
++fn holds(world: &World, s: &Settings, key: &str, want: Want) -> Option<bool> {
++    let i = s.index(key)?;
++    if s.disabled_status(world, i).is_some() {
++        return None;
++    }
++    let row = s.list().get(i)?;
++    Some(match want {
++        On(on) => row.slider.is_none() && s.choices(i).is_none() && (row.get)(world) == on,
++        Part(p) => row.slider.is_some_and(|sl| ((sl.get)(world) - p.clamp(sl.min, 1.0)).abs() < sl.step.max(0.01) * 0.51),
++        Nth(n, count) => row.slider.is_some_and(|sl| choice_index((sl.get)(world), count) == n),
++        Pick(name) => s.choices(i).is_some_and(|c| (c.chosen)(world) == name),
++    })
++}
++
++/// The profile the rows match now, else [`CUSTOM`].
++pub fn current(world: &World) -> usize {
++    let Some(s) = world.get_resource::<Settings>() else { return CUSTOM };
++    PROFILES
++        .iter()
++        .position(|p| p.iter().all(|&(key, want)| holds(world, s, key, want) != Some(false)))
++        .unwrap_or(CUSTOM)
++}
++
++/// Set once the game runs (the first Update): the INI's stored profile row is read before
++/// that (`settings::apply_stored`) and must not set the rows again over what the player
++/// changed by hand — the rows are kept in the INI on their own and are the truth.
++static LIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
++
++fn take(world: &mut World, n: usize) {
++    if !LIVE.load(std::sync::atomic::Ordering::Relaxed) {
++        return;
++    }
++    let Some(profile) = PROFILES.get(n) else { return };
++    let mut set = 0;
++    for &(key, want) in profile.iter() {
++        let Some(s) = world.get_resource::<Settings>() else { return };
++        let Some(i) = s.index(key) else { continue };
++        match holds(world, s, key, want) {
++            Some(false) => {}
++            _ => continue,
++        }
++        set += 1;
++        match want {
++            On(_) => {
++                settings::flip(world, i);
++            }
++            Part(p) => {
++                settings::set_slider(world, i, p);
++            }
++            Nth(idx, count) => {
++                settings::set_slider(world, i, choice_part(idx, count));
++            }
++            Pick(name) => {
++                settings::pick(world, i, name);
++            }
++        }
++    }
++    let now = current(world);
++    info!(
++        "graphics profile: {} taken ({set} rows changed); the rows now read {}",
++        NAMES[n],
++        NAMES.get(now).copied().unwrap_or("Custom")
++    );
++}
++
++pub fn register(app: &mut App) {
++    use nvf_play::settings::{add_setting, Setting, Slider};
++    app.add_systems(Update, go_live);
++    add_setting(
++        app,
++        Setting::slider(
++            "graphics-profile",
++            "Graphics",
++            "Graphics Profile",
++            "Sets textures, resolution, shadows, distances, grass, water, effects and anti-aliasing together. Changing any of them shows Custom; Reset to Default takes this phone's profile.",
++            Slider::choice(
++                POSITIONS,
++                |w| choice_part(current(w), POSITIONS),
++                |w, v| match choice_index(v, POSITIONS) {
++                    n if n < CUSTOM => take(w, n),
++                    RESET => take(w, default_profile()),
++                    _ => {}
++                },
++                |v| match choice_index(v, POSITIONS) {
++                    n if n < CUSTOM => NAMES[n].to_string(),
++                    CUSTOM => "Custom".to_string(),
++                    _ => "Reset to Default".to_string(),
++                },
++            ),
++        ),
++    );
++}
++
++fn go_live(world: &mut World, mut done: Local<bool>) {
++    if *done {
++        return;
++    }
++    *done = true;
++    LIVE.store(true, std::sync::atomic::Ordering::Relaxed);
++    log_at_start(world);
++}
++
++/// Logs the profile the rows match at the start (after the INI was read).
++pub fn log_at_start(world: &World) {
++    let n = current(world);
++    info!(
++        "graphics profile: {} at the start (this phone's default {}); texture quality {} mip level(s) dropped",
++        NAMES.get(n).copied().unwrap_or("Custom"),
++        NAMES[default_profile()],
++        nvf_assets::texture::mip_skip()
++    );
++}
 diff --git a/engine/nvforever/src/pipeline_prewarm.rs b/engine/nvforever/src/pipeline_prewarm.rs
 index 681a80b..279a95f 100644
 --- a/engine/nvforever/src/pipeline_prewarm.rs
@@ -3640,11 +4203,217 @@ index bf97e78..4b28395 100644
              Projection::Perspective(PerspectiveProjection { fov: 0.1, near: 5.0, far: crate::sky::OUTDOOR_FAR, aspect_ratio: 1.0, ..default() }),
              crate::sky::initial_fog(),
              bevy::core_pipeline::prepass::DepthPrepass,
+diff --git a/engine/nvforever/src/shadow_census.rs b/engine/nvforever/src/shadow_census.rs
+new file mode 100644
+index 0000000..5e7c8a1
+--- /dev/null
++++ b/engine/nvforever/src/shadow_census.rs
+@@ -0,0 +1,184 @@
++//! [nvport] Sun shadows and cloud shadows diagnosed apart (owner's report: sun shadows come
++//! and go instead of staying; with cloud shadows on, the player's and NPCs' models
++//! flicker). Every 10 s of play, one line for each system, from what the frames did:
++//!
++//! `shadow census: sun <on|off> (<mode>), <n> cascades of <map>², far <..> units, texel <..>;
++//!  casters <a/b/c/d>; on->off <k> times, frames without cascades <m>, light turned on <t>
++//!  frames (largest step <deg>)`
++//! `shadow census: cloud <on|off>, image <shown|none> (<f> frames without), uv offset steps <..>`
++//! `shadow census: pipelines waiting <w> (most in one frame), failed <e>` and each failed
++//! pipeline's label and error once (a failed or long-compiling variant is not drawn: a
++//! model that skips frames flickers).
++//!
++//! Console `fdshadows off|sun|cloud|both` (`nvf_play::console::SHADOW_TEST`) sets the
++//! two rows for the four tests, through the rows' own setters (kept in the INI as the page
++//! keeps them), and marks the log (`shadow test: …`).
++
++use bevy::light::{Cascades, DirectionalLight};
++use bevy::prelude::*;
++use bevy::render::render_resource::{CachedPipelineState, PipelineCache};
++use bevy::render::{Render, RenderApp, RenderSystems};
++use std::sync::atomic::{AtomicU32, Ordering};
++
++use crate::sky::Sun;
++use crate::sun_visibility::SunVisibility;
++
++#[derive(Default)]
++struct Counts {
++    frames: u32,
++    on_to_off: u32,
++    no_cascades: u32,
++    turned: u32,
++    largest_turn: f32,
++    cloud_missing: u32,
++    was_on: Option<bool>,
++    last_dir: Option<Vec3>,
++}
++
++/// Render world → main world: the most pipelines waiting in one frame, and failed ones.
++static WAITING_MAX: AtomicU32 = AtomicU32::new(0);
++static FAILED: AtomicU32 = AtomicU32::new(0);
++
++pub struct ShadowCensusPlugin;
++
++impl Plugin for ShadowCensusPlugin {
++    fn build(&self, app: &mut App) {
++        app.add_systems(PostUpdate, census).add_systems(Update, shadow_test);
++        if let Some(render) = app.get_sub_app_mut(RenderApp) {
++            render.add_systems(Render, pipelines.in_set(RenderSystems::Cleanup));
++        }
++    }
++}
++
++fn pipelines(cache: Option<Res<PipelineCache>>, mut said: Local<std::collections::HashSet<String>>) {
++    let Some(cache) = cache else { return };
++    let waiting = cache.waiting_pipelines().count() as u32;
++    WAITING_MAX.fetch_max(waiting, Ordering::Relaxed);
++    let mut failed = 0;
++    for p in cache.pipelines() {
++        if let CachedPipelineState::Err(e) = &p.state {
++            failed += 1;
++            let label = match &p.descriptor {
++                bevy::render::render_resource::PipelineDescriptor::RenderPipelineDescriptor(d) => d.label.as_ref().map(|l| l.to_string()),
++                bevy::render::render_resource::PipelineDescriptor::ComputePipelineDescriptor(d) => d.label.as_ref().map(|l| l.to_string()),
++                bevy::render::render_resource::PipelineDescriptor::MeshPipelineDescriptor(d) => d.label.as_ref().map(|l| l.to_string()),
++            }
++            .unwrap_or_else(|| "(no label)".to_string());
++            if said.len() < 64 && said.insert(label.clone()) {
++                error!("shadow census: pipeline {label} failed: {e}");
++            }
++        }
++    }
++    FAILED.store(failed, Ordering::Relaxed);
++}
++
++#[allow(clippy::type_complexity)]
++fn census(
++    time: Res<Time<Real>>,
++    suns: Query<(&DirectionalLight, &GlobalTransform, Option<&Cascades>, Option<&bevy::camera::visibility::CascadesVisibleEntities>, Option<&bevy::light::CascadeShadowConfig>), With<Sun>>,
++    performance: Option<Res<crate::shadow_rate::PerformanceShadows>>,
++    map: Option<Res<bevy::light::DirectionalLightShadowMap>>,
++    vis: Option<Res<SunVisibility>>,
++    mut c: Local<Counts>,
++    mut next: Local<f64>,
++) {
++    let Ok((light, at, cascades, visible, config)) = suns.single() else { return };
++    c.frames += 1;
++    let on = light.shadow_maps_enabled;
++    if c.was_on == Some(true) && !on {
++        c.on_to_off += 1;
++    }
++    c.was_on = Some(on);
++    let views = cascades.map_or(0, |cs| cs.cascades.values().map(Vec::len).max().unwrap_or(0));
++    if on && views == 0 {
++        c.no_cascades += 1;
++    }
++    let dir = at.forward().as_vec3();
++    if let Some(last) = c.last_dir {
++        let a = last.angle_between(dir);
++        if a > 1e-7 {
++            c.turned += 1;
++            c.largest_turn = c.largest_turn.max(a.to_degrees());
++        }
++    }
++    c.last_dir = Some(dir);
++    let cloud_on = vis.as_ref().is_some_and(|v| v.cloud_enabled);
++    if cloud_on && vis.as_ref().is_some_and(|v| v.cloud.is_none()) {
++        c.cloud_missing += 1;
++    }
++    let now = time.elapsed_secs_f64();
++    if now < *next {
++        return;
++    }
++    *next = now + 10.0;
++    let far: Vec<String> = config.map(|c| c.bounds.iter().map(|b| format!("{b:.0}")).collect()).unwrap_or_default();
++    let texel: Vec<String> = cascades
++        .and_then(|cs| cs.cascades.values().next())
++        .map(|list| list.iter().map(|k| format!("{:.1}", k.texel_size)).collect())
++        .unwrap_or_default();
++    let casters: Vec<String> = visible
++        .and_then(|v| v.entities.values().next())
++        .map(|lists| lists.iter().map(|l| l.entities.len().to_string()).collect())
++        .unwrap_or_default();
++    let mode = if performance.is_some_and(|p| p.0) { "performance" } else { "quality" };
++    info!(
++        "shadow census: sun {} ({mode}), {views} cascades of {}², far [{}] units, texel [{}]; casters [{}]; in {} frames: on->off {} times, frames without cascades {}, light turned on {} frames (largest step {:.4}°)",
++        if on { "on" } else { "off" },
++        map.map_or(0, |m| m.size),
++        far.join(", "),
++        texel.join(", "),
++        casters.join("/"),
++        c.frames,
++        c.on_to_off,
++        c.no_cascades,
++        c.turned,
++        c.largest_turn,
++    );
++    info!(
++        "shadow census: cloud {}, image {} ({} of {} frames without one)",
++        if cloud_on { "on" } else { "off" },
++        if vis.as_ref().is_some_and(|v| v.cloud.is_some()) { "shown" } else { "none" },
++        c.cloud_missing,
++        c.frames
++    );
++    info!(
++        "shadow census: pipelines waiting {} (most in one frame), failed {}",
++        WAITING_MAX.swap(0, Ordering::Relaxed),
++        FAILED.load(Ordering::Relaxed)
++    );
++    let keep_dir = c.last_dir;
++    let keep_on = c.was_on;
++    *c = Counts { last_dir: keep_dir, was_on: keep_on, ..default() };
++}
++
++fn shadow_test(world: &mut World) {
++    let ask = nvf_play::console::SHADOW_TEST.swap(0, Ordering::Relaxed);
++    if ask == 0 {
++        return;
++    }
++    let (sun, cloud) = match ask {
++        1 => (false, false),
++        2 => (true, false),
++        3 => (false, true),
++        _ => (true, true),
++    };
++    use nvf_play::settings::{flip, pick, Settings};
++    let Some(s) = world.get_resource::<Settings>() else { return };
++    let sun_row = s.index("sun-shadows");
++    let cloud_row = s.index("cloud-shadows");
++    let cloud_now = cloud_row.and_then(|i| s.list().get(i).copied()).is_some_and(|r| (r.get)(world));
++    if let Some(i) = sun_row {
++        let name = if sun { if crate::shadow_rate::sun_shadow_choice(world) == 0 { "Quality" } else { crate::shadow_rate::SUN_SHADOW_CHOICES[crate::shadow_rate::sun_shadow_choice(world)] } } else { "Off" };
++        pick(world, i, name);
++    }
++    if let Some(i) = cloud_row {
++        if cloud_now != cloud {
++            flip(world, i);
++        }
++    }
++    info!(
++        "shadow test {ask}: sun shadows {}, cloud shadows {}",
++        if sun { "on" } else { "off" },
++        if cloud { "on" } else { "off" }
++    );
++}
 diff --git a/engine/nvforever/src/shadow_rate.rs b/engine/nvforever/src/shadow_rate.rs
-index d428306..e1bcc59 100644
+index d428306..412a2aa 100644
 --- a/engine/nvforever/src/shadow_rate.rs
 +++ b/engine/nvforever/src/shadow_rate.rs
-@@ -319,7 +319,17 @@ pub(crate) fn hold_cascades(
+@@ -130,7 +130,14 @@ pub fn set_performance(world: &mut World, on: bool) {
+     };
+     world.resource_mut::<SkyState>().shadow_layout = layout;
+     let cascades = layout.count();
+-    let how = if on {
++    let how = if cfg!(target_os = "android") {
++        // [nvport] A phone draws every cascade every frame in both modes (hold_cascades).
++        if on {
++            "performance on a phone (every cascade drawn every frame, trees cast near the camera only, no arms shade light)"
++        } else {
++            "quality on a phone (every cascade drawn every frame)"
++        }
++    } else if on {
+         "performance (maps drawn every other frame, the farthest every fourth, trees cast near the camera only, no arms shade light)"
+     } else if staggered() {
+         "cascades on a staggered schedule (the nearest every frame, the farther ones less often)"
+@@ -319,7 +326,17 @@ pub(crate) fn hold_cascades(
      if let Some(share) = share.as_mut().filter(|s| s.0.is_some()) {
          share.0 = None;
      }
@@ -3664,7 +4433,7 @@ index d428306..e1bcc59 100644
      } else if staggered() {
          &STAGGERED_SCHEDULE
 diff --git a/engine/nvforever/src/sky.rs b/engine/nvforever/src/sky.rs
-index bd2755d..62cf56c 100644
+index bd2755d..bca55f7 100644
 --- a/engine/nvforever/src/sky.rs
 +++ b/engine/nvforever/src/sky.rs
 @@ -981,6 +981,13 @@ impl SkyState {
@@ -3708,16 +4477,18 @@ index bd2755d..62cf56c 100644
          let cur = at(&self.weather);
          let dimmer = match &self.prev {
              Some(p) => at(p) + (cur - at(p)) * self.fade,
-@@ -2157,7 +2167,12 @@ pub fn update_sky(
+@@ -2157,7 +2167,14 @@ pub fn update_sky(
      }
      // The sun light turns with the game clock every frame, not with the sky's half-minute
      // steps (`SkyState::sun_light_hour`); its colour still changes with the sky below.
 -    let light_dir = to_bevy.rotation * Vec3::from_array(sun_direction(c, sky.sun_light_hour(), SUN_SOUTH));
-+    // [nvport] On a phone the light turns in steps of a game minute (0.25 degrees, about
-+    // two seconds of play): a light that turns every frame moves the shadow maps' texel
-+    // grid every frame, and every shadow edge crawled and shimmered (players' reports).
-+    // Between the steps the shadows stand still.
-+    let light_hour = if cfg!(target_os = "android") { (sky.sun_light_hour() * 60.0).floor() / 60.0 } else { sky.sun_light_hour() };
++    // [nvport] A phone turns the light every frame as upstream. The game-minute steps of
++    // alpha33-45 (0.25 degrees about every two seconds) moved every sun shadow by about
++    // 4 texels of the anchored grid at each step (shadow_anchor.rs: 887 texels from the
++    // anchor x 0.0044 rad): the shadows jumped. The crawl the steps were for came from the
++    // held cascades, which a phone no longer holds (shadow_rate.rs), and the anchored grid
++    // leaves about 0.03 texel a frame.
++    let light_hour = sky.sun_light_hour();
 +    let light_dir = to_bevy.rotation * Vec3::from_array(sun_direction(c, light_hour, SUN_SOUTH));
      if let Ok((mut light, mut t)) = sun.single_mut() {
          aim_sun(&mut light, &mut t, light_dir, to_bevy.rotation * Vec3::Y, PI * unit * sky.sun_scale() * sun_mod);
@@ -3737,29 +4508,51 @@ index 5a7c1e2..5f62ce4 100644
              layer.clone(),
 diff --git a/engine/nvforever/src/texture_live.rs b/engine/nvforever/src/texture_live.rs
 new file mode 100644
-index 0000000..eeac409
+index 0000000..9a86930
 --- /dev/null
 +++ b/engine/nvforever/src/texture_live.rs
-@@ -0,0 +1,134 @@
+@@ -0,0 +1,236 @@
 +//! [nvport] Texture Quality applied live, without a restart. When the mip levels the
 +//! textures drop change (`nvf_assets::texture::set_mip_skip`), every world texture the
 +//! cache holds is read again on a worker thread, a batch at a time, and put back under its
-+//! own handle: the GPU uploads it (inside the frame's upload limit) and drops the old
-+//! texture once the materials that sampled it are bound again (marked changed here).
-+//! Interface and distant-LOD textures keep every level and are not read again; a texture
-+//! whose format would change keeps its current picture (never a half-made material).
++//! own handle: the GPU uploads it (inside the frame's upload limit) and the old GPU texture
++//! goes once the materials that sampled it are bound again (marked changed here).
++//!
++//! - One job at a time; a new choice while a job runs replaces it: the batch on its way is
++//!   dropped (it was read at the old choice) and the job starts over from every texture.
++//! - A texture that fails to read, or would change format, keeps its current picture
++//!   (never a missing or half-made material); one no longer used by anything is skipped.
++//! - When more than a quarter of a job's textures fail, the previous quality is put back
++//!   and read again (logged).
++//! - Interface, Pip-Boy, HUD and distant-LOD textures keep every level
++//!   (`nvf_assets::texture::skips_levels`) and are not read again.
++//! - [`progress`] gives the settings row "applying n/m"; the run log gets the count, the
++//!   time, the replaced textures' GPU size before and after, and the GPU allocator's and
++//!   the process's memory before and after (or that they are not available).
 +
 +use bevy::image::CompressedImageFormatSupport;
 +use bevy::prelude::*;
++use bevy::render::renderer::RenderDevice;
 +use bevy::tasks::{futures::check_ready, AsyncComputeTaskPool, Task};
-+use nvf_assets::release::{image_bytes, material_images};
++use nvf_assets::release::{held_beyond, image_bytes, material_images};
 +use nvf_assets::texture::{self, TextureUsage};
 +use nvf_assets::{GameData, NifMaterial, TextureCache};
 +use std::collections::{HashSet, VecDeque};
++use std::sync::atomic::{AtomicU32, Ordering};
 +use std::time::Instant;
 +
 +/// Textures read again per worker task (one task at a time, so the frame never waits).
 +const BATCH: usize = 24;
++
++/// Textures done and in all of the running job (0, 0: none running).
++static DONE: AtomicU32 = AtomicU32::new(0);
++static TOTAL: AtomicU32 = AtomicU32::new(0);
++
++/// The running job's progress, `None` when none runs.
++pub fn progress() -> Option<(u32, u32)> {
++    let total = TOTAL.load(Ordering::Relaxed);
++    (total > 0).then(|| (DONE.load(Ordering::Relaxed), total))
++}
 +
 +type Done = Vec<(Handle<Image>, Result<Image, String>)>;
 +
@@ -3767,14 +4560,24 @@ index 0000000..eeac409
 +struct Reread {
 +    /// The skip the held textures are at; `None` until the first frame.
 +    applied: Option<u32>,
++    /// The skip before the running job's (put back when the job mostly fails).
++    previous: u32,
 +    queue: VecDeque<(String, TextureUsage, Handle<Image>)>,
-+    task: Option<Task<Done>>,
++    /// The batch on its way and the skip it was read at.
++    task: Option<(u32, Task<Done>)>,
 +    total: usize,
 +    done: usize,
 +    kept: usize,
++    failed: usize,
 +    bytes_before: u64,
 +    bytes_after: u64,
++    gpu_before: Option<(u64, u64)>,
++    rss_before: Option<u64>,
 +    started: Option<Instant>,
++    /// The skip being put back after a failed job (that job is not undone again).
++    restore_to: Option<u32>,
++    /// The running job is such a putting back.
++    restoring: bool,
 +}
 +
 +pub struct TextureLivePlugin;
@@ -3785,78 +4588,113 @@ index 0000000..eeac409
 +    }
 +}
 +
++/// The GPU allocator's allocated and reserved bytes (wgpu's report), if it gives one.
++fn gpu_memory(device: Option<&RenderDevice>) -> Option<(u64, u64)> {
++    let r = device?.wgpu_device().generate_allocator_report()?;
++    Some((r.total_allocated_bytes, r.total_reserved_bytes))
++}
++
++/// This process's resident memory (`/proc/self/statm`, pages of 4 KiB), bytes.
++fn rss() -> Option<u64> {
++    let t = std::fs::read_to_string("/proc/self/statm").ok()?;
++    let pages: u64 = t.split_whitespace().nth(1)?.parse().ok()?;
++    Some(pages * 4096)
++}
++
++fn mb(b: Option<u64>) -> String {
++    b.map_or_else(|| "not available".to_string(), |b| format!("{} MB", b >> 20))
++}
++
 +fn reread(
 +    mut state: ResMut<Reread>,
 +    cache: Option<Res<TextureCache>>,
 +    data: Option<Res<GameData>>,
 +    formats: Option<Res<CompressedImageFormatSupport>>,
++    device: Option<Res<RenderDevice>>,
 +    mut images: ResMut<Assets<Image>>,
 +    mut materials: ResMut<Assets<NifMaterial>>,
 +) {
 +    let (Some(cache), Some(data)) = (cache, data) else { return };
 +    let skip = texture::mip_skip();
 +    let applied = *state.applied.get_or_insert(skip);
-+    // A new choice: start over from every texture held now (a batch on its way finishes
-+    // first; what it brings back is at the skip it was read at, and read again here).
-+    if applied != skip && state.task.is_none() {
++    if applied != skip {
++        // A new choice: the batch on its way (read at the old one) is dropped, and the job
++        // starts over from every texture held now.
++        state.task = None;
++        state.restoring = state.restore_to.take() == Some(skip);
++        state.previous = applied;
 +        state.applied = Some(skip);
 +        state.queue = cache.held().into_iter().filter(|(path, _, _)| texture::skips_levels(path)).collect();
 +        state.total = state.queue.len();
 +        state.done = 0;
 +        state.kept = 0;
++        state.failed = 0;
 +        state.bytes_before = 0;
 +        state.bytes_after = 0;
++        state.gpu_before = gpu_memory(device.as_deref());
++        state.rss_before = rss();
 +        state.started = Some(Instant::now());
-+        info!("texture quality: {} textures to read again at {skip} mip level(s) dropped (was {applied})", state.total);
++        DONE.store(0, Ordering::Relaxed);
++        TOTAL.store(state.total as u32, Ordering::Relaxed);
++        info!(
++            "texture quality: {} textures to read again at {skip} mip level(s) dropped (was {applied}); wgpu allocator {} allocated (wgpu report), process RAM {} (statm)",
++            state.total,
++            mb(state.gpu_before.map(|g| g.0)),
++            mb(state.rss_before)
++        );
 +    }
-+    if let Some(task) = state.task.as_mut() {
++    if let Some((read_at, task)) = state.task.as_mut() {
++        let read_at = *read_at;
 +        let Some(done) = check_ready(task) else { return };
 +        state.task = None;
-+        let mut changed = HashSet::new();
-+        for (handle, result) in done {
-+            match result {
-+                Ok(mut image) => {
-+                    if let Some(old) = images.get(&handle) {
-+                        if old.texture_descriptor.format != image.texture_descriptor.format {
++        if read_at == skip {
++            let mut changed = HashSet::new();
++            for (handle, result) in done {
++                match result {
++                    Ok(mut image) => {
++                        // Only the queue's copy left: nothing draws it any more.
++                        if !held_beyond(&handle, 1) {
 +                            state.kept += 1;
 +                            continue;
 +                        }
-+                        // The sampler as it is now (anisotropy, clamped edges).
-+                        image.sampler = old.sampler.clone();
-+                        state.bytes_before += image_bytes(old);
++                        if let Some(old) = images.get(&handle) {
++                            if old.texture_descriptor.format != image.texture_descriptor.format {
++                                state.kept += 1;
++                                continue;
++                            }
++                            // The sampler as it is now (anisotropy, clamped edges).
++                            image.sampler = old.sampler.clone();
++                            state.bytes_before += image_bytes(old);
++                        }
++                        let after = image_bytes(&image);
++                        if images.insert(handle.id(), image).is_ok() {
++                            state.bytes_after += after;
++                            changed.insert(handle.id());
++                            state.done += 1;
++                        } else {
++                            state.failed += 1;
++                        }
 +                    }
-+                    state.bytes_after += image_bytes(&image);
-+                    if images.insert(handle.id(), image).is_ok() {
-+                        changed.insert(handle.id());
-+                        state.done += 1;
++                    Err(e) => {
++                        state.failed += 1;
++                        warn!("texture quality: kept the current picture of {e}");
 +                    }
 +                }
-+                Err(e) => {
-+                    state.kept += 1;
-+                    warn!("texture quality: kept {e}");
++            }
++            if !changed.is_empty() {
++                let touched: Vec<_> = materials
++                    .iter()
++                    .filter(|(_, m)| material_images(m).any(|h| changed.contains(&h.id())))
++                    .map(|(id, _)| id)
++                    .collect();
++                for id in touched {
++                    let _ = materials.get_mut(id);
 +                }
 +            }
-+        }
-+        if !changed.is_empty() {
-+            let touched: Vec<_> = materials
-+                .iter()
-+                .filter(|(_, m)| material_images(m).any(|h| changed.contains(&h.id())))
-+                .map(|(id, _)| id)
-+                .collect();
-+            for id in touched {
-+                let _ = materials.get_mut(id);
++            DONE.store((state.done + state.kept + state.failed) as u32, Ordering::Relaxed);
++            if state.queue.is_empty() {
++                finish(&mut state, skip, device.as_deref());
 +            }
-+        }
-+        if state.queue.is_empty() {
-+            let secs = state.started.map_or(0.0, |t| t.elapsed().as_secs_f32());
-+            info!(
-+                "texture quality: {} of {} textures read again in {secs:.1} s, {} kept; their GPU size {} MB -> {} MB",
-+                state.done,
-+                state.total,
-+                state.kept,
-+                state.bytes_before >> 20,
-+                state.bytes_after >> 20
-+            );
 +        }
 +    }
 +    if state.task.is_none() && !state.queue.is_empty() {
@@ -3864,7 +4702,7 @@ index 0000000..eeac409
 +        let batch: Vec<_> = state.queue.drain(..n).collect();
 +        let data = data.clone();
 +        let bc = texture::bc_supported_or_known(formats.as_deref());
-+        state.task = Some(AsyncComputeTaskPool::get().spawn(async move {
++        let task = AsyncComputeTaskPool::get().spawn(async move {
 +            batch
 +                .into_iter()
 +                .map(|(path, usage, handle)| {
@@ -3872,8 +4710,43 @@ index 0000000..eeac409
 +                    (handle, r)
 +                })
 +                .collect()
-+        }));
++        });
++        state.task = Some((skip, task));
 +    }
++}
++
++fn finish(state: &mut Reread, skip: u32, device: Option<&RenderDevice>) {
++    let secs = state.started.map_or(0.0, |t| t.elapsed().as_secs_f32());
++    let gpu_after = gpu_memory(device);
++    info!(
++        "texture quality: done at {skip} mip level(s) dropped in {secs:.1} s: {} of {} textures replaced (their old GPU textures released), {} kept (unused or another format), {} failed; their texture size by format {} MB -> {} MB (computed, not measured); wgpu allocator {} -> {} allocated (wgpu report); process RAM {} -> {} (statm)",
++        state.done,
++        state.total,
++        state.kept,
++        state.failed,
++        state.bytes_before >> 20,
++        state.bytes_after >> 20,
++        mb(state.gpu_before.map(|g| g.0)),
++        mb(gpu_after.map(|g| g.0)),
++        mb(state.rss_before),
++        mb(rss()),
++    );
++    TOTAL.store(0, Ordering::Relaxed);
++    DONE.store(0, Ordering::Relaxed);
++    state.started = None;
++    if !state.restoring && state.total > 0 && state.failed * 4 > state.total {
++        warn!(
++            "texture quality: {} of {} textures failed at {skip} level(s); putting back {} level(s)",
++            state.failed, state.total, state.previous
++        );
++        state.restore_to = Some(state.previous);
++        texture::set_mip_skip(state.previous);
++        // The launcher's copy, for the next start.
++        if let Some(home) = std::env::var_os("NVFOREVER_HOME") {
++            let _ = std::fs::write(std::path::Path::new(&home).join("texture_quality.txt"), state.previous.to_string());
++        }
++    }
++    state.restoring = false;
 +}
 diff --git a/engine/nvforever/src/vats_highlight.rs b/engine/nvforever/src/vats_highlight.rs
 index 6d465f5..a11ab69 100644
@@ -4035,6 +4908,94 @@ index 7566f48..c5c142e 100644
      let view_uniforms_buffer = view_uniforms.uniforms.buffer().unwrap();
      let source = view_target.main_texture_view();
  
+diff --git a/engine/vendor/bevy_render/src/render_asset.rs b/engine/vendor/bevy_render/src/render_asset.rs
+index 17628cb..4f44875 100644
+--- a/engine/vendor/bevy_render/src/render_asset.rs
++++ b/engine/vendor/bevy_render/src/render_asset.rs
+@@ -446,11 +446,14 @@ pub fn prepare_assets<A: RenderAsset>(
+     }
+ 
+     for (id, extracted_asset) in extracted_assets.extracted.drain(..) {
+-        // we remove previous here to ensure that if we are updating the asset then
+-        // any users will not see the old asset after a new asset is extracted,
+-        // even if the new asset is not yet ready or we are out of bytes to write.
+-        let previous_asset = render_assets.remove(id);
+-
++        // NVForever: an updated asset keeps its previous version in use until the new one
++        // is prepared. Upstream removed the previous version here, so an update that waited
++        // for the frame's upload budget (or for a dependency) left the asset missing for
++        // those frames: a replaced texture's GPU image was gone, and a material re-prepared
++        // over it was gone with it, so its meshes were not drawn (objects blinking out while
++        // textures were read again at another quality, or while the cloud-shadow image is
++        // rewritten during streaming). The previous version is dropped once the new one is
++        // in; wgpu keeps its GPU objects alive until the work that used them is done.
+         let write_bytes = if let Some(size) = A::byte_len(&extracted_asset) {
+             if bpf.exhausted() {
+                 prepare_next_frame.assets.push((id, extracted_asset));
+@@ -461,6 +464,7 @@ pub fn prepare_assets<A: RenderAsset>(
+             0
+         };
+ 
++        let previous_asset = render_assets.remove(id);
+         match A::prepare_asset(extracted_asset, id, &mut param, previous_asset.as_ref()) {
+             Ok(prepared_asset) => {
+                 render_assets.insert(id, prepared_asset);
+@@ -468,6 +472,9 @@ pub fn prepare_assets<A: RenderAsset>(
+                 wrote_asset_count += 1;
+             }
+             Err(PrepareAssetError::RetryNextUpdate(extracted_asset)) => {
++                if let Some(previous) = previous_asset {
++                    render_assets.insert(id, previous);
++                }
+                 prepare_next_frame.assets.push((id, extracted_asset));
+             }
+             Err(PrepareAssetError::AsBindGroupError(e)) => {
+diff --git a/engine/vendor/bevy_render/src/renderer/render_device.rs b/engine/vendor/bevy_render/src/renderer/render_device.rs
+index 614b9b3..4b8ff10 100644
+--- a/engine/vendor/bevy_render/src/renderer/render_device.rs
++++ b/engine/vendor/bevy_render/src/renderer/render_device.rs
+@@ -222,8 +222,39 @@ impl RenderDevice {
+ 
+     /// Creates a [`Buffer`] and initializes it with the specified data.
+     pub fn create_buffer_with_data(&self, desc: &wgpu::util::BufferInitDescriptor) -> Buffer {
+-        let wgpu_buffer = self.device.create_buffer_init(desc);
+-        Buffer::from(wgpu_buffer)
++        // NVForever: wgpu's `create_buffer_init` panics when the new buffer cannot be
++        // mapped ("Failed to get mapped range for buffer created with mapped_at_creation"),
++        // which is what a lost device or an exhausted GPU heap gives. The same steps here,
++        // with that case logged and the (invalid) buffer handed back, so the loss goes
++        // through the device-lost / uncaptured-error handlers (error_handler.rs) instead of
++        // a panic named after whichever buffer came next.
++        if desc.contents.is_empty() {
++            return Buffer::from(self.device.create_buffer_init(desc));
++        }
++        let unpadded = desc.contents.len() as wgpu::BufferAddress;
++        let mask = wgpu::COPY_BUFFER_ALIGNMENT - 1;
++        let padded = ((unpadded + mask) & !mask).max(wgpu::COPY_BUFFER_ALIGNMENT);
++        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
++            label: desc.label,
++            size: padded,
++            usage: desc.usage,
++            mapped_at_creation: true,
++        });
++        match buffer.get_mapped_range_mut(..) {
++            Ok(mut range) => {
++                range.slice(..unpadded as usize).copy_from_slice(desc.contents);
++                drop(range);
++                buffer.unmap();
++            }
++            Err(e) => {
++                bevy_log::error!(
++                    "GPU buffer {:?} ({} bytes) could not be mapped at creation: {e} (a lost device or no GPU memory left; the device-lost handler decides)",
++                    desc.label,
++                    padded
++                );
++            }
++        }
++        Buffer::from(buffer)
+     }
+ 
+     /// Creates a new [`Texture`] and initializes it with the specified data.
 diff --git a/engine/vendor/bevy_winit/src/system.rs b/engine/vendor/bevy_winit/src/system.rs
 index 22ad677..df42c57 100644
 --- a/engine/vendor/bevy_winit/src/system.rs
@@ -4254,7 +5215,7 @@ index c5d8126..b4e3264 100644
      panic!("Device lost");
  
 diff --git a/lang/ru.toml b/lang/ru.toml
-index 69dc72c..3d63ea5 100644
+index 69dc72c..b077f1b 100644
 --- a/lang/ru.toml
 +++ b/lang/ru.toml
 @@ -6,6 +6,569 @@
@@ -5158,7 +6119,7 @@ index 69dc72c..3d63ea5 100644
  "Quality of Life" = "Удобство"
  "Menus" = "Меню"
  "Cheats" = "Читы"
-@@ -530,23 +1093,203 @@ name = "Русский"
+@@ -530,23 +1093,206 @@ name = "Русский"
  # [design, #2014, #2317, #2662, #2688, #2149, #2169, #2403] Rows main registers without a Russian line.
  "On: when choices appear the view returns to the speaker (with the close-up off). Needs \"Turn to Each Other\"." = "Вкл.: когда появляются варианты ответа, вид возвращается к собеседнику (при выключенном приближении). Нужен «Поворот друг к другу в диалоге»."
  "Grass fires" = "Пожары в траве"
@@ -5370,3 +6331,6 @@ index 69dc72c..3d63ea5 100644
 +"Ultra" = "Ультра"
 +"Very Low" = "Очень низкое"
 +"The textures' detail: Ultra keeps every level; each step down drops one more (a quarter of the memory), Potato five. Applied at once: the textures are read again in the background." = "Детализация текстур: Ультра — все уровни; каждая ступень ниже отбрасывает ещё один (в 4 раза меньше памяти), Картошка — пять. Применяется сразу: текстуры перечитываются в фоне."
++"Graphics Profile" = "Профиль графики"
++"Reset to Default" = "Сброс по умолчанию"
++"Sets textures, resolution, shadows, distances, grass, water, effects and anti-aliasing together. Changing any of them shows Custom; Reset to Default takes this phone's profile." = "Задаёт вместе текстуры, разрешение, тени, дальности, траву, воду, эффекты и сглаживание. Изменение любого из них показывает «Свой»; «Сброс по умолчанию» берёт профиль этого телефона."

@@ -214,6 +214,15 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
         }
     }
 
+    private static int gcd(int a, int b) {
+        while (b != 0) {
+            int t = a % b;
+            a = b;
+            b = t;
+        }
+        return Math.max(1, a);
+    }
+
     private void fitSurface(int vw, int vh) {
         if (vw <= 0 || vh <= 0) return;
         int target = FalloutEngine.renderHeight(this);
@@ -221,9 +230,24 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
         // Dynamic resolution's share of the chosen height (1 when it is off).
         target = Math.max(240, Math.round(target * drsScale));
         int th = Math.min(vh, target);
-        int tw = Math.round(th * (float) vw / vh);
-        tw &= ~1;
-        th &= ~1;
+        int tw;
+        // The view's exact aspect at every size: sizes that are whole multiples of the
+        // view's sides divided by their common divisor (1080x2400: 9x20 steps). A size
+        // rounded from the scale changed the aspect a little at each dynamic resolution
+        // step, which refitted the sun's shadow cascades to a new texel size and moved
+        // every shadow edge (shadow_anchor.rs takes a fresh grid for a new texel size).
+        int g = gcd(vw, vh);
+        int uw = vw / g, uh = vh / g;
+        int n = th / uh;
+        if (uh * 4 <= th && n >= 2) {
+            if (((uw * n) & 1) != 0 || ((uh * n) & 1) != 0) n -= 1;
+            tw = uw * n;
+            th = uh * n;
+        } else {
+            tw = Math.round(th * (float) vw / vh);
+            tw &= ~1;
+            th &= ~1;
+        }
         if (tw != fixedW || th != fixedH) {
             fixedW = tw;
             fixedH = th;

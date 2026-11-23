@@ -1,5 +1,38 @@
 # Fallout Droid Native — CHANGELOG
 
+## 2.0.0-alpha46 (345)
+Built and checked by compilation only; nothing here verified on a device yet.
+- GPU detection from the Vulkan device (not the phone's name): run log `gpu:` lines with the
+  GPU name, PCI vendor id and family (Adreno, Mali, Xclipse, PowerVR; an unknown GPU stays
+  "other"), driver, Vulkan API version, enabled extensions, memory heaps; kept in
+  `gpu_family.txt` for the launcher.
+- Memory every 30 s, three sources never mixed: `memory: Vulkan budget/usage (driver,
+  VK_EXT_memory_budget) | wgpu allocated/reserved (wgpu allocator report) | process RAM
+  (/proc/self/statm)`, "not available" where a source gives nothing.
+- A GPU buffer that cannot be mapped at creation (lost device or no GPU memory) is logged
+  and goes to the device-lost handler instead of panicking ("Failed to get mapped range …
+  GpuClusterableObjectIndexListsStorage" was that panic: the buffer's name was only the next
+  one made, not a cause).
+- An updated GPU asset (texture, material, mesh) keeps its previous version until the new one
+  is uploaded: before, an update waiting for the frame's upload budget left it missing for
+  those frames, and the meshes using it were not drawn (blinking).
+- Sun shadows: the light turns every frame again (the game-minute steps since alpha33 moved
+  every shadow by ~4 texels every ~2 s); dynamic resolution keeps the screen's exact aspect
+  at every step (a rounded aspect refitted the cascades to a new texel size and moved every
+  shadow edge at each step).
+- Shadow diagnostics: `shadow census:` lines every 10 s (sun on/off flips, frames without
+  cascades, light steps, cascades, casters; cloud image present; shader pipelines waiting or
+  failed, each failure named); console `fdshadows off|sun|cloud|both` for the four tests.
+- Texture Quality switching: one job at a time; a new choice drops the batch on its way and
+  starts over; a texture that fails keeps its picture; over a quarter failing puts the
+  previous quality back and reads it again; progress shown in the row ("Medium (120/900)").
+- Graphics Profile row: Ultra, High, Medium, Low, Potato over the real rows (textures,
+  resolution, dynamic resolution, sun shadows and distance, object/actor/item/tree/grass
+  distances, grass, water, bloom, glow, eye adaptation, light shafts, cloud shadows, AO,
+  anisotropy, anti-aliasing); Custom when any row differs; Reset to Default (this phone's
+  profile by class and RAM). The stored row never re-applies at the start: rows are kept
+  on their own.
+
 ## 2.0.0-alpha45 (344)
 - Texture Quality in the game's settings: Ultra, High, Medium, Low, Very Low, Potato (0–5 mip
   levels dropped), applied at once without a restart: every world texture held is read again
