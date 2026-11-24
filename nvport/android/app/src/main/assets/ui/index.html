@@ -564,6 +564,49 @@ svg.fluent-ico {
 }
 .nav-tabs-strip::-webkit-scrollbar { display: none; }
 
+/* Launcher radio: a compact player in the left of the tab strip, no cover art. */
+#main-nav-strip { position: relative; }
+.fd-player {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 420px;
+  height: 34px;
+  margin-right: auto;
+  padding: 0 4px 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 8px;
+  background: rgba(var(--accent-rgb), 0.06);
+  border: 1px solid rgba(var(--accent-rgb), 0.22);
+  overflow: hidden;
+  font-family: 'FalloutMonofonto', monospace;
+}
+.fd-eq { display: flex; align-items: flex-end; gap: 2px; height: 14px; flex: 0 0 auto; }
+.fd-eq i { display: block; width: 3px; height: 4px; background: var(--accent); border-radius: 1px; box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.7); }
+.fd-player.playing .fd-eq i { animation: fdEq 0.9s ease-in-out infinite; }
+.fd-player.playing .fd-eq i:nth-child(2) { animation-delay: -0.3s; }
+.fd-player.playing .fd-eq i:nth-child(3) { animation-delay: -0.6s; }
+.fd-player.playing .fd-eq i:nth-child(4) { animation-delay: -0.15s; }
+@keyframes fdEq { 0%, 100% { height: 3px; } 50% { height: 14px; } }
+.fd-track { flex: 1 1 auto; min-width: 0; line-height: 1.05; cursor: pointer; }
+.fd-title-wrap { overflow: hidden; white-space: nowrap; }
+.fd-title { display: inline-block; color: var(--accent); font-size: 13px; letter-spacing: 0.3px; text-shadow: 0 0 6px rgba(var(--accent-rgb), 0.55); }
+.fd-title.scroll { animation: fdMarquee var(--fd-dur, 12s) linear infinite; padding-left: 100%; }
+@keyframes fdMarquee { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+.fd-artist { color: var(--text-muted); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fd-btn {
+  flex: 0 0 auto; width: 28px; height: 28px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: 1px solid rgba(var(--accent-rgb), 0.35); border-radius: 7px;
+  color: var(--accent); cursor: pointer;
+}
+.fd-btn svg { width: 14px; height: 14px; fill: currentColor; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.fd-btn:active { background: rgba(var(--accent-rgb), 0.18); }
+.fd-progress { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: rgba(var(--accent-rgb), 0.12); }
+.fd-progress-fill { height: 100%; width: 0; background: var(--accent); box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.8); }
+
 .nav-tab-btn {
   flex: 1;
   height: 34px;
@@ -3237,7 +3280,7 @@ body.gamepad-connected-mode #ingame-controls-layer {
 </div>
 
 <!-- Audio Elements -->
-<audio id="launcher-bg-music" src="../audio/city_of_ruin.mp3" loop preload="auto"></audio>
+<audio id="launcher-bg-music" preload="auto"></audio>
 <audio id="ui-click-audio-fallback" src="../audio/ui_click.mp3" preload="auto"></audio>
 
 <!-- IN-GAME ONLY FPS HUD BADGE (Strictly visible only inside running container when enabled in FalloutDroid Настройки) -->
@@ -3353,7 +3396,19 @@ body.gamepad-connected-mode #ingame-controls-layer {
         <img src="../art/logo_fallout_droid.png" alt="FalloutDroid by Rommy" class="brand-logo-official" />
       </div>
 
-      <nav class="nav-tabs-strip" id="main-nav-strip" style="justify-content:center;gap:10px;">
+      <nav class="nav-tabs-strip" id="main-nav-strip" style="justify-content:flex-end;gap:10px;">
+        <div class="fd-player" id="fd-player" aria-label="Радио лаунчера">
+          <div class="fd-eq" id="fd-eq"><i></i><i></i><i></i><i></i></div>
+          <div class="fd-track" onclick="fdMusicToggle()">
+            <div class="fd-title-wrap"><span class="fd-title" id="fd-title">—</span></div>
+            <div class="fd-artist" id="fd-artist"></div>
+          </div>
+          <button class="fd-btn" id="fd-play-btn" title="Пауза / играть" aria-label="Пауза / играть" onclick="fdMusicToggle()"></button>
+          <button class="fd-btn" title="Следующий трек" aria-label="Следующий трек" onclick="fdMusicNext(true)">
+            <svg viewBox="0 0 24 24"><path d="M5 5.5v13l9-6.5-9-6.5z"/><path d="M17 5v14"/></svg>
+          </button>
+          <div class="fd-progress"><div class="fd-progress-fill" id="fd-progress"></div></div>
+        </div>
         <button class="nav-tab-btn icon-only active" data-tab="home" title="Главная" aria-label="Главная" onclick="switchMainTab('home')">
           <svg viewBox="0 0 24 24"><path d="M3 10.5L12 3l9 7.5"/><path d="M5 9.8V20a1 1 0 0 0 1 1h4.5v-6h3v6H18a1 1 0 0 0 1-1V9.8"/></svg>
         </button>
@@ -3449,7 +3504,7 @@ body.gamepad-connected-mode #ingame-controls-layer {
           <div class="hero-right-col">
             <!-- Full-bleed trailer card with ONLY clean SVG icons (no text labels!) -->
             <div class="trailer-card" id="home-trailer-container">
-              <video id="home-trailer-video" src="../trailers/FalloutNVt.mp4" autoplay loop muted playsinline></video>
+              <video id="home-trailer-video" src="../trailers/FalloutNVt.mp4" autoplay loop muted playsinline preload="auto" poster="../art/launcher_art.jpg"></video>
               <div class="trailer-icon-controls">
                 <button class="trailer-ico-btn" id="trailer-mute-btn" onclick="toggleHomeTrailerSound()" title="Звук трейлера">
                   <span id="trailer-mute-ico"></span>
@@ -3691,14 +3746,7 @@ body.gamepad-connected-mode #ingame-controls-layer {
                 </div>
               </div>
 
-              <div class="sec-group-title">Аудиосистема (Автоприглушение 21. City of Ruin.mp3 и звук UI)</div>
-              <div class="setting-row">
-                <div>
-                  <div class="setting-name">Громкость фоновой музыки (21. City of Ruin.mp3)</div>
-                  <div class="setting-hint">Автоматически приглушается при включении звука трейлера и возобновляется при его отключении</div>
-                </div>
-                <input type="range" min="0" max="100" value="45" oninput="setLauncherMusicVolume(this.value)" />
-              </div>
+              <div class="sec-group-title">Звук интерфейса</div>
               <div class="setting-row">
                 <div>
                   <div class="setting-name">Звук нажатий интерфейса (pop-up-bubble-notification-2.mp3)</div>
@@ -3984,7 +4032,7 @@ body.gamepad-connected-mode #ingame-controls-layer {
      IN-GAME INTERACTIVE CONTAINER RUNTIME VIEW (Opened by «ИГРАТЬ»)
      ========================================================================== -->
 <div id="ingame-container-screen">
-  <video id="ingame-viewport-video" src="../trailers/FalloutNVt.mp4" loop playsinline></video>
+  <video id="ingame-viewport-video" preload="none" loop playsinline></video>
 
   <!-- Subtle top-left button to open «FalloutDroid Настройки» side drawer in-game -->
   <button id="ingame-drawer-trigger" onclick="toggleSideDrawer()" title="FalloutDroid Настройки (или кнопка Назад)">
@@ -4369,12 +4417,117 @@ function reopenSetupWizard() {
 }
 
 // ============================================================================
-// 6. AUTOMATIC AUDIO DUCKING BETWEEN MAIN MENU (21. City of Ruin.mp3) & TRAILER
+// 6. AUTOMATIC AUDIO DUCKING BETWEEN THE LAUNCHER RADIO & THE TRAILER
 //    (No music mute button in menu! Trailer sound ON -> Menu music pauses;
 //     Trailer sound Muted -> Menu music plays automatically!)
 // ============================================================================
 const bgMusic = document.getElementById('launcher-bg-music');
 bgMusic.volume = 0.45;
+
+// ---- Launcher radio: eight songs, a new order at every start, a random other one on "next".
+const FD_TRACKS = [
+  { file: 'dont_fence_me_in.m4a', title: "Don't Fence Me In", artist: 'Bing Crosby & The Andrews Sisters' },
+  { file: 'my_rifle_my_pony_and_me.m4a', title: 'My Rifle, My Pony and Me', artist: 'Dean Martin' },
+  { file: 'ladyfingers.m4a', title: 'Ladyfingers', artist: 'Herb Alpert & The Tijuana Brass' },
+  { file: 'all_over_again.m4a', title: 'All Over Again', artist: 'Johnny Cash' },
+  { file: 'drink_to_me.m4a', title: 'Drink to Me', artist: 'Johnny Cash' },
+  { file: 'it_aint_me_babe.m4a', title: "It Ain't Me, Babe", artist: 'Johnny Cash & June Carter' },
+  { file: 'home_on_the_range.m4a', title: 'Home on the Range', artist: 'Roy Rogers' },
+  { file: 'lone_star.m4a', title: 'Lone Star', artist: 'Tony Marcus' }
+];
+const FD_SVG_PLAY = '<svg viewBox="0 0 24 24"><path d="M7 5v14l11-7z"/></svg>';
+const FD_SVG_PAUSE = '<svg viewBox="0 0 24 24"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>';
+let fdOrder = [];
+let fdPos = -1;
+let fdRecent = [];
+window.__fdMusicUserPaused = false;
+
+function fdShuffled() {
+  const a = FD_TRACKS.map((_, i) => i);
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = a[i]; a[i] = a[j]; a[j] = t;
+  }
+  return a;
+}
+
+function fdShow(t) {
+  const title = document.getElementById('fd-title');
+  const artist = document.getElementById('fd-artist');
+  if (!title || !artist) return;
+  title.textContent = t.title;
+  artist.textContent = t.artist;
+  title.classList.remove('scroll');
+  requestAnimationFrame(() => {
+    const wrap = title.parentElement;
+    if (wrap && title.scrollWidth > wrap.clientWidth + 2) {
+      title.style.setProperty('--fd-dur', Math.max(8, title.textContent.length * 0.45) + 's');
+      title.classList.add('scroll');
+    }
+  });
+}
+
+function fdLoad(i, play) {
+  const t = FD_TRACKS[i];
+  fdRecent.push(i);
+  if (fdRecent.length > 3) fdRecent.shift();
+  bgMusic.src = '../audio/music/' + t.file;
+  fdShow(t);
+  if (play) bgMusic.play().catch(() => {});
+}
+
+// Next: in the order shuffled at this start; asked by the player, a random track other than
+// the last few, and the order is shuffled again from there.
+function fdMusicNext(asked) {
+  if (asked) {
+    playUiClick && playUiClick();
+    const pool = FD_TRACKS.map((_, i) => i).filter(i => fdRecent.indexOf(i) < 0);
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    fdOrder = fdShuffled().filter(i => i !== pick);
+    fdOrder.unshift(pick);
+    fdPos = 0;
+    window.__fdMusicUserPaused = false;
+  } else {
+    fdPos++;
+    if (fdPos >= fdOrder.length) { fdOrder = fdShuffled(); fdPos = 0; }
+  }
+  fdLoad(fdOrder[fdPos], window.__fdMusicUserPaused ? false : true);
+  if (typeof syncAudioIsolation === 'function') syncAudioIsolation();
+}
+
+function fdMusicToggle() {
+  if (bgMusic.paused) {
+    window.__fdMusicUserPaused = false;
+    const vid = document.getElementById('home-trailer-video');
+    if (vid && !vid.muted) { vid.muted = true; }
+    bgMusic.play().catch(() => {});
+  } else {
+    window.__fdMusicUserPaused = true;
+    bgMusic.pause();
+  }
+  if (typeof syncAudioIsolation === 'function') syncAudioIsolation();
+}
+
+function fdSyncButton() {
+  const playing = !bgMusic.paused;
+  const btn = document.getElementById('fd-play-btn');
+  if (btn) btn.innerHTML = playing ? FD_SVG_PAUSE : FD_SVG_PLAY;
+  const box = document.getElementById('fd-player');
+  if (box) box.classList.toggle('playing', playing);
+}
+
+bgMusic.addEventListener('ended', () => fdMusicNext(false));
+bgMusic.addEventListener('play', fdSyncButton);
+bgMusic.addEventListener('pause', fdSyncButton);
+bgMusic.addEventListener('error', () => setTimeout(() => fdMusicNext(false), 400));
+bgMusic.addEventListener('timeupdate', () => {
+  const f = document.getElementById('fd-progress');
+  if (f && bgMusic.duration > 0) f.style.width = (100 * bgMusic.currentTime / bgMusic.duration).toFixed(2) + '%';
+});
+fdOrder = fdShuffled();
+fdPos = 0;
+fdLoad(fdOrder[0], false);
+fdSyncButton();
 
 function syncTrailerMuteIcon() {
   const vid = document.getElementById('home-trailer-video');
@@ -4401,8 +4554,8 @@ function syncAudioIsolation() {
       // Trailer sound is ON -> automatically pause main menu music!
       if (!bgMusic.paused) bgMusic.pause();
     } else {
-      // Trailer sound is MUTED -> automatically play 21. City of Ruin.mp3!
-      if (bgMusic.paused) bgMusic.play().catch(() => {});
+      // Trailer sound muted -> the launcher radio plays, unless the player paused it.
+      if (bgMusic.paused && !window.__fdMusicUserPaused) bgMusic.play().catch(() => {});
     }
   }
   syncTrailerMuteIcon();
@@ -4564,8 +4717,46 @@ window.onNativeActivityPause = function() {
 };
 
 window.onNativeActivityResume = function() {
+  fdTrailerRevive(true);
   syncAudioIsolation();
 };
+
+// The home trailer comes back by itself: after the game (its process held the GPU and the
+// decoder), on an error or a stall the element is given its file again and started, so the
+// card never stays black (players' reports, alpha47).
+function fdTrailerRevive(force) {
+  const vid = document.getElementById('home-trailer-video');
+  if (!vid) return;
+  const homePane = document.getElementById('pane-home');
+  if (homePane && !homePane.classList.contains('active')) return;
+  const broken = force || vid.error || vid.readyState < 2 || vid.networkState === 3;
+  if (broken) {
+    const src = (currentGame === 'fo3') ? '../trailers/Fallout3t.mp4' : '../trailers/FalloutNVt.mp4';
+    const muted = vid.muted;
+    vid.removeAttribute('src');
+    vid.load();
+    vid.src = src;
+    vid.muted = muted;
+    vid.load();
+  }
+  vid.play().catch(() => {});
+}
+(function() {
+  const vid = document.getElementById('home-trailer-video');
+  if (!vid) return;
+  let last = -1, still = 0;
+  vid.addEventListener('error', () => setTimeout(() => fdTrailerRevive(true), 500));
+  vid.addEventListener('stalled', () => setTimeout(() => fdTrailerRevive(false), 1500));
+  setInterval(() => {
+    if (document.hidden || currentStage !== 'launcher') return;
+    const homePane = document.getElementById('pane-home');
+    if (homePane && !homePane.classList.contains('active')) return;
+    // Playing but not moving for 6 s: revive.
+    if (!vid.paused && vid.currentTime === last) { still++; } else { still = 0; }
+    last = vid.currentTime;
+    if (still >= 3 || (vid.paused && vid.readyState < 2)) { still = 0; fdTrailerRevive(true); }
+  }, 2000);
+})();
 
 window.onNativeBackPressed = function() {
   if (document.getElementById('fullscreen-controls-editor').classList.contains('open')) {
@@ -5436,7 +5627,7 @@ window.addEventListener('DOMContentLoaded', () => {
   try { applyThemeAccentDom(localStorage.getItem('fd_theme_accent') || 'green'); } catch(e) {}
   updateScreenDiagonalScale();
   syncUiSfxButtonIcon();
-  syncSetupVideoSoundIcon();
+  if (typeof syncSetupVideoSoundIcon === 'function') syncSetupVideoSoundIcon();
   syncTrailerMuteIcon();
   initDraggableEditorPanel();
 

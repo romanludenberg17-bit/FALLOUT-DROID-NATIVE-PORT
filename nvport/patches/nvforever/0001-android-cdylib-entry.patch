@@ -421,7 +421,7 @@ index 50054bb..6a35ddf 100644
          return;
      }
 diff --git a/engine/nvf-assets/src/texture.rs b/engine/nvf-assets/src/texture.rs
-index 4f6f70c..206bb01 100644
+index 4f6f70c..33143bd 100644
 --- a/engine/nvf-assets/src/texture.rs
 +++ b/engine/nvf-assets/src/texture.rs
 @@ -128,7 +128,7 @@ pub(crate) fn worker_texture(
@@ -433,7 +433,7 @@ index 4f6f70c..206bb01 100644
          decoded.image.texture_descriptor.label = Some(folder_label(path));
          Ok(decoded)
      })
-@@ -232,34 +232,205 @@ pub fn dds_image_top(bytes: &[u8], srgb: bool, bc_supported: bool) -> Result<Ima
+@@ -232,34 +232,215 @@ pub fn dds_image_top(bytes: &[u8], srgb: bool, bc_supported: bool) -> Result<Ima
  }
  
  fn dds_texture(bytes: &[u8], usage: TextureUsage, bc_supported: bool, top_only: bool) -> Result<DecodedTexture, String> {
@@ -561,11 +561,21 @@ index 4f6f70c..206bb01 100644
 +/// distant LOD (one picture for a whole block of cells: a skipped level smeared the far
 +/// landscape and buildings).
 +pub fn skips_levels(path: &str) -> bool {
-+    let p = path.to_ascii_lowercase();
-+    if p.contains("interface\\") || p.contains("interface/") || p.contains("menus") || p.contains("fonts") {
++    let p = path.to_ascii_lowercase().replace('/', "\\");
++    if p.contains("interface\\") || p.contains("menus") || p.contains("fonts") {
 +        return false;
 +    }
-+    !(p.contains("\\lod\\") || p.contains("/lod/") || p.contains("_lod") || p.contains("lod_") || p.contains("\\lod"))
++    if p.contains("\\lod\\") || p.contains("_lod") || p.contains("lod_") || p.contains("\\lod") {
++        return false;
++    }
++    // [nvport] Effects keep every level too (alpha47-48 dropped them at Potato and Very Low):
++    // a particle texture is an atlas of frames (4×4 of smoke, dust, sparks), and a level
++    // dropped five times left each frame two texels wide, so a hit's dust fell as dark
++    // blocks of its neighbours; a muzzle flash became a soft square; a decal sheet (2×2
++    // marks) smeared its marks together; the water's wave noise went flat, and the water
++    // a smooth sheet of glass. They are small and few; the world's surfaces are not.
++    const KEEP: [&str; 9] = ["effects\\", "decals\\", "particles\\", "water\\", "sky\\", "\\fx", "impact", "muzzle", "blood"];
++    !KEEP.iter().any(|k| p.contains(k))
 +}
 +
 +
@@ -648,7 +658,7 @@ index 4f6f70c..206bb01 100644
              } else {
                  let f = match (dds.format, srgb) {
                      (Format::Dxt1, true) => TextureFormat::Bc1RgbaUnormSrgb,
-@@ -293,7 +464,7 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
+@@ -293,7 +474,7 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
              } else {
                  let mut out = Vec::new();
                  for (m, level) in levels.iter().enumerate() {
@@ -657,7 +667,7 @@ index 4f6f70c..206bb01 100644
                      let values = fnv_dds::decode_bc4(dds.format, lw, lh, level).ok_or("invalid BC4 block data")?;
                      if signed {
                          out.extend(values.into_iter().map(|v| (v * 127.0).round() as i8 as u8));
-@@ -314,7 +485,7 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
+@@ -314,7 +495,7 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
              } else {
                  let mut out = Vec::new();
                  for (m, level) in levels.iter().enumerate() {
@@ -666,7 +676,7 @@ index 4f6f70c..206bb01 100644
                      let pixels = fnv_dds::decode_bc5(dds.format, lw, lh, level).ok_or("invalid BC5 block data")?;
                      for [r, g] in pixels {
                          if usage == TextureUsage::Normal {
-@@ -354,10 +525,58 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
+@@ -354,10 +535,58 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
      let lacks_alpha = dds.alpha_opaque()
          || matches!(dds.format, Format::Bc5U | Format::Bc5S | Format::Bc4U | Format::Bc4S)
          || (dds.format == Format::Dxt1 && dds.header.dx10.is_some())
@@ -726,7 +736,7 @@ index 4f6f70c..206bb01 100644
  fn normal_byte(value: f32) -> u8 {
      ((value + 1.0) * 0.5 * 255.0).round() as u8
  }
-@@ -528,6 +747,7 @@ impl TextureCache {
+@@ -528,6 +757,7 @@ impl TextureCache {
              .collect()
      }
  
@@ -734,7 +744,7 @@ index 4f6f70c..206bb01 100644
      /// Changes to the cache so far ([`Self::snapshot`]).
      pub fn generation(&self) -> u64 {
          self.generation
-@@ -627,14 +847,14 @@ impl TextureCache {
+@@ -627,14 +857,14 @@ impl TextureCache {
                  return Some(h);
              }
          }
@@ -751,13 +761,23 @@ index 4f6f70c..206bb01 100644
          };
          drop(decode_span);
          let handle = match result {
-@@ -862,6 +1082,26 @@ fn remembered(known: &Mutex<HashMap<String, bool>>, key: String, compute: impl F
+@@ -862,6 +1092,36 @@ fn remembered(known: &Mutex<HashMap<String, bool>>, key: String, compute: impl F
      answer
  }
  
 +#[cfg(test)]
 +mod shrink_tests {
-+    use super::shrink_rgba8;
++    use super::{shrink_rgba8, skips_levels};
++
++    #[test]
++    fn effects_water_sky_decals_keep_their_levels() {
++        for p in ["textures\\effects\\muzzleflash01.dds", "Textures/Effects/smoke_atlas.dds", "textures\\decals\\blood01.dds", "textures\\water\\wastelandwaternoise.dds", "textures\\sky\\alpha.dds", "textures\\interface\\hud.dds", "textures\\landscape\\lod\\x.dds"] {
++            assert!(!skips_levels(p), "{p}");
++        }
++        for p in ["textures\\architecture\\megaton\\door01.dds", "textures\\landscape\\dirt02.dds"] {
++            assert!(skips_levels(p), "{p}");
++        }
++    }
 +
 +    #[test]
 +    fn potato_shrinks_by_the_levels_and_keeps_eight_texels() {

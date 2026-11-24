@@ -1,8 +1,8 @@
 plugins { id 'com.android.application' }
 
 // Version: bump on every release (see PORT_PROGRESS.md).
-def fdVersionName = "2.0.0-alpha48"
-def fdVersionCode = 347
+def fdVersionName = "2.0.0-alpha49"
+def fdVersionCode = 348
 
 android {
     namespace 'com.wastelanddroid'
@@ -29,7 +29,7 @@ android {
         jniLibs { useLegacyPackaging true }   // extractNativeLibs: large .so, faster first start
     }
     androidResources {
-        noCompress += ['mp4', 'mp3', 'zip', 'ttf', 'jpg', 'png']
+        noCompress += ['mp4', 'mp3', 'm4a', 'zip', 'ttf', 'jpg', 'png']
     }
 }
 

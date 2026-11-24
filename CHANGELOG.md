@@ -1,5 +1,22 @@
 # Fallout Droid Native — CHANGELOG
 
+## 2.0.0-alpha49 (348)
+Built; the new texture rule's unit test passes; the launcher's scripts parse and its header
+was rendered in Chromium at a phone's size. Nothing verified on a device.
+- Texture Quality (Very Low, Potato) no longer drops levels of effect, decal, particle,
+  water and sky textures: a particle atlas (4×4 frames of smoke and dust) shrunk five levels
+  left each frame two texels wide, so a hit's dust fell as dark blocks, a muzzle flash
+  became a soft square, decal sheets smeared and the water's wave noise went flat (the
+  "glass" water). Interface, fonts and distant LOD were already kept.
+- Launcher: a radio in the top bar (no cover): eight songs with their proper titles, a new
+  order at every start, "next" picks a random other track and shuffles again; pause/play,
+  a progress line, the title scrolling when long. The background song (City of Ruin) and its
+  settings row are removed.
+- Launcher trailers: the hidden second video no longer holds a decoder; the home trailer is
+  reloaded and started when it errors, stalls, stops moving or the launcher comes back from
+  the game; a script error at start (a missing function) that stopped the start-up code
+  before the trailer's controls were set up is fixed.
+
 ## 2.0.0-alpha48 (347)
 Built; the script engine's host tests pass (194 of 194); the NVCS skeletons parse with the
 engine's NIF reader. Nothing below verified on a device yet.
