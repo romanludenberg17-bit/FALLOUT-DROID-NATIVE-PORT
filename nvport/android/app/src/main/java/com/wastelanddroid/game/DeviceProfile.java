@@ -106,7 +106,7 @@ public final class DeviceProfile {
             {"mt6896", "Dimensity 8200"}, {"mt6895", "Dimensity 8100"}, {"mt6893", "Dimensity 1200"},
             {"mt6891", "Dimensity 1100"}, {"mt6886", "Dimensity 7200"}, {"mt6878", "Dimensity 7300"},
             {"mt6877", "Dimensity 1080"}, {"mt6855", "Dimensity 7020"}, {"mt6853", "Dimensity 720"},
-            {"mt6835", "Dimensity 6100+"}, {"mt6833", "Dimensity 700"}, {"mt6789", "Helio G99"},
+            {"mt6835", "Dimensity 6100+"}, {"mt6833", "Dimensity 700"}, {"mt6789v", "Helio G100"}, {"mt6789", "Helio G99"},
             {"mt6785", "Helio G95"}, {"mt6781", "Helio G96"}, {"mt6769", "Helio G85"}, {"mt6768", "Helio G85"},
             {"mt6765", "Helio G35"}, {"mt6762", "Helio P22"},
             {"s5e9955", "Exynos 2500"}, {"s5e9945", "Exynos 2400"}, {"s5e9925", "Exynos 2200"},
