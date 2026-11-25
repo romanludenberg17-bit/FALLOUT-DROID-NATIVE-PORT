@@ -510,9 +510,9 @@ index 4f6f70c..33143bd 100644
 +        }
 +        let surface = ctt_etcpak::Surface::new(&bgra, pw, ph);
 +        if alpha {
-+            out.extend(ctt_etcpak::etc2_rgba::compress_blocks(&surface, true));
++            out.extend(ctt_etcpak::etc2_rgba::compress_blocks(&surface, false));
 +        } else {
-+            out.extend(ctt_etcpak::etc2_rgb::compress_blocks(&surface, true));
++            out.extend(ctt_etcpak::etc2_rgb::compress_blocks(&surface, false));
 +        }
 +    }
 +    let format = match (alpha, srgb) {
@@ -2036,7 +2036,7 @@ new file mode 100644
 index 0000000..9049246
 --- /dev/null
 +++ b/engine/nvforever/src/android_input.rs
-@@ -0,0 +1,897 @@
+@@ -0,0 +0,897 @@
 +//! [nvport] Input from the Android launcher (Fallout Droid): on-screen keys, touch look,
 +//! gamepads mapped to PC keys and physical keyboards/mice arrive through JNI
 +//! (`com.wastelanddroid.engine.NativeInput`) and are written as Bevy's own input messages,
@@ -3348,7 +3348,7 @@ new file mode 100644
 index 0000000..ab9a6fb
 --- /dev/null
 +++ b/engine/nvforever/src/gpu_report.rs
-@@ -0,0 +1,221 @@
+@@ -0,0 +0,221 @@
 +//! [nvport] What GPU the game runs on, read from the Vulkan device itself (not from the
 +//! phone's maker or chip name), logged once at the start:
 +//!
@@ -3972,13 +3972,26 @@ index 0d206a3..29f7260 100644
  
  /// A GPU budget under this (or not known yet) takes the allocator's small blocks [design:
  /// the 4 GB card in #2754 reached 0.95 of its budget; a 6 GB card reads a budget under
-@@ -211,6 +220,9 @@ impl Plugin for MemoryBudgetPlugin {
+@@ -211,6 +220,22 @@ impl Plugin for MemoryBudgetPlugin {
  pub fn limits_for(ram_mb: Option<u64>, vram_mb: Option<u64>) -> KeepLimits {
      let share = |have: Option<u64>, full: u64| have.map_or(1.0, |h| (h as f64 / full as f64).min(1.0));
      let s = share(ram_mb, FULL_RAM_MB).min(share(vram_mb, FULL_VRAM_MB));
-+    // [nvport] Android: always the least (the RAM is the GPU's too).
++    // [nvport] Android: scale cache limits by device RAM instead of forcing minimum
++    // (10 s / 48 entries caused constant re-decoding and stutters even on 8-16 GB phones).
 +    #[cfg(target_os = "android")]
-+    let s = { let _ = s; 0.0 };
++    {
++        let _ = s;
++        let mb = ram_mb.unwrap_or(4096);
++        return if mb >= 10_000 {
++            KeepLimits { secs: 90.0, max: 256 }
++        } else if mb >= 7_000 {
++            KeepLimits { secs: 45.0, max: 160 }
++        } else if mb >= 5_500 {
++            KeepLimits { secs: 25.0, max: 96 }
++        } else {
++            KeepLimits { secs: 15.0, max: 64 }
++        };
++    }
      let full = KeepLimits::default();
      KeepLimits { secs: (full.secs * s).round().max(MIN_LIMITS.secs), max: ((full.max as f64 * s).round() as usize).max(MIN_LIMITS.max) }
  }
@@ -4027,7 +4040,7 @@ new file mode 100644
 index 0000000..46e7d2e
 --- /dev/null
 +++ b/engine/nvforever/src/phone_cpu.rs
-@@ -0,0 +1,209 @@
+@@ -0,0 +0,209 @@
 +//! [nvport] The phone's CPU for the game: the frame's threads on the big cores and the
 +//! system told how long a frame should take (Android Performance Hint, ADPF), so the
 +//! governor raises the clocks before a frame runs late instead of after.
@@ -4242,7 +4255,7 @@ new file mode 100644
 index 0000000..1299a42
 --- /dev/null
 +++ b/engine/nvforever/src/phone_profiles.rs
-@@ -0,0 +1,305 @@
+@@ -0,0 +0,305 @@
 +//! [nvport] Graphics Profile (Ultra, High, Medium, Low, Potato) on a phone: one row over
 +//! the real rows of the settings page. Taking a profile sets each of its rows through the
 +//! row's own setter, exactly as a change on the page would, so every row applies itself
@@ -4662,7 +4675,7 @@ new file mode 100644
 index 0000000..6d21460
 --- /dev/null
 +++ b/engine/nvforever/src/shadow_census.rs
-@@ -0,0 +1,196 @@
+@@ -0,0 +0,196 @@
 +//! [nvport] Sun shadows and cloud shadows diagnosed apart (owner's report: sun shadows come
 +//! and go instead of staying; with cloud shadows on, the player's and NPCs' models
 +//! flicker). Every 10 s of play, one line for each system, from what the frames did:
@@ -4887,7 +4900,7 @@ index d428306..412a2aa 100644
 +    // [nvport] A phone: the nearest cascade every frame (held, it shimmered as the view
 +    // moved at a phone's uneven frame rate), the farther ones every other and fourth frame.
 +    // Every cascade every frame: a held far cascade still shimmered (owner report, alpha23).
-+    const PHONE_SCHEDULE: [(u32, u32); 3] = [(1, 0), (1, 0), (1, 0)];
++    const PHONE_SCHEDULE: [(u32, u32); 3] = [(1, 0), (2, 0), (4, 1)];
 +    // [nvport] On a phone no cascade is ever held, whatever the shadow quality: Quality's
 +    // staggered schedule held cascades and remade the held 4096² array (4 and 5 layers by
 +    // turns) every few frames: yellow stripes over the screen, then a lost GPU (owner's
@@ -5194,7 +5207,7 @@ index fba76a2..a0d0645 100644
 +            "none" => Some(GpuPreprocessingMode::None),
 +            "preprocess" => Some(GpuPreprocessingMode::PreprocessingOnly),
 +            "culling" => Some(GpuPreprocessingMode::Culling),
-+            _ if adreno8 && cfg!(target_os = "android") => Some(GpuPreprocessingMode::None),
++            _ if adreno8 && cfg!(target_os = "android") => Some(GpuPreprocessingMode::PreprocessingOnly),
 +            _ => None,
 +        };
 +
