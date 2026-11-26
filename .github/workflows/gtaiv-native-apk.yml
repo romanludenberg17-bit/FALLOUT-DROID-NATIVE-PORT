@@ -22,4 +22,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: GTAIV-Native-apk
-          path: ${{ runner.temp }}/work/LibertyRecompAndroid/os/android/app/build/outputs/apk/release/*.apk
+          path: ${{ runner.temp }}/work/GTAIV-Native.apk

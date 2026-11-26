@@ -36,6 +36,24 @@ ln -sf glslang "$H/glslang/bin/glslangValidator"
 export BUILD_TYPE=Release STRIP=1
 bash os/android/scripts/build_native.sh
 bash os/android/scripts/build_driver_proxy.sh
-rm -rf os/android/app/build/outputs/apk
-bash os/android/scripts/build_apk.sh release
-echo "APK: $SRC/os/android/app/build/outputs/apk/release/app-release.apk"
+[ -f "$HOME/.android/debug.keystore" ] || { mkdir -p "$HOME/.android"; keytool -genkeypair -keystore "$HOME/.android/debug.keystore" -storepass android -keypass android -alias androiddebugkey -keyalg RSA -validity 10000 -dname "CN=Android Debug"; }
+
+# Final APK: the 4NMP v502 UI shell + this engine (see build_from_4nmp.py).
+ASSETS="$WORK/engine_assets"; rm -rf "$ASSETS"; mkdir -p "$ASSETS"
+cp -r os/android/app/src/main/assets/. "$ASSETS/"; rm -rf "$ASSETS/Resources/touch-icons"
+for f in default_args.txt default_args_mali.txt; do
+  grep -q multiplayer_backend "$ASSETS/$f" || echo "--gta4_multiplayer_backend=lan" >> "$ASSETS/$f"
+done
+cp "$ASSETS/default_args_mali.txt" "$ASSETS/default_args_g99.txt"
+python3 -I "$HERE/build_from_4nmp.py" "$HERE/shell/4NMP-v502-ui-only.apk" \
+  os/android/app/src/main/jniLibs/arm64-v8a "$ASSETS" "$WORK/unsigned.apk"
+BT="$ANDROID_HOME/build-tools/35.0.0"
+"$BT/zipalign" -f -p 4 "$WORK/unsigned.apk" "$WORK/aligned.apk"
+if [ -n "${KEYSTORE:-}" ]; then
+  "$BT/apksigner" sign --ks "$KEYSTORE" --ks-pass "pass:$KS_PASS" --ks-key-alias "${KS_ALIAS:-gtaiv}" \
+    --out "$WORK/GTAIV-Native.apk" "$WORK/aligned.apk"
+else
+  "$BT/apksigner" sign --ks "$HOME/.android/debug.keystore" --ks-pass pass:android \
+    --out "$WORK/GTAIV-Native.apk" "$WORK/aligned.apk"
+fi
+echo "APK: $WORK/GTAIV-Native.apk"

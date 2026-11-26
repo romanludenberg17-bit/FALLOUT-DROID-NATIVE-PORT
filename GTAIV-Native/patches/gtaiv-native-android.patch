@@ -1,3 +1,297 @@
+diff --git a/glue/rexglue-sdk-main/gta4-recomp/CMakeLists.txt b/glue/rexglue-sdk-main/gta4-recomp/CMakeLists.txt
+index 3b03306..78d588e 100644
+--- a/glue/rexglue-sdk-main/gta4-recomp/CMakeLists.txt
++++ b/glue/rexglue-sdk-main/gta4-recomp/CMakeLists.txt
+@@ -412,6 +412,10 @@ elseif(ANDROID)
+         src/install/gta4_rpf_extractor.cpp
+         src/install/gta4_source_inspector.cpp
+         src/android/android_install_jni.cpp
++        src/android/android_touch_settings_jni.cpp
++        src/input/context_touch_layout.cpp
++        src/input/context_touch_settings.cpp
++        src/input/context_touch_activity_layout.cpp
+         "${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty/crypto/rijndael-alg-fst.c"
+     )
+     target_include_directories(liberty_install PRIVATE
+diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/android/android_platform_stubs.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/android/android_platform_stubs.cpp
+index 56c07bc..fa12298 100644
+--- a/glue/rexglue-sdk-main/gta4-recomp/src/android/android_platform_stubs.cpp
++++ b/glue/rexglue-sdk-main/gta4-recomp/src/android/android_platform_stubs.cpp
+@@ -94,3 +94,67 @@ rex::system::xam::LiveBackendServices CreateCommunityMultiplayerBackend(
+ }
+ 
+ }  // namespace LibertyRecomp::Network
++
++// JNI entry points declared by the 4NMP launcher's LibertyActivity (called on
++// every pause / resume). This engine saves its pipeline cache by itself, and
++// haptics go through SDL, so both only record the state.
++#include <jni.h>
++#include <atomic>
++#include <SDL3/SDL_system.h>
++
++namespace {
++std::atomic<bool> g_game_haptics_available{false};
++}
++
++extern "C" JNIEXPORT void JNICALL
++Java_com_libertyrecomp_LibertyActivity_nativeCheckpointGpuCache(JNIEnv*, jclass) {}
++
++namespace {
++jobject g_multicast_lock = nullptr;
++
++// LAN co-op discovery is multicast; Wi-Fi drivers drop inbound multicast
++// unless an app holds a WifiManager.MulticastLock (the 4NMP shell takes none).
++void AcquireMulticastLock(JNIEnv* env) {
++  if (g_multicast_lock || !env) return;
++  jobject activity = static_cast<jobject>(SDL_GetAndroidActivity());
++  if (!activity) return;
++  auto clear = [env] { if (env->ExceptionCheck()) env->ExceptionClear(); };
++  jclass context_class = env->FindClass("android/content/Context");
++  jmethodID get_app = env->GetMethodID(context_class, "getApplicationContext", "()Landroid/content/Context;");
++  jobject app = env->CallObjectMethod(activity, get_app);
++  clear();
++  jmethodID get_service =
++      env->GetMethodID(context_class, "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;");
++  jstring wifi_name = env->NewStringUTF("wifi");
++  jobject wifi = app ? env->CallObjectMethod(app, get_service, wifi_name) : nullptr;
++  clear();
++  if (wifi) {
++    jclass wifi_class = env->FindClass("android/net/wifi/WifiManager");
++    jmethodID create = env->GetMethodID(wifi_class, "createMulticastLock",
++                                        "(Ljava/lang/String;)Landroid/net/wifi/WifiManager$MulticastLock;");
++    jstring tag = env->NewStringUTF("gta4-coop");
++    jobject lock = env->CallObjectMethod(wifi, create, tag);
++    clear();
++    if (lock) {
++      jclass lock_class = env->GetObjectClass(lock);
++      env->CallVoidMethod(lock, env->GetMethodID(lock_class, "setReferenceCounted", "(Z)V"), JNI_FALSE);
++      clear();
++      env->CallVoidMethod(lock, env->GetMethodID(lock_class, "acquire", "()V"));
++      if (env->ExceptionCheck()) {
++        env->ExceptionClear();  // CHANGE_WIFI_MULTICAST_STATE missing
++      } else {
++        g_multicast_lock = env->NewGlobalRef(lock);
++      }
++    }
++  }
++  clear();
++  env->DeleteLocalRef(activity);
++}
++}  // namespace
++
++extern "C" JNIEXPORT void JNICALL
++Java_com_libertyrecomp_LibertyActivity_nativeSetGameHapticsAvailable(JNIEnv* env, jclass,
++                                                                     jboolean available) {
++  g_game_haptics_available.store(available == JNI_TRUE, std::memory_order_relaxed);
++  AcquireMulticastLock(env);
++}
+diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/android/android_touch_settings_jni.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/android/android_touch_settings_jni.cpp
+new file mode 100644
+index 0000000..9257648
+--- /dev/null
++++ b/glue/rexglue-sdk-main/gta4-recomp/src/android/android_touch_settings_jni.cpp
+@@ -0,0 +1,201 @@
++// JNI for the 4NMP launcher's touch layout editor (com.libertyrecomp.TouchSettings),
++// implemented over this engine's own touch layout and settings code, so the
++// editor and the in-game overlay share one action numbering and one file
++// (LibertyRecomp/touch-controls.ini). Coordinates: the game lays the overlay
++// out in window points (pixels / display density); Java works in pixels.
++#include <jni.h>
++
++#include <cmath>
++#include <cstdio>
++#include <fstream>
++#include <map>
++#include <mutex>
++#include <string>
++
++#include "input/context_touch_layout.h"
++#include "input/context_touch_settings.h"
++
++namespace {
++using namespace gta4::input;
++
++std::mutex g_mutex;
++ContextTouchLayout g_layout;
++float g_density = 1.0f;
++std::filesystem::path g_extras_path;
++std::map<std::string, std::string> g_extras;  // launcher-only keys (radar_scale, camera_mode, ...)
++
++std::string ToString(JNIEnv* env, jstring value) {
++  if (!value) return {};
++  const char* chars = env->GetStringUTFChars(value, nullptr);
++  std::string out = chars ? chars : "";
++  if (chars) env->ReleaseStringUTFChars(value, chars);
++  return out;
++}
++
++void LoadExtras() {
++  g_extras.clear();
++  std::ifstream file(g_extras_path);
++  std::string key, value;
++  while (file >> key >> value) g_extras[key] = value;
++}
++
++bool SaveExtras() {
++  if (g_extras_path.empty()) return false;
++  std::ofstream file(g_extras_path, std::ios::trunc);
++  for (const auto& [key, value] : g_extras) file << key << ' ' << value << '\n';
++  return static_cast<bool>(file);
++}
++
++void AppendEscaped(std::string& out, const char* text) {
++  for (const char* c = text; *c; ++c) {
++    if (*c == '"' || *c == '\\') out += '\\';
++    if (static_cast<unsigned char>(*c) >= 0x20) out += *c;
++  }
++}
++
++std::string PreferenceValue(const std::string& key) {
++  const auto p = GetContextTouchPreferences();
++  char buffer[32];
++  auto number = [&](float v) { std::snprintf(buffer, sizeof(buffer), "%.2f", v); return std::string(buffer); };
++  if (key == "button_scale") return number(p.button_scale);
++  if (key == "opacity") return number(p.opacity);
++  if (key == "camera_sensitivity") return number(p.camera_sensitivity);
++  if (key == "aim_sensitivity") return number(p.aim_sensitivity);
++  if (key == "vehicle_sensitivity") return number(p.vehicle_sensitivity);
++  if (key == "flight_sensitivity") return number(p.flight_sensitivity);
++  if (key == "left_handed") return p.left_handed ? "true" : "false";
++  if (key == "floating_stick") return p.floating_stick ? "true" : "false";
++  if (key == "invert_camera_y") return p.invert_camera_y ? "true" : "false";
++  if (key == "haptics") return p.haptics ? "true" : "false";
++  const auto found = g_extras.find(key);
++  return found != g_extras.end() ? found->second : std::string();
++}
++
++bool SetPreference(const std::string& key, const std::string& value) {
++  auto p = GetContextTouchPreferences();
++  const bool flag = value == "true" || value == "1";
++  const float number = std::strtof(value.c_str(), nullptr);
++  if (key == "button_scale") p.button_scale = number;
++  else if (key == "opacity") p.opacity = number;
++  else if (key == "camera_sensitivity") p.camera_sensitivity = number;
++  else if (key == "aim_sensitivity") p.aim_sensitivity = number;
++  else if (key == "vehicle_sensitivity") p.vehicle_sensitivity = number;
++  else if (key == "flight_sensitivity") p.flight_sensitivity = number;
++  else if (key == "left_handed") p.left_handed = flag;
++  else if (key == "floating_stick") p.floating_stick = flag;
++  else if (key == "invert_camera_y") p.invert_camera_y = flag;
++  else if (key == "haptics") p.haptics = flag;
++  else {
++    if (key.empty() || key.find_first_of(" \n") != std::string::npos ||
++        value.find_first_of(" \n") != std::string::npos) return false;
++    g_extras[key] = value.empty() ? "-" : value;
++    return true;
++  }
++  SetContextTouchPreferences(p);
++  return true;
++}
++}  // namespace
++
++extern "C" {
++
++JNIEXPORT void JNICALL Java_com_libertyrecomp_TouchSettings_nativeOpen(JNIEnv* env, jclass, jstring path) {
++  std::lock_guard lock(g_mutex);
++  const std::filesystem::path file = ToString(env, path);
++  ConfigureContextTouchSettings(file);
++  g_extras_path = file;
++  g_extras_path += ".launcher";
++  LoadExtras();
++}
++
++JNIEXPORT jstring JNICALL Java_com_libertyrecomp_TouchSettings_nativeGet(JNIEnv* env, jclass, jstring key) {
++  std::lock_guard lock(g_mutex);
++  return env->NewStringUTF(PreferenceValue(ToString(env, key)).c_str());
++}
++
++JNIEXPORT jboolean JNICALL Java_com_libertyrecomp_TouchSettings_nativeSet(JNIEnv* env, jclass, jstring key,
++                                                                          jstring value) {
++  std::lock_guard lock(g_mutex);
++  return SetPreference(ToString(env, key), ToString(env, value)) ? JNI_TRUE : JNI_FALSE;
++}
++
++JNIEXPORT jboolean JNICALL Java_com_libertyrecomp_TouchSettings_nativeSave(JNIEnv*, jclass) {
++  std::lock_guard lock(g_mutex);
++  const bool extras = SaveExtras();
++  return FlushContextTouchSettings() && extras ? JNI_TRUE : JNI_FALSE;
++}
++
++JNIEXPORT void JNICALL Java_com_libertyrecomp_TouchSettings_nativeReset(JNIEnv*, jclass, jboolean all) {
++  std::lock_guard lock(g_mutex);
++  if (all == JNI_TRUE) {
++    for (int mode = 1; mode <= static_cast<int>(ContextTouchMode::kMap); ++mode) {
++      auto layout = g_layout;
++      layout.mode = static_cast<ContextTouchMode>(mode);
++      RestoreContextTouchLayout(layout);
++    }
++    SetContextTouchPreferences({});
++    g_extras.clear();
++  } else {
++    RestoreContextTouchLayout(g_layout);
++  }
++}
++
++// [{"action":N,"x":px,"y":px,"r":px,"label":"..","icon":".."}, ...]
++JNIEXPORT jstring JNICALL Java_com_libertyrecomp_TouchSettings_nativeLayout(JNIEnv* env, jclass, jint mode,
++                                                                            jfloat width, jfloat height,
++                                                                            jfloat density) {
++  std::lock_guard lock(g_mutex);
++  g_density = std::isfinite(density) && density > 0.1f ? density : 1.0f;
++  if (mode <= 0 || mode > static_cast<int>(ContextTouchMode::kMap) || !(width > 0.0f) || !(height > 0.0f)) {
++    return env->NewStringUTF("[]");
++  }
++  const float w = width / g_density, h = height / g_density;
++  ContextTouchViewport viewport{
++      .output_width = w, .output_height = h,
++      .physical_output_x = 0.0f, .physical_output_y = 0.0f,
++      .physical_output_width = width, .physical_output_height = height,
++      .physical_surface_width = width, .physical_surface_height = height,
++      .safe_x = 0.0f, .safe_y = 0.0f, .safe_width = w, .safe_height = h,
++      .generation = 1, .valid = true, .focused = true,
++      .logical_width = w, .logical_height = h, .host_space = true};
++  const auto preferences = GetContextTouchPreferences();
++  ContextTouchLayoutOptions options;
++  options.editing = true;
++  options.armed = true;
++  options.can_enter_vehicle = true;
++  options.phone_visible = mode == static_cast<int>(ContextTouchMode::kPhone);
++  options.left_handed = preferences.left_handed;
++  options.button_scale = preferences.button_scale;
++  options.opacity = preferences.opacity;
++  g_layout = BuildContextTouchLayout(static_cast<ContextTouchMode>(mode), viewport, {}, options);
++  ApplyContextTouchSavedLayout(g_layout);
++  std::string json = "[";
++  char number[160];
++  for (size_t i = 0; i < g_layout.control_count; ++i) {
++    const auto& c = g_layout.controls[i];
++    if (!c.visible || c.action == TouchAction::kNone || c.kind == ContextTouchControlKind::kLookSurface ||
++        c.kind == ContextTouchControlKind::kUtility) continue;
++    if (json.size() > 1) json += ',';
++    std::snprintf(number, sizeof(number), "{\"action\":%u,\"x\":%.2f,\"y\":%.2f,\"r\":%.2f,\"label\":\"",
++                  static_cast<unsigned>(c.action), c.center_x * g_density, c.center_y * g_density,
++                  c.radius * g_density);
++    json += number;
++    AppendEscaped(json, c.label.data());
++    json += "\",\"icon\":\"";
++    AppendEscaped(json, c.icon_id.data());
++    json += "\"}";
++  }
++  json += ']';
++  return env->NewStringUTF(json.c_str());
++}
++
++JNIEXPORT jboolean JNICALL Java_com_libertyrecomp_TouchSettings_nativeMove(JNIEnv*, jclass, jint action, jfloat x,
++                                                                           jfloat y, jfloat radius) {
++  std::lock_guard lock(g_mutex);
++  if (action <= 0 || action >= static_cast<int>(TouchAction::kCount)) return JNI_FALSE;
++  return SetContextTouchPlacement(g_layout, static_cast<TouchAction>(action), x / g_density, y / g_density,
++                                  radius / g_density)
++             ? JNI_TRUE
++             : JNI_FALSE;
++}
++
++}  // extern "C"
 diff --git a/glue/rexglue-sdk-main/src/graphics/CMakeLists.txt b/glue/rexglue-sdk-main/src/graphics/CMakeLists.txt
 index af36910..96d7058 100644
 --- a/glue/rexglue-sdk-main/src/graphics/CMakeLists.txt
@@ -16,7 +310,7 @@ index af36910..96d7058 100644
              set(GTA4_NATIVE_DXC_LIBRARY_PATH "${GTA4_NATIVE_DXC_ROOT}/lib/x64")
          endif()
 diff --git a/glue/rexglue-sdk-main/src/system/xam/live_compatibility.cpp b/glue/rexglue-sdk-main/src/system/xam/live_compatibility.cpp
-index b5d7b20..206d004 100644
+index b5d7b20..47e4a14 100644
 --- a/glue/rexglue-sdk-main/src/system/xam/live_compatibility.cpp
 +++ b/glue/rexglue-sdk-main/src/system/xam/live_compatibility.cpp
 @@ -36,6 +36,8 @@
@@ -104,7 +398,44 @@ index b5d7b20..206d004 100644
                   reinterpret_cast<const char*>(&membership), sizeof(membership)) != 0) {
      SetError("Unable to join LAN multicast group");
      return false;
-@@ -2492,7 +2554,11 @@ bool LiveCompatibilityRuntime::LoadOrCreateIdentity(const std::filesystem::path&
+@@ -1811,6 +1873,13 @@ bool LanSessionDirectory::SendPayload(uint8_t operation, std::span<const uint8_t
+   destination.sin_family = AF_INET;
+   destination.sin_port = htons(discovery_port_);
+   inet_pton(AF_INET, kMulticastAddress, &destination.sin_addr);
++  // The 4NMP launcher's join-by-IP bridge listens on 127.0.0.1:3075 and
++  // relays these frames to the peer it was given (for networks that drop
++  // multicast). Nothing listens there otherwise; errors are ignored.
++  sockaddr_in bridge{};
++  bridge.sin_family = AF_INET;
++  bridge.sin_port = htons(3075);
++  bridge.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+   for (const auto& frame : frames) {
+     if (sendto(static_cast<int>(socket_), reinterpret_cast<const char*>(frame.data()),
+                static_cast<int>(frame.size()), 0, reinterpret_cast<sockaddr*>(&destination),
+@@ -1818,6 +1887,9 @@ bool LanSessionDirectory::SendPayload(uint8_t operation, std::span<const uint8_t
+       SetError("Unable to send LAN session frame");
+       return false;
+     }
++    sendto(static_cast<int>(socket_), reinterpret_cast<const char*>(frame.data()),
++           static_cast<int>(frame.size()), 0, reinterpret_cast<sockaddr*>(&bridge),
++           sizeof(bridge));
+   }
+   return true;
+ }
+@@ -1872,7 +1944,11 @@ void LanSessionDirectory::ReceivePacket() {
+     return;
+   }
+ 
+-  session.host_ipv4 = source.sin_addr.s_addr;
++  // Frames relayed by the launcher's UDP bridge (127.0.0.1) keep the host
++  // address the sender put in the record.
++  if (source.sin_addr.s_addr != htonl(INADDR_LOOPBACK) || !session.host_ipv4) {
++    session.host_ipv4 = source.sin_addr.s_addr;
++  }
+   std::optional<SessionRecord> authoritative_update;
+   {
+     std::lock_guard lock(mutex_);
+@@ -2492,7 +2568,11 @@ bool LiveCompatibilityRuntime::LoadOrCreateIdentity(const std::filesystem::path&
    return true;
  }
  

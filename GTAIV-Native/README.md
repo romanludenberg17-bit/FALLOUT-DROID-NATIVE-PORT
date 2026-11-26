@@ -1,7 +1,9 @@
 # GTA IV Native (com.rommy.gtaiv)
 
-Нативный ARM64-порт GTA IV для Android на базе LibertyRecompAndroid
-(статическая рекомпиляция в C++, Vulkan, без эмулятора/Wine/Box64).
+**Оформление** — оболочка 4NMP v502 (`shell/4NMP-v502-ui-only.apk`: лаунчер, дизайн,
+музыка меню, MP-хаб, редактор раскладки, иконки). **Движок** — gta4-recomp из
+LibertyRecompAndroid (статическая рекомпиляция в C++, Vulkan, без эмулятора/Wine/Box64).
+Итоговый APK собирает `build_from_4nmp.py`: dex/ресурсы/assets 4NMP + наши `.so`.
 Upstream: vaduur/LibertyRecompAndroid @ f4f6d8a + `patches/gtaiv-native-android.patch`.
 
 ## Требования к игре
@@ -25,7 +27,16 @@ upstream `docs/android/INSTALL.md`.
 - Только APK: открыть `android-project/` в Android Studio (готовые `.so` в `jniLibs`) → Build APK.
 - Полностью из исходников: `ANDROID_HOME=... ./build_linux.sh` или workflow `GTA IV Native APK`.
 
-## Изменения относительно upstream
+## Что поменяно в оболочке 4NMP (build_from_4nmp.py)
+- «ИГРАТЬ» снова запускает игру (вместо тоста «Движок вырезан» — `mPlayBtn.performClick()`).
+- Пакет `com.rommy.gtaiv`, название «GTA IV Native», разрешения Wi-Fi/multicast.
+- Профили `default_args*.txt` заменены на профили движка (качество консоли + LAN).
+
+## Изменения движка относительно upstream
+- JNI для оболочки: `TouchSettings` (редактор раскладки 4NMP) поверх нашей раскладки —
+  редактор и игровой оверлей используют один `touch-controls.ini` и одну нумерацию;
+  `LibertyActivity.nativeCheckpointGpuCache/nativeSetGameHapticsAvailable`; MulticastLock.
+- LAN-кадры дублируются в мост 4NMP `127.0.0.1:3075` (вход по IP из MP-хаба).
 - LAN-мультиплеер на Android: исправлено определение локального IP (на Android
   `gethostname()` = localhost → сессия объявлялась на 127.0.0.1), multicast привязан к
   Wi-Fi/hotspot-интерфейсу, MulticastLock, разрешения Wi-Fi, LAN по умолчанию.
