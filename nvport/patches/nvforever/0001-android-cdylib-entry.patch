@@ -458,7 +458,7 @@ index 50054bb..6a35ddf 100644
          return;
      }
 diff --git a/engine/nvf-assets/src/texture.rs b/engine/nvf-assets/src/texture.rs
-index 4f6f70c..33143bd 100644
+index 4f6f70c..50d7f8a 100644
 --- a/engine/nvf-assets/src/texture.rs
 +++ b/engine/nvf-assets/src/texture.rs
 @@ -128,7 +128,7 @@ pub(crate) fn worker_texture(
@@ -547,9 +547,9 @@ index 4f6f70c..33143bd 100644
 +        }
 +        let surface = ctt_etcpak::Surface::new(&bgra, pw, ph);
 +        if alpha {
-+            out.extend(ctt_etcpak::etc2_rgba::compress_blocks(&surface, true));
++            out.extend(ctt_etcpak::etc2_rgba::compress_blocks(&surface, false));
 +        } else {
-+            out.extend(ctt_etcpak::etc2_rgb::compress_blocks(&surface, true));
++            out.extend(ctt_etcpak::etc2_rgb::compress_blocks(&surface, false));
 +        }
 +    }
 +    let format = match (alpha, srgb) {
@@ -4017,7 +4017,7 @@ index a6cf138..87857c7 100644
      // The app and its renderer are gone; Streamline shut down before the device and instance it
      // used (dlss/, "Shutdown"). Nothing when Streamline was not loaded.
 diff --git a/engine/nvforever/src/memory_budget.rs b/engine/nvforever/src/memory_budget.rs
-index 0d206a3..29f7260 100644
+index 0d206a3..e792255 100644
 --- a/engine/nvforever/src/memory_budget.rs
 +++ b/engine/nvforever/src/memory_budget.rs
 @@ -82,7 +82,12 @@ pub const GPU_PRESSURE: (f64, f64) = (0.85, 0.75);
@@ -4045,13 +4045,26 @@ index 0d206a3..29f7260 100644
  
  /// A GPU budget under this (or not known yet) takes the allocator's small blocks [design:
  /// the 4 GB card in #2754 reached 0.95 of its budget; a 6 GB card reads a budget under
-@@ -211,6 +220,9 @@ impl Plugin for MemoryBudgetPlugin {
+@@ -211,6 +220,22 @@ impl Plugin for MemoryBudgetPlugin {
  pub fn limits_for(ram_mb: Option<u64>, vram_mb: Option<u64>) -> KeepLimits {
      let share = |have: Option<u64>, full: u64| have.map_or(1.0, |h| (h as f64 / full as f64).min(1.0));
      let s = share(ram_mb, FULL_RAM_MB).min(share(vram_mb, FULL_VRAM_MB));
-+    // [nvport] Android: always the least (the RAM is the GPU's too).
++    // [nvport] Android: scale cache limits by device RAM instead of forcing minimum
++    // (10 s / 48 entries caused constant re-decoding and stutters even on 8-16 GB phones).
 +    #[cfg(target_os = "android")]
-+    let s = { let _ = s; 0.0 };
++    {
++        let _ = s;
++        let mb = ram_mb.unwrap_or(4096);
++        return if mb >= 10_000 {
++            KeepLimits { secs: 90.0, max: 256 }
++        } else if mb >= 7_000 {
++            KeepLimits { secs: 45.0, max: 160 }
++        } else if mb >= 5_500 {
++            KeepLimits { secs: 25.0, max: 96 }
++        } else {
++            KeepLimits { secs: 15.0, max: 64 }
++        };
++    }
      let full = KeepLimits::default();
      KeepLimits { secs: (full.secs * s).round().max(MIN_LIMITS.secs), max: ((full.max as f64 * s).round() as usize).max(MIN_LIMITS.max) }
  }
@@ -4933,7 +4946,7 @@ index 0000000..6d21460
 +    );
 +}
 diff --git a/engine/nvforever/src/shadow_rate.rs b/engine/nvforever/src/shadow_rate.rs
-index d428306..412a2aa 100644
+index d428306..e306276 100644
 --- a/engine/nvforever/src/shadow_rate.rs
 +++ b/engine/nvforever/src/shadow_rate.rs
 @@ -130,7 +130,14 @@ pub fn set_performance(world: &mut World, on: bool) {
@@ -4960,7 +4973,7 @@ index d428306..412a2aa 100644
 +    // [nvport] A phone: the nearest cascade every frame (held, it shimmered as the view
 +    // moved at a phone's uneven frame rate), the farther ones every other and fourth frame.
 +    // Every cascade every frame: a held far cascade still shimmered (owner report, alpha23).
-+    const PHONE_SCHEDULE: [(u32, u32); 3] = [(1, 0), (1, 0), (1, 0)];
++    const PHONE_SCHEDULE: [(u32, u32); 3] = [(1, 0), (2, 0), (4, 1)];
 +    // [nvport] On a phone no cascade is ever held, whatever the shadow quality: Quality's
 +    // staggered schedule held cascades and remade the held 4096² array (4 and 5 layers by
 +    // turns) every few frames: yellow stripes over the screen, then a lost GPU (owner's
@@ -5257,7 +5270,7 @@ index 7566f48..c5c142e 100644
      let source = view_target.main_texture_view();
  
 diff --git a/engine/vendor/bevy_render/src/batching/gpu_preprocessing.rs b/engine/vendor/bevy_render/src/batching/gpu_preprocessing.rs
-index fba76a2..a0d0645 100644
+index fba76a2..d84acfd 100644
 --- a/engine/vendor/bevy_render/src/batching/gpu_preprocessing.rs
 +++ b/engine/vendor/bevy_render/src/batching/gpu_preprocessing.rs
 @@ -1542,6 +1542,14 @@ where
@@ -5293,7 +5306,7 @@ index fba76a2..a0d0645 100644
 +            "none" => Some(GpuPreprocessingMode::None),
 +            "preprocess" => Some(GpuPreprocessingMode::PreprocessingOnly),
 +            "culling" => Some(GpuPreprocessingMode::Culling),
-+            _ if adreno8 && cfg!(target_os = "android") => Some(GpuPreprocessingMode::None),
++            _ if adreno8 && cfg!(target_os = "android") => Some(GpuPreprocessingMode::PreprocessingOnly),
 +            _ => None,
 +        };
 +

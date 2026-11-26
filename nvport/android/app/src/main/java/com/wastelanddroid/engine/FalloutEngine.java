@@ -279,9 +279,10 @@ public final class FalloutEngine {
             android.util.Log.w("NVForever", "NVForever.ini: " + e);
         }
         if (game == GameDef.FO3) {
-            // Fallout 3's room markers and portals (Vault 101 and the like) left the walls of
-            // rooms in view culled from some angles: every room of an interior is drawn.
-            args.add("--no-room-culling");
+            // Keep room culling enabled on LOW class (Helio G85/G99/G100) for interior FPS.
+            if (profile.quality != com.wastelanddroid.game.DeviceProfile.Quality.LOW) {
+                args.add("--no-room-culling");
+            }
             args.add("--world");
             args.add("Wasteland");
         }
@@ -771,7 +772,7 @@ public final class FalloutEngine {
         int base = com.wastelanddroid.game.DeviceProfile.flagshipProfile() ? 1080
                 : q == com.wastelanddroid.game.DeviceProfile.Quality.HIGH ? 810
                 : q == com.wastelanddroid.game.DeviceProfile.Quality.MEDIUM ? 660
-                : com.wastelanddroid.game.DeviceProfile.veryLow() ? 360 : 480;
+                : 480;
         int scale = Math.max(50, Math.min(100, prefs.getInt(Prefs.RES_SCALE, 100)));
         int h = Math.max(360, base * scale / 100);
         if (prefs.getInt(GPU_SAFE, 0) >= 2) h = Math.min(h, 660);

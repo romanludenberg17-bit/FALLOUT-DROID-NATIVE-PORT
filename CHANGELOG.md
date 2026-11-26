@@ -18,6 +18,12 @@ nothing below was seen running.
   uniform|storage|auto`. Run log: `skinning: joints read from …`. Unverified on a 778G.
 - GPU naming in the launcher: the Vulkan device's own name when known; an unknown chip is
   "Unknown", no longer taken for a Mali.
+- Merged the owner's changes of 2026-11-25: Fallout 3 keeps room culling on the low class;
+  Helio G100 named; the low class's base height 480; ETC2 transcoding in its fast mode;
+  asset caches kept by the phone's RAM (15-90 s, 64-256 entries) instead of the least;
+  phone sun shadows drawn on a schedule again (near every frame, middle every 2nd, far
+  every 4th); Adreno 8xx: GPU preprocessing without GPU culling (was the CPU path). The
+  patch's broken hunk headers (`+0,N` for new files) are regenerated.
 - Found, not changed: NPC hit volumes take no physics contacts by design, so a held cart
   passes through an NPC. Giving living actors contact colliders broke rapier 0.36's
   persistent-island check in the crowd tests every way tried; a regression test is kept
