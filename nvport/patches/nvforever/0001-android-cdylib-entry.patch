@@ -1014,7 +1014,7 @@ index 2ea26c6..bb9eb07 100644
  }
  
 diff --git a/engine/nvf-play/src/console.rs b/engine/nvf-play/src/console.rs
-index 4e8f628..a8817f5 100644
+index 4e8f628..3495b2c 100644
 --- a/engine/nvf-play/src/console.rs
 +++ b/engine/nvf-play/src/console.rs
 @@ -720,6 +720,7 @@ fn typing(
@@ -1025,7 +1025,7 @@ index 4e8f628..a8817f5 100644
                      c.print("Quests and info: sq, sqt, movetoqt [n], sqs <quest>, sqv <quest>, sv, caqs, inv, getavinfo <av>, setgs <setting> <value>, cam, qqq, advlevel (level up), poker [casino] (a poker table)");
                      c.print("Toggles: tcl (collision), tai (actors' AI), tdetect, tgm, tscr (scripts), tg (grass), ts (sky), tws (water), tt (trees), tlv (leaves), ToggleLODLand, ToggleNavmesh, tlik (head tracking), temo (emotions), tcg [radius] (collision shapes)");
                      c.print("bat <file> (console lines from a text file), rbat [file] (record lines for bat), scof [file] (write the console to a file), slpm [1-5] (a practice lock), [ref.]mfg expression|phoneme|modifier <id> <0-100>, mfg reset");
-@@ -777,6 +778,97 @@ fn typing(
+@@ -777,6 +778,112 @@ fn typing(
                  return;
              }
              // `bat <file>`: the file's lines run next, in order, as if typed.
@@ -1108,6 +1108,21 @@ index 4e8f628..a8817f5 100644
 +                    )),
 +                }
 +            }
++            // [nvport] `fdbindless on|off`: bindless material slabs or one bind group per
++            // material from the next start (bevy_render material_bind_groups.rs).
++            "fdbindless" => {
++                let file = std::env::var_os("NVFOREVER_HOME").map(|h| std::path::PathBuf::from(h).join("bindless.txt"));
++                match (rest.trim(), file) {
++                    (m @ ("on" | "off"), Some(f)) => {
++                        let _ = std::fs::write(&f, m);
++                        c.print(format!("fdbindless: {m} from the next start"));
++                    }
++                    _ => c.print(format!(
++                        "fdbindless on|off (this run: {})",
++                        if std::env::var("NVPORT_BINDLESS").is_ok_and(|v| v == "0") { "off" } else { "on" }
++                    )),
++                }
++            }
 +            "fxtest" => {
 +                FX_TEST.store(true, std::sync::atomic::Ordering::Relaxed);
 +                c.print("fxtest: three cards before the camera for 20 s: red opaque (left), green blended (middle), blue added (right)");
@@ -1123,7 +1138,7 @@ index 4e8f628..a8817f5 100644
              "bat" => {
                  batches += 1;
                  let found = if batches > MAX_BATCHES { Err(format!("bat: more than {MAX_BATCHES} batch files on one line")) } else { batch_lines(rest, &batch_roots(data.as_deref())) };
-@@ -1067,6 +1159,12 @@ pub fn place_name(d: &PlayData, cell: u32) -> String {
+@@ -1067,6 +1174,12 @@ pub fn place_name(d: &PlayData, cell: u32) -> String {
  
  /// The player's Extra Console Details tweak: a selected reference's details add its
  /// base's model [design: docs/design/tweaks.md].
@@ -1136,7 +1151,7 @@ index 4e8f628..a8817f5 100644
  static MODEL_DETAILS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
  
  /// Set by the Tweaks tab.
-@@ -1141,6 +1239,57 @@ pub fn describe(id: u32, d: &PlayData, sim: &SimState, rt: Option<&mut Runtime>)
+@@ -1141,6 +1254,57 @@ pub fn describe(id: u32, d: &PlayData, sim: &SimState, rt: Option<&mut Runtime>)
  }
  
  /// Where `coc <cell>` goes: the cell's COC spot (interiors and exterior cells alike).
@@ -3244,10 +3259,10 @@ index 012291e..0734019 100644
  /// file. Nothing here allocates (there is no memory), and the log's lock is never waited on
  /// (the failing allocation can be the log's own).
 diff --git a/engine/nvforever/src/decals.rs b/engine/nvforever/src/decals.rs
-index f9dd8cb..5630bba 100644
+index f9dd8cb..2e4c6ff 100644
 --- a/engine/nvforever/src/decals.rs
 +++ b/engine/nvforever/src/decals.rs
-@@ -91,9 +91,30 @@ const MISSES_LOGGED: u32 = 8;
+@@ -91,9 +91,33 @@ const MISSES_LOGGED: u32 = 8;
  #[derive(Component)]
  struct Decal {
      age: f32,
@@ -3273,21 +3288,60 @@ index f9dd8cb..5630bba 100644
 +        flat
 +    })
 +}
++/// [nvport] No decal closer than this to the camera, game units (module notes, `place`).
++const NEAR_CAMERA: f32 = 48.0;
++
 +/// How far a flat decal lies off its surface, in game units.
 +const FLAT_LIFT: f32 = 0.4;
 +
  /// A live decal: its entity, texture set and where it was put (game space).
  struct Live {
      entity: Entity,
-@@ -193,6 +214,7 @@ fn place(
+@@ -112,6 +136,8 @@ struct Decals {
+     placed: u32,
+     on_actors: u32,
+     near_another: u32,
++    /// [nvport] Not placed: within `NEAR_CAMERA` of the eye.
++    near_camera: u32,
+     /// On an actor flagged No Blood Decal (docs/spec-notes/actor-flags.md §2).
+     no_decal: u32,
+     over_frame_cap: u32,
+@@ -142,6 +168,7 @@ impl Default for Decals {
+             placed: 0,
+             on_actors: 0,
+             near_another: 0,
++            near_camera: 0,
+             no_decal: 0,
+             over_frame_cap: 0,
+             no_body: 0,
+@@ -193,9 +220,10 @@ fn place(
      sfx: Option<Res<Sfx>>,
      mut models: ModelCtx,
      mut materials: ResMut<Assets<ForwardDecalMaterial<StandardMaterial>>>,
 +    (mut flat_materials, mut quad): (ResMut<Assets<StandardMaterial>>, Local<Option<Handle<Mesh>>>),
      mut st: ResMut<Decals>,
      root: Query<(Entity, &GlobalTransform), With<WorldRoot>>,
-     (rigs, nodes): (Query<&ActorRig>, Query<&GlobalTransform>),
-@@ -340,8 +362,7 @@ fn place(
+-    (rigs, nodes): (Query<&ActorRig>, Query<&GlobalTransform>),
++    (rigs, nodes, cams): (Query<&ActorRig>, Query<&GlobalTransform>, Query<&GlobalTransform, With<crate::fly::FlyCam>>),
+     (streamer, cells): (Option<Res<Streamer>>, Query<&Transform, With<CellEntity>>),
+     shapes: Query<DrawnShape>,
+ ) {
+@@ -213,6 +241,14 @@ fn place(
+         let Some(impact) = sfx.forms.impacts.get(&hit.impact) else { continue };
+         let Some((set, data)) = sfx.forms.decal(impact) else { continue };
+         let Some(set_id) = impact.texture_set else { continue };
++        // [nvport] None within NEAR_CAMERA of the eye: a decal there lies round the camera
++        // and a forward decal then covers the whole screen (players' reports: a huge
++        // square at a shot); seen from so close it could not be drawn right anyway.
++        let eye = cams.iter().next().map(|c| c.translation());
++        if eye.is_some_and(|e| root_place.affine().transform_point3(Vec3::from_array(hit.point)).distance(e) < NEAR_CAMERA) {
++            st.near_camera += 1;
++            continue;
++        }
+         let mut point = Vec3::from_array(hit.point);
+         let mut normal_game = Vec3::from_array(hit.normal);
+         if let Some(actor) = hit.actor {
+@@ -340,8 +376,7 @@ fn place(
              _ => (0.0, false),
          };
          let [r, g, b] = data.color;
@@ -3297,7 +3351,7 @@ index f9dd8cb..5630bba 100644
                  base_color: Color::srgb_u8(r, g, b),
                  base_color_texture: Some(base),
                  specular_texture: normal.clone().filter(|_| masked),
-@@ -354,15 +375,23 @@ fn place(
+@@ -354,15 +389,23 @@ fn place(
                  uv_transform: quarter((st.rng.next_f32() * 4.0) as u32),
                  alpha_mode: AlphaMode::Blend,
                  ..default()
@@ -3325,7 +3379,7 @@ index f9dd8cb..5630bba 100644
          let (parent, place) = match bone {
              None => match cell {
                  Some((e, origin)) => (e, Transform { translation: point - origin, ..game_place }),
-@@ -373,9 +402,26 @@ fn place(
+@@ -373,9 +416,26 @@ fn place(
                  (e, Transform::from_matrix(Mat4::from(g.affine().inverse() * world)))
              }
          };
@@ -3355,7 +3409,7 @@ index f9dd8cb..5630bba 100644
          if st.reported.insert(hit.impact) {
              info!(
                  "decals: {} leaves {} ({}) on {}: side {side:.0} of {:.0}-{:.0}, depth {:.0}",
-@@ -416,6 +462,7 @@ fn fade(
+@@ -416,6 +476,7 @@ fn fade(
      mut st: ResMut<Decals>,
      mut decals: Query<(Entity, &mut Decal)>,
      mut materials: ResMut<Assets<ForwardDecalMaterial<StandardMaterial>>>,
@@ -3363,7 +3417,7 @@ index f9dd8cb..5630bba 100644
  ) {
      let dt = time.delta_secs();
      st.clock += dt;
-@@ -429,9 +476,12 @@ fn fade(
+@@ -429,9 +490,12 @@ fn fade(
              commands.entity(e).try_despawn();
              gone.push(e);
          } else if left < DECAL_FADE {
@@ -3377,6 +3431,17 @@ index f9dd8cb..5630bba 100644
          }
      }
      st.faded += gone.len() as u32;
+@@ -446,8 +510,8 @@ fn report(mut exit: MessageReader<AppExit>, st: Res<Decals>) {
+     let exit_seen = exit.read().last().is_some();
+     if exit_seen && st.placed + st.near_another + st.no_body + st.no_cell > 0 {
+         info!(
+-            "decals summary: {} placed ({} on actors), at most {} alive (cap {MAX_DECALS}), {} still alive; {} within the placement radius of another, {} over the {MAX_DECALS_PER_FRAME} a frame, {} on actors without a skeleton drawn, {} outside the drawn cells; {} removed at the cap, {} faded out after {DECAL_LIFETIME} s, {} gone with their cell or actor",
+-            st.placed, st.on_actors, st.peak, st.live.len(), st.near_another, st.over_frame_cap, st.no_body, st.no_cell, st.over_cap, st.faded, st.unloaded
++            "decals summary: {} placed ({} on actors), at most {} alive (cap {MAX_DECALS}), {} still alive; {} within the placement radius of another, {} over the {MAX_DECALS_PER_FRAME} a frame, {} on actors without a skeleton drawn, {} outside the drawn cells, {} within {NEAR_CAMERA} of the camera; {} removed at the cap, {} faded out after {DECAL_LIFETIME} s, {} gone with their cell or actor",
++            st.placed, st.on_actors, st.peak, st.live.len(), st.near_another, st.over_frame_cap, st.no_body, st.no_cell, st.near_camera, st.over_cap, st.faded, st.unloaded
+         );
+     }
+     if exit_seen && st.off_body + st.actor_limit > 0 {
 diff --git a/engine/nvforever/src/eye_adapt.rs b/engine/nvforever/src/eye_adapt.rs
 index 9493eaa..cbbeece 100644
 --- a/engine/nvforever/src/eye_adapt.rs
@@ -5344,6 +5409,36 @@ index fba76a2..c0b96ba 100644
  
          GpuPreprocessingSupport { max_supported_mode }
      }
+diff --git a/engine/vendor/bevy_render/src/material_bind_groups.rs b/engine/vendor/bevy_render/src/material_bind_groups.rs
+index d28b4d7..00bb2b7 100644
+--- a/engine/vendor/bevy_render/src/material_bind_groups.rs
++++ b/engine/vendor/bevy_render/src/material_bind_groups.rs
+@@ -2199,8 +2199,23 @@ pub fn material_uses_bindless_resources<M>(render_device: &RenderDevice) -> bool
+ where
+     M: AsBindGroup,
+ {
+-    M::bindless_slot_count().is_some_and(|bindless_slot_count| {
+-        M::bindless_supported(render_device) && bindless_slot_count.resolve() > 1
++    nvport_bindless_allowed()
++        && M::bindless_slot_count().is_some_and(|bindless_slot_count| {
++            M::bindless_supported(render_device) && bindless_slot_count.resolve() > 1
++        })
++}
++
++/// NVForever (nvport): `NVPORT_BINDLESS=0` gives every material its own bind group (Bevy's
++/// path on devices without binding arrays) instead of the bindless slabs, whose empty slots
++/// hold the white fallback image: the test for textures drawn white for a moment (far
++/// buildings, a muzzle flash as a white square) on a phone's driver. The launcher passes it
++/// from `bindless.txt` (console `fdbindless on|off`); logged once as `materials: …`.
++fn nvport_bindless_allowed() -> bool {
++    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
++    *ON.get_or_init(|| {
++        let on = !std::env::var("NVPORT_BINDLESS").is_ok_and(|v| v.trim() == "0");
++        bevy_log::warn!("materials: {}", if on { "bindless where the device allows it" } else { "one bind group each (NVPORT_BINDLESS=0)" });
++        on
+     })
+ }
+ 
 diff --git a/engine/vendor/bevy_render/src/render_asset.rs b/engine/vendor/bevy_render/src/render_asset.rs
 index 17628cb..4f44875 100644
 --- a/engine/vendor/bevy_render/src/render_asset.rs

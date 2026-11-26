@@ -1,5 +1,13 @@
 # Fallout Droid Native — CHANGELOG
 
+## 2.0.0-alpha52 (351)
+- No impact decal within 48 units of the camera: a forward decal there lies round the
+  camera and covers the whole screen (players' reports: a huge square at a shot).
+- Console `fdbindless on|off` (next start; `materials: …` in the run log): one bind group per
+  material instead of Bevy's bindless slabs, whose empty slots hold the white fallback
+  image — the test for far buildings and a muzzle flash drawn white (a tester's New Vegas
+  video, Freeside). Bindless stays on by default until a tester's run says otherwise.
+
 ## 2.0.0-alpha51 (350)
 - Phone sun shadows: every cascade drawn every frame again. alpha50's staggered schedule
   (merged from the owner's change) brought back what alpha35 had: pale vertical stripes over

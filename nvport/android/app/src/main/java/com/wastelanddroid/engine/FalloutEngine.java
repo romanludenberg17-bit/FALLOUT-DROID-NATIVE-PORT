@@ -214,6 +214,12 @@ public final class FalloutEngine {
             if (uniform) args.add("env:NVPORT_SKIN_UNIFORM=1");
         } catch (Exception ignored) {
         }
+        // Bindless materials (console `fdbindless on|off`, bindless.txt): on unless asked off.
+        try {
+            java.io.File bl = new java.io.File(homeDir(context, game.id), "bindless.txt");
+            if (bl.isFile() && readText(bl).trim().equals("off")) args.add("env:NVPORT_BINDLESS=0");
+        } catch (Exception ignored) {
+        }
         // The resolution row of the game's settings shows the height in use (0: native).
         args.add("env:NVPORT_RENDER_HEIGHT=" + Math.max(0, renderHeight(context)));
         // Snapdragon 7+ Gen 2 and up, and every high class chip: the engine's settings page
