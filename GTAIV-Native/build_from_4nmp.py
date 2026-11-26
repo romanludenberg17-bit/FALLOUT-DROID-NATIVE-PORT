@@ -5,6 +5,8 @@
 usage: build_from_4nmp.py <4NMP-ui-only.apk> <engine jniLibs dir> <engine assets dir> <out unsigned.apk>
 
 Patches applied to the shell:
+  nmp_mp_hub.html  replaced by shell/nmp_mp_hub.html (working MP / co-op hub).
+  classes2.dex  NmpCoopBridge forwards to the engine's LAN discovery port 3076.
   classes2.dex  NmpLauncherActivity.onClick(id 1001 "ИГРАТЬ"): the "engine removed"
                 toast becomes mPlayBtn.performClick() (the original Play button, the
                 same call the MP hub's launch_coop already makes).
@@ -13,6 +15,7 @@ Patches applied to the shell:
   resources     app label -> "GTA IV Native".
 """
 import hashlib
+import os
 import struct
 import sys
 import zipfile
@@ -136,6 +139,12 @@ def patch_dex(dex):
         "0e00")         # return-void
     assert len(new) == 22
     d[i:i + 22] = new
+    # NmpCoopBridge.run: frames from the remote peer go to the engine's LAN
+    # discovery port (3076), not to the game traffic port 3074.
+    bridge = bytes.fromhex("1306020c")          # const/16 v6, 3074
+    assert d.count(bridge) == 1, "unexpected NmpCoopBridge layout"
+    j = d.find(bridge)
+    d[j:j + 4] = bytes.fromhex("1306040c")      # const/16 v6, 3076
     d[12:32] = hashlib.sha1(bytes(d[32:])).digest()
     struct.pack_into("<I", d, 8, zlib.adler32(bytes(d[12:])) & 0xFFFFFFFF)
     return bytes(d)
@@ -143,7 +152,6 @@ def patch_dex(dex):
 
 def main():
     src, jnilibs, assets, out = sys.argv[1:5]
-    import os
     with zipfile.ZipFile(src) as zin, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
         names = set()
         for item in zin.infolist():
@@ -158,6 +166,9 @@ def main():
             if n == "AndroidManifest.xml": data = patch_manifest(data)
             elif n == "resources.arsc": data = patch_arsc(data)
             elif n == "classes2.dex": data = patch_dex(data)
+            elif n == "assets/nmp_mp_hub.html":
+                with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "shell", "nmp_mp_hub.html"), "rb") as hub:
+                    data = hub.read()  # working LAN / co-op hub instead of the "in development" page
             store = n == "resources.arsc" or n.endswith((".png", ".jpg", ".mp3"))
             zout.writestr(zipfile.ZipInfo(n, item.date_time), data,
                           zipfile.ZIP_STORED if store else zipfile.ZIP_DEFLATED)

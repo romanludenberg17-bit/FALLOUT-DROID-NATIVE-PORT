@@ -292,6 +292,56 @@ index 0000000..9257648
 +}
 +
 +}  // extern "C"
+diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/gta4_app.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/gta4_app.cpp
+index 68d694b..3b84233 100644
+--- a/glue/rexglue-sdk-main/gta4-recomp/src/gta4_app.cpp
++++ b/glue/rexglue-sdk-main/gta4-recomp/src/gta4_app.cpp
+@@ -74,7 +74,7 @@ REXCVAR_DEFINE_STRING(gta4_relay_policy, "auto", "GTA IV/Multiplayer",
+                       "Peer route policy: auto, direct_only, or relay_only")
+     .allowed({"auto", "direct_only", "relay_only"})
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+-REXCVAR_DEFINE_UINT32(gta4_lan_discovery_port, 36002, "GTA IV/Multiplayer",
++REXCVAR_DEFINE_UINT32(gta4_lan_discovery_port, 3076, "GTA IV/Multiplayer",
+                       "LAN discovery UDP port")
+     .range(1, 65535)
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+@@ -630,7 +630,17 @@ struct GTA4App::TitleProfileSyncState {
+ std::optional<rex::PathConfig> GTA4App::OnFinalizePaths(
+     const rex::PathConfig& defaults, std::function<void(rex::PathConfig)> resume) {
+   auto paths = defaults;
+-  paths.game_data_root = liberty_root_ / "game";
++  // The launcher passes a selected, ready game folder (default.xex +
++  // default.xexp + game.iso or extracted files) as --game_data_root.
++  const bool external_game = !defaults.game_data_root.empty() &&
++                             gta4::install::IsInstallReady(defaults.game_data_root, nullptr);
++  if (!external_game) {
++    if (!defaults.game_data_root.empty()) {
++      REXLOG_WARN("Selected game folder is not usable, using the installed game: {}",
++                  defaults.game_data_root.string());
++    }
++    paths.game_data_root = liberty_root_ / "game";
++  }
+   paths.marketplace_content_root = liberty_root_ / "dlc";
+   paths.config_path = native_config_path_;
+ 
+diff --git a/glue/rexglue-sdk-main/src/filesystem/virtual_file_system.cpp b/glue/rexglue-sdk-main/src/filesystem/virtual_file_system.cpp
+index 95fbfb2..0695d80 100644
+--- a/glue/rexglue-sdk-main/src/filesystem/virtual_file_system.cpp
++++ b/glue/rexglue-sdk-main/src/filesystem/virtual_file_system.cpp
+@@ -140,6 +140,13 @@ Entry* VirtualFileSystem::ResolvePath(const std::string_view path) {
+   const auto& device = *it;
+   auto relative_path = normalized_path.substr(device->mount_path().size());
+   auto* entry = device->ResolvePath(relative_path);
++  // Overlay: a later device on the same mount path (game.iso behind the
++  // loose default.xex/default.xexp folder) answers what the first lacks.
++  for (auto next = std::next(it); !entry && next != devices_.cend(); ++next) {
++    if ((*next)->mount_path() == device->mount_path()) {
++      entry = (*next)->ResolvePath(relative_path);
++    }
++  }
+ 
+   if (entry) {
+     if (had_symlink) {
 diff --git a/glue/rexglue-sdk-main/src/graphics/CMakeLists.txt b/glue/rexglue-sdk-main/src/graphics/CMakeLists.txt
 index af36910..96d7058 100644
 --- a/glue/rexglue-sdk-main/src/graphics/CMakeLists.txt
@@ -309,6 +359,40 @@ index af36910..96d7058 100644
          if(NOT GTA4_NATIVE_DXC_LIBRARY_PATH)
              set(GTA4_NATIVE_DXC_LIBRARY_PATH "${GTA4_NATIVE_DXC_ROOT}/lib/x64")
          endif()
+diff --git a/glue/rexglue-sdk-main/src/system/runtime.cpp b/glue/rexglue-sdk-main/src/system/runtime.cpp
+index 0184328..55c727b 100644
+--- a/glue/rexglue-sdk-main/src/system/runtime.cpp
++++ b/glue/rexglue-sdk-main/src/system/runtime.cpp
+@@ -13,6 +13,7 @@
+ #include <rex/cvar.h>
+ #include <rex/diagnostics/gta4_transition.h>
+ #include <rex/filesystem/devices/host_path_device.h>
++#include <rex/filesystem/devices/disc_image_device.h>
+ #include <rex/filesystem/devices/null_device.h>
+ #include <rex/filesystem/vfs.h>
+ #include <rex/logging.h>
+@@ -322,6 +323,21 @@ bool Runtime::SetupVfs() {
+   }
+   REXSYS_INFO("  Mounted {} at {}", abs_game_root.string(), mount_path);
+ 
++  // A game folder kept as default.xex + default.xexp + game.iso (the 4NMP
++  // "game_cache" layout): the disc image supplies everything else.
++  {
++    std::error_code iso_error;
++    const auto iso_path = abs_game_root / "game.iso";
++    if (std::filesystem::is_regular_file(iso_path, iso_error)) {
++      auto iso = std::make_unique<rex::filesystem::DiscImageDevice>(mount_path, iso_path);
++      if (iso->Initialize() && file_system_->RegisterDevice(std::move(iso))) {
++        REXSYS_INFO("  Mounted {} behind {}", iso_path.string(), mount_path);
++      } else {
++        REXSYS_ERROR("Runtime::SetupVfs: Failed to mount {}", iso_path.string());
++      }
++    }
++  }
++
+   // Register symbolic links for game: and D:
+   file_system_->RegisterSymbolicLink("game:", mount_path);
+   file_system_->RegisterSymbolicLink("d:", mount_path);
 diff --git a/glue/rexglue-sdk-main/src/system/xam/live_compatibility.cpp b/glue/rexglue-sdk-main/src/system/xam/live_compatibility.cpp
 index b5d7b20..47e4a14 100644
 --- a/glue/rexglue-sdk-main/src/system/xam/live_compatibility.cpp

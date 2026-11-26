@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>4NMP — Мультиплеер</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; user-select: none; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; color: #D4D4D4;
+    font-family: "Helvetica Neue", Helvetica, Arial, "Roboto", sans-serif; }
+  .screen { display: flex; flex-direction: column; width: 100%; height: 100%; padding: 14px 32px 12px 32px; }
+  .topbar { display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+    padding-bottom: 10px; border-bottom: 1px solid #333; flex-shrink: 0; }
+  .tabs { display: flex; gap: 32px; align-items: baseline; }
+  .tab { font-size: 22px; font-weight: 800; letter-spacing: -0.3px; color: #4A4A4A; cursor: pointer; }
+  .tab.on { color: #F5F5F5; }
+  .tab:active { color: #F5A623; }
+  .top-meta { font-size: 11px; font-weight: 700; color: #6B6B6B; letter-spacing: 0.4px; text-transform: uppercase; white-space: nowrap; }
+  .main { flex: 1; min-height: 0; display: flex; padding: 16px 0; gap: 28px; }
+  .col-left { width: 40%; flex-shrink: 0; display: flex; flex-direction: column; overflow-y: auto; }
+  .row { display: flex; align-items: center; justify-content: space-between; padding: 7px 8px;
+    min-height: 34px; cursor: pointer; border-left: 3px solid transparent; }
+  .row:active, .row.sel { background: #141414; border-left-color: #F5A623; }
+  .row-lbl { font-size: 14px; font-weight: 700; color: #E5E5E5; }
+  .row-val { font-size: 12px; font-weight: 700; color: #8A8A8A; }
+  .row-sep { height: 1px; background: #1E1E1E; margin: 8px 0; }
+  .col-right { flex: 1; min-width: 0; min-height: 0; border: 1px solid #222; background: #060606;
+    padding: 18px 22px; overflow-y: auto; }
+  h2 { font-size: 20px; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase; color: #F5F5F5; margin-bottom: 8px; }
+  .line { width: 64px; height: 2px; background: #F5A623; margin: 0 0 12px 0; }
+  p, li { font-size: 12px; font-weight: 600; line-height: 1.55; color: #9A9A9A; }
+  ul { margin: 6px 0 10px 18px; }
+  b { color: #E5E5E5; }
+  .field { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
+  .field label { font-size: 11px; font-weight: 800; color: #8A8A8A; text-transform: uppercase; width: 70px; flex-shrink: 0; }
+  input { flex: 1; min-width: 0; background: #111; border: 1px solid #444; color: #F5F5F5; font-size: 14px;
+    font-weight: 700; padding: 7px 9px; outline: none; user-select: text; }
+  input:focus { border-color: #F5A623; }
+  .btn { display: inline-block; margin: 6px 8px 6px 0; padding: 9px 16px; background: #1A1A1A;
+    border: 1px solid #555; color: #F5F5F5; font-size: 13px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.5px; cursor: pointer; }
+  .btn.main { background: #F5A623; border-color: #F5A623; color: #000; }
+  .btn:active { opacity: 0.7; }
+  .item { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 6px 0; border-bottom: 1px solid #1A1A1A; }
+  .item span { font-size: 13px; font-weight: 700; color: #E5E5E5; }
+  .item small { font-size: 11px; color: #8A8A8A; margin-left: 6px; }
+  .bottombar { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding-top: 9px; border-top: 1px solid #333; flex-shrink: 0; }
+  .status-lbl { font-size: 11px; font-weight: 800; color: #8A8A8A; letter-spacing: 0.6px; text-transform: uppercase; }
+  .hint { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; font-weight: 700;
+    color: #D4D4D4; text-transform: uppercase; padding: 2px 4px; }
+  .hint:active { color: #F5A623; }
+  .keycap { display: inline-block; padding: 1px 6px; border: 1px solid #777; font-size: 10px; font-weight: 800;
+    color: #E5E5E5; background: #111; }
+  .hidden { display: none; }
+  @media (max-height: 420px) {
+    .screen { padding: 8px 20px; } .tab { font-size: 18px; } h2 { font-size: 17px; }
+    .row { padding: 4px 8px; min-height: 28px; } .main { padding: 10px 0; }
+  }
+  @media (orientation: portrait) {
+    .screen { padding: 12px 16px; } .main { flex-direction: column; gap: 14px; }
+    .col-left { width: 100%; max-height: 35%; } .top-meta { display: none; } .tabs { gap: 16px; } .tab { font-size: 17px; }
+  }
+</style>
+</head>
+<body>
+<div class="screen">
+  <div class="topbar">
+    <div class="tabs">
+      <div class="tab" data-tab="mp">Мультиплеер</div>
+      <div class="tab" data-tab="coop">Co-op</div>
+      <div class="tab" data-tab="servers">Серверы</div>
+      <div class="tab" data-tab="friends">Друзья</div>
+    </div>
+    <div class="top-meta">4NMP • P2P БЕЗ СЕРВЕРА</div>
+  </div>
+
+  <div class="main">
+    <!-- ===== МУЛЬТИПЛЕЕР ===== -->
+    <div class="col-left" data-page="mp">
+      <div class="row sel" data-mode="Свободный режим"><span class="row-lbl">Свободный режим</span><span class="row-val">до 16</span></div>
+      <div class="row" data-mode="Бой насмерть"><span class="row-lbl">Бой насмерть</span><span class="row-val">2–16</span></div>
+      <div class="row" data-mode="Командный бой"><span class="row-lbl">Командный бой</span><span class="row-val">2–16</span></div>
+      <div class="row" data-mode="Работа на мафию"><span class="row-lbl">Работа на мафию</span><span class="row-val">2–16</span></div>
+      <div class="row" data-mode="Угон автомобилей"><span class="row-lbl">Угон автомобилей</span><span class="row-val">2–16</span></div>
+      <div class="row" data-mode="Копы и бандиты"><span class="row-lbl">Копы и бандиты</span><span class="row-val">2–16</span></div>
+      <div class="row" data-mode="Война за территорию"><span class="row-lbl">Война за территорию</span><span class="row-val">2–16</span></div>
+      <div class="row" data-mode="Гонки / GTA-гонки"><span class="row-lbl">Гонки / GTA-гонки</span><span class="row-val">2–12</span></div>
+      <div class="row" data-mode="Вечеринка"><span class="row-lbl">Вечеринка</span><span class="row-val">2–16</span></div>
+    </div>
+    <div class="col-right" data-page="mp">
+      <h2>Игра по сети</h2><div class="line"></div>
+      <p>Режим: <b id="mpMode">Свободный режим</b>. Все игроки — в одной Wi-Fi сети или на точке доступа одного из телефонов. Сервер не нужен.</p>
+      <div class="field"><label>Ник</label><input id="nick1" maxlength="15" placeholder="Player4NMP"></div>
+      <span class="btn main" id="mpHost">Создать игру</span>
+      <span class="btn" id="mpJoin">Найти игру</span>
+      <p style="margin-top:8px">В игре: <b>телефон → Мультиплеер</b> → режим. Хост создаёт матч, остальные выбирают его в списке.</p>
+    </div>
+
+    <!-- ===== CO-OP ===== -->
+    <div class="col-left hidden" data-page="coop">
+      <div class="row sel" data-coop="Петля палача (Hangman's NOOSE)"><span class="row-lbl">Петля палача</span><span class="row-val">кооп 2–4</span></div>
+      <div class="row" data-coop="Срыв сделки (Deal Breaker)"><span class="row-lbl">Срыв сделки</span><span class="row-val">кооп 2–4</span></div>
+      <div class="row" data-coop="Взрыв базы II (Bomb da Base II)"><span class="row-lbl">Взрыв базы II</span><span class="row-val">кооп 2–4</span></div>
+      <div class="row" data-coop="Свободный режим (вдвоём по городу)"><span class="row-lbl">Свободный режим</span><span class="row-val">кооп 2–16</span></div>
+      <div class="row-sep"></div>
+      <div class="row" id="coopRecentRow"><span class="row-lbl">Последний хост</span><span class="row-val" id="coopRecent">—</span></div>
+    </div>
+    <div class="col-right hidden" data-page="coop">
+      <h2>Co-op лобби</h2><div class="line"></div>
+      <p>Миссия: <b id="coopMode">Петля палача (Hangman's NOOSE)</b></p>
+      <div class="field"><label>Ник</label><input id="nick2" maxlength="15" placeholder="Player4NMP"></div>
+      <span class="btn main" id="coopHost">Я хост</span>
+      <span class="btn" id="coopAuto">Найти по Wi-Fi</span>
+      <div class="field"><label>IP хоста</label><input id="hostIp" maxlength="15" inputmode="decimal" placeholder="192.168.43.1"></div>
+      <span class="btn" id="coopJoinIp">Подключиться по IP</span>
+      <ul>
+        <li><b>Хост</b> жмёт «Я хост», в игре: телефон → Мультиплеер → кооп-миссия → создать.</li>
+        <li><b>Второй игрок</b> жмёт «Найти по Wi-Fi» и выбирает игру хоста в списке.</li>
+        <li>Если игра не видна — «Подключиться по IP». IP хоста: Настройки → Wi-Fi → сеть → IP-адрес (у точки доступа обычно 192.168.43.1).</li>
+      </ul>
+    </div>
+
+    <!-- ===== СЕРВЕРЫ ===== -->
+    <div class="col-left hidden" data-page="servers">
+      <div class="row sel"><span class="row-lbl">Локальная сеть</span><span class="row-val">авто</span></div>
+      <div class="row-sep"></div>
+      <div id="recentList"></div>
+    </div>
+    <div class="col-right hidden" data-page="servers">
+      <h2>Серверы не нужны</h2><div class="line"></div>
+      <p>Игра работает напрямую между телефонами (P2P): хост — это игрок, создавший матч. Сессии в одной сети находятся автоматически.</p>
+      <p style="margin-top:8px">Слева — хосты, к которым вы подключались. Нажмите, чтобы зайти снова.</p>
+      <span class="btn main" id="srvScan">Искать в сети</span>
+      <span class="btn" id="srvClear">Очистить список</span>
+    </div>
+
+    <!-- ===== ДРУЗЬЯ ===== -->
+    <div class="col-left hidden" data-page="friends">
+      <div id="friendList"></div>
+    </div>
+    <div class="col-right hidden" data-page="friends">
+      <h2>Друзья</h2><div class="line"></div>
+      <div class="field"><label>Имя</label><input id="fName" maxlength="15" placeholder="Друг"></div>
+      <div class="field"><label>IP</label><input id="fIp" maxlength="15" inputmode="decimal" placeholder="192.168.0.10"></div>
+      <span class="btn main" id="fAdd">Добавить друга</span>
+      <p style="margin-top:8px">Нажмите на друга слева, чтобы подключиться к его игре.</p>
+    </div>
+  </div>
+
+  <div class="bottombar">
+    <div class="status-lbl" id="status">4NMP • LAN / ТОЧКА ДОСТУПА • UDP 3074–3076</div>
+    <div class="hint" id="back"><span class="keycap">ESC</span> НАЗАД</div>
+  </div>
+</div>
+
+<script>
+var store = {
+  get: function (k, d) { try { var v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set: function (k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+};
+function $(id) { return document.getElementById(id); }
+function go(url) { window.location.href = url; }
+function toast(msg) { go("nmp://toast?msg=" + encodeURIComponent(msg)); }
+function cleanNick(v) { v = (v || "").replace(/[^A-Za-z0-9_\-]/g, "").slice(0, 15); return v || "Player4NMP"; }
+function validIp(v) { return /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(v) &&
+  v.split(".").every(function (x) { return +x <= 255; }); }
+function nick() { var n = cleanNick($("nick2").value || $("nick1").value); store.set("nick", n); return n; }
+function remember(ip, name) {
+  var list = store.get("recent", []).filter(function (r) { return r.ip !== ip; });
+  list.unshift({ ip: ip, name: name || ip }); store.set("recent", list.slice(0, 8));
+}
+function launch(params) { go("nmp://launch_coop?" + params + "&nick=" + encodeURIComponent(nick())); }
+function join(ip, name) {
+  if (!validIp(ip)) { toast("Введите IP вида 192.168.0.10"); return; }
+  remember(ip, name); launch("ip=" + encodeURIComponent(ip));
+}
+
+function show(tab) {
+  store.set("tab", tab);
+  Array.prototype.forEach.call(document.querySelectorAll(".tab"), function (t) { t.classList.toggle("on", t.dataset.tab === tab); });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-page]"), function (p) { p.classList.toggle("hidden", p.dataset.page !== tab); });
+  render();
+}
+function pick(attr, target) {
+  Array.prototype.forEach.call(document.querySelectorAll("[data-" + attr + "]"), function (r) {
+    r.addEventListener("click", function () {
+      Array.prototype.forEach.call(document.querySelectorAll("[data-" + attr + "]"), function (x) { x.classList.remove("sel"); });
+      r.classList.add("sel"); $(target).textContent = r.dataset[attr];
+    });
+  });
+}
+function listItem(label, sub, onGo, onDel) {
+  var d = document.createElement("div"); d.className = "item";
+  var s = document.createElement("span"); s.textContent = label;
+  if (sub && sub !== label) { var sm = document.createElement("small"); sm.textContent = sub; s.appendChild(sm); } d.appendChild(s);
+  var b = document.createElement("span"); b.className = "btn"; b.textContent = "Войти"; b.onclick = onGo; d.appendChild(b);
+  if (onDel) { var x = document.createElement("span"); x.className = "btn"; x.textContent = "×"; x.onclick = onDel; d.appendChild(x); }
+  return d;
+}
+function render() {
+  var recent = store.get("recent", []);
+  $("coopRecent").textContent = recent.length ? recent[0].name : "—";
+  var rl = $("recentList"); rl.innerHTML = "";
+  if (!recent.length) { var p = document.createElement("p"); p.textContent = "Пока пусто."; rl.appendChild(p); }
+  recent.forEach(function (r) { rl.appendChild(listItem(r.name, r.ip, function () { join(r.ip, r.name); })); });
+  var friends = store.get("friends", []), fl = $("friendList"); fl.innerHTML = "";
+  if (!friends.length) { var q = document.createElement("p"); q.textContent = "Друзей пока нет."; fl.appendChild(q); }
+  friends.forEach(function (f, i) {
+    fl.appendChild(listItem(f.name, f.ip, function () { join(f.ip, f.name); },
+      function () { friends.splice(i, 1); store.set("friends", friends); render(); }));
+  });
+}
+
+Array.prototype.forEach.call(document.querySelectorAll(".tab"), function (t) { t.addEventListener("click", function () { show(t.dataset.tab); }); });
+pick("mode", "mpMode"); pick("coop", "coopMode");
+$("nick1").value = $("nick2").value = store.get("nick", "");
+$("nick1").oninput = function () { $("nick2").value = this.value; };
+$("nick2").oninput = function () { $("nick1").value = this.value; };
+$("hostIp").value = (store.get("recent", [])[0] || {}).ip || "";
+$("mpHost").onclick = function () { launch("host=1"); };
+$("mpJoin").onclick = function () { launch("lan=1"); };
+$("coopHost").onclick = function () { launch("host=1"); };
+$("coopAuto").onclick = function () { launch("lan=1"); };
+$("coopJoinIp").onclick = function () { join($("hostIp").value.trim()); };
+$("coopRecentRow").onclick = function () { var r = store.get("recent", [])[0]; if (r) join(r.ip, r.name); };
+$("srvScan").onclick = function () { launch("lan=1"); };
+$("srvClear").onclick = function () { store.set("recent", []); render(); };
+$("fAdd").onclick = function () {
+  var name = cleanNick($("fName").value), ip = $("fIp").value.trim();
+  if (!validIp(ip)) { toast("Введите IP вида 192.168.0.10"); return; }
+  var friends = store.get("friends", []); friends.push({ name: name, ip: ip }); store.set("friends", friends);
+  $("fName").value = $("fIp").value = ""; render(); go("nmp://add_friend");
+};
+function closeHub() { go("nmp://close"); }
+$("back").onclick = closeHub;
+window.addEventListener("keydown", function (e) {
+  if (e.key === "Escape" || (e.key === "Backspace" && document.activeElement.tagName !== "INPUT")) closeHub();
+});
+show(store.get("tab", "coop"));
+</script>
+</body>
+</html>

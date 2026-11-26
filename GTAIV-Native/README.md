@@ -30,9 +30,18 @@ upstream `docs/android/INSTALL.md`.
 ## Что поменяно в оболочке 4NMP (build_from_4nmp.py)
 - «ИГРАТЬ» снова запускает игру (вместо тоста «Движок вырезан» — `mPlayBtn.performClick()`).
 - Пакет `com.rommy.gtaiv`, название «GTA IV Native», разрешения Wi-Fi/multicast.
+- MP-хаб `shell/nmp_mp_hub.html`: рабочие вкладки Мультиплеер / Co-op / Серверы / Друзья.
 - Профили `default_args*.txt` заменены на профили движка (качество консоли + LAN).
 
+## Папка игры (как в 4NMP)
+В лаунчере выбрать папку `game/` с `default.xex`, `default.xexp`, `game.iso` (можно
+русифицированный), `aes_key.bin`. Установка не нужна: `default.xex`/`xexp` берутся из
+папки, всё остальное — прямо из `game.iso`. Нужен доступ «Все файлы».
+
 ## Изменения движка относительно upstream
+- `--game_data_root` от лаунчера учитывается (если `default.xex`/`xexp` проходят проверку);
+  `game.iso` монтируется за папкой (VFS ищет дальше, если файла нет в папке).
+- LAN-обнаружение на UDP 3076 (мост 4NMP пересылает на 3076, игровой трафик — 3074).
 - JNI для оболочки: `TouchSettings` (редактор раскладки 4NMP) поверх нашей раскладки —
   редактор и игровой оверлей используют один `touch-controls.ini` и одну нумерацию;
   `LibertyActivity.nativeCheckpointGpuCache/nativeSetGameHapticsAvailable`; MulticastLock.
