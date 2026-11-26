@@ -154,8 +154,14 @@ def main():
     src, jnilibs, assets, out = sys.argv[1:5]
     with zipfile.ZipFile(src) as zin, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
         names = set()
+        overridden = set()
+        for root, _, files in os.walk(assets):
+            for f in files:
+                overridden.add("assets/" + os.path.relpath(os.path.join(root, f), assets).replace(os.sep, "/"))
         for item in zin.infolist():
             n = item.filename
+            if n.startswith("assets/Resources/") and n in overridden:
+                continue  # the engine's copy (e.g. GTA-style touch icons) wins
             if n.startswith("META-INF/") and n.split("/")[-1].upper().endswith((".SF", ".RSA", ".MF", ".EC", ".DSA")):
                 continue
             if n.startswith("lib/"):

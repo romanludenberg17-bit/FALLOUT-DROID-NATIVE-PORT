@@ -87,10 +87,10 @@ index 56c07bc..fa12298 100644
 +}
 diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/android/android_touch_settings_jni.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/android/android_touch_settings_jni.cpp
 new file mode 100644
-index 0000000..9257648
+index 0000000..2c66a55
 --- /dev/null
 +++ b/glue/rexglue-sdk-main/gta4-recomp/src/android/android_touch_settings_jni.cpp
-@@ -0,0 +1,201 @@
+@@ -0,0 +1,202 @@
 +// JNI for the 4NMP launcher's touch layout editor (com.libertyrecomp.TouchSettings),
 +// implemented over this engine's own touch layout and settings code, so the
 +// editor and the in-game overlay share one action numbering and one file
@@ -252,6 +252,7 @@ index 0000000..9257648
 +      .logical_width = w, .logical_height = h, .host_space = true};
 +  const auto preferences = GetContextTouchPreferences();
 +  ContextTouchLayoutOptions options;
++  options.contextual = true;  // the in-game (semantic) layout, not the legacy grid
 +  options.editing = true;
 +  options.armed = true;
 +  options.can_enter_vehicle = true;
@@ -293,10 +294,18 @@ index 0000000..9257648
 +
 +}  // extern "C"
 diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/gta4_app.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/gta4_app.cpp
-index 68d694b..3b84233 100644
+index 68d694b..6ebe9de 100644
 --- a/glue/rexglue-sdk-main/gta4-recomp/src/gta4_app.cpp
 +++ b/glue/rexglue-sdk-main/gta4-recomp/src/gta4_app.cpp
-@@ -74,7 +74,7 @@ REXCVAR_DEFINE_STRING(gta4_relay_policy, "auto", "GTA IV/Multiplayer",
+@@ -12,6 +12,7 @@
+ #include <unordered_set>
+ #include <vector>
+ 
++#include <rex/filesystem.h>
+ #include <rex/graphics/gta4_native/title_commands.h>
+ #include <rex/graphics/gta4_native/anti_aliasing_policy.h>
+ #include <rex/graphics/gta4_native/hdr_policy.h>
+@@ -74,7 +75,7 @@ REXCVAR_DEFINE_STRING(gta4_relay_policy, "auto", "GTA IV/Multiplayer",
                        "Peer route policy: auto, direct_only, or relay_only")
      .allowed({"auto", "direct_only", "relay_only"})
      .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
@@ -305,7 +314,21 @@ index 68d694b..3b84233 100644
                        "LAN discovery UDP port")
      .range(1, 65535)
      .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-@@ -630,7 +630,17 @@ struct GTA4App::TitleProfileSyncState {
+@@ -627,10 +628,31 @@ struct GTA4App::TitleProfileSyncState {
+   bool stopping = false;
+ };
+ 
++namespace {
++// User icons in LibertyRecomp/touch-icons win; otherwise the bundled set the
++// launcher unpacks into Resources/touch-icons.
++std::filesystem::path TouchIconDirectory(const std::filesystem::path& liberty_root) {
++  std::error_code error;
++  const auto user = liberty_root / "touch-icons";
++  if (std::filesystem::is_directory(user, error) && !std::filesystem::is_empty(user, error)) return user;
++  return rex::filesystem::GetResourcesFolder() / "touch-icons";
++}
++}  // namespace
++
  std::optional<rex::PathConfig> GTA4App::OnFinalizePaths(
      const rex::PathConfig& defaults, std::function<void(rex::PathConfig)> resume) {
    auto paths = defaults;
@@ -324,6 +347,401 @@ index 68d694b..3b84233 100644
    paths.marketplace_content_root = liberty_root_ / "dlc";
    paths.config_path = native_config_path_;
  
+@@ -1334,7 +1356,7 @@ void GTA4App::OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) {
+   gta4::game_center::Initialize();
+   context_touch_overlay_ =
+       std::make_unique<gta4::input::ContextTouchOverlay>(
+-          drawer, immediate_drawer(), native_config_path_.parent_path() / "touch-icons", window());
++          drawer, immediate_drawer(), TouchIconDirectory(native_config_path_.parent_path()), window());
+   text_chat_dialog_ = std::make_unique<gta4::input::TextChatDialog>(
+       drawer, [this](bool captured) {
+         SetTitleInputCaptured(captured);
+diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.cpp
+index 5f3e537..c0e4b8e 100644
+--- a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.cpp
++++ b/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.cpp
+@@ -480,6 +480,31 @@ ContextTouchViewport ReadViewport() {
+   };
+ }
+ 
++// Cutscene skip: gameplay controls are hidden during cutscenes, so a single
++// GTA-style SKIP button sends the title's skip input (A) for a short pulse.
++std::atomic<uint64_t> g_skip_until_ns{0};
++constexpr uint64_t kSkipPulseNanoseconds = 180'000'000;
++
++bool CutsceneSkipAvailable(const TouchContextSnapshot& context) {
++  return context.valid && context.cutscene && !context.loading && !context.frontend && !context.map;
++}
++
++ContextTouchControl CutsceneSkipButton(const ContextTouchViewport& v) {
++  ContextTouchControl c;
++  const float edge = std::min(v.safe_width, v.safe_height);
++  c.kind = ContextTouchControlKind::kButton;
++  c.action = TouchAction::kMore;
++  c.radius = std::max(edge * 0.075f, 22.0f);
++  c.center_x = v.safe_x + v.safe_width - edge * 0.05f - c.radius;
++  c.center_y = v.safe_y + v.safe_height - edge * 0.05f - c.radius;
++  c.minimum_x = c.center_x - c.radius * 1.3f; c.maximum_x = c.center_x + c.radius * 1.3f;
++  c.minimum_y = c.center_y - c.radius * 1.3f; c.maximum_y = c.center_y + c.radius * 1.3f;
++  std::snprintf(c.label.data(), c.label.size(), "SKIP");
++  std::snprintf(c.icon_id.data(), c.icon_id.size(), "skip");
++  std::snprintf(c.accessible_name.data(), c.accessible_name.size(), "Skip cutscene");
++  return c;
++}
++
+ void RecalculateAxesLocked() {
+   g_runtime.movement_x = g_runtime.movement_y = 0;
+   g_runtime.right_x = g_runtime.right_y = 0;
+@@ -915,6 +940,20 @@ bool OnPointerEvent(const rex::input::AbsolutePointerEvent& event, PPCContext&,
+       (!rex::input::TouchControlsActive() && !ContextTouchEditorOpen())) return false;
+   std::lock_guard lock(g_runtime.mutex);
+   if (g_runtime.epoch != epoch || g_runtime.frozen_epoch == epoch) return false;
++  if (!g_runtime.editing && !g_runtime.editor_session) {
++    const auto snapshot = GetTouchContextSnapshot();
++    if (CutsceneSkipAvailable(snapshot)) {
++      if (event.phase != rex::input::AbsolutePointerPhase::kDown) return false;
++      const auto viewport = ReadViewport();
++      const float x = viewport.host_space ? event.logical_x : event.x;
++      const float y = viewport.host_space ? event.logical_y : event.y;
++      const auto skip = CutsceneSkipButton(viewport);
++      if (!viewport.valid || x < skip.minimum_x || x > skip.maximum_x || y < skip.minimum_y ||
++          y > skip.maximum_y) return false;
++      g_skip_until_ns.store(MonotonicNanoseconds() + kSkipPulseNanoseconds);
++      return true;
++    }
++  }
+   if (!g_runtime.editing && !GameplayPresentationAdmittedLocked(GetTouchContextSnapshot())) {
+     if (!g_runtime.editor_session) HideGameplayLocked();
+     return false;
+@@ -1291,6 +1330,10 @@ bool NativePadProvider(uint32_t user, rex::input::X_INPUT_GAMEPAD* output) noexc
+   if (!g_runtime.initialized || !g_runtime.context.valid || !g_runtime.context.input_user_known ||
+       user != g_runtime.context.input_user) return false;
+   *output = {};
++  if (!owned && active && MonotonicNanoseconds() < g_skip_until_ns.load()) {
++    output->buttons = rex::input::X_INPUT_GAMEPAD_A;
++    return true;
++  }
+   if (owned || !active || !pad.active || pad.epoch != g_runtime.epoch ||
+       !GameplayPresentationAdmittedLocked(GetTouchContextSnapshot())) return true;
+   output->buttons = pad.buttons;
+@@ -1565,6 +1608,19 @@ ContextTouchOverlaySnapshot GetContextTouchDrawableOverlaySnapshot(uint64_t mono
+                          g_runtime.context.frontend || g_runtime.context.map;
+   const bool editor_drawable = g_runtime.editor_session &&
+       (g_runtime.editing || (g_runtime.editor_closing && g_runtime.last_drawable.editor));
++  if (!editor_drawable && !g_runtime.editor_session && pointer_allowed && viewport.valid &&
++      viewport.focused && CutsceneSkipAvailable(context)) {
++    ContextTouchOverlaySnapshot skip;
++    skip.layout.mode = ContextTouchMode::kMinigame;
++    skip.layout.viewport = viewport;
++    skip.layout.opacity = std::clamp(g_runtime.preferences.opacity + 0.15f, 0.4f, 1.0f);
++    skip.layout.controls[0] = CutsceneSkipButton(viewport);
++    skip.layout.control_count = 1;
++    skip.active[0] = monotonic_ns < g_skip_until_ns.load() ? 1 : 0;
++    skip.visible = true;
++    skip.fade_alpha = 1.0f;
++    return skip;
++  }
+   if (!editor_drawable && !GameplayPresentationAdmittedLocked(context)) {
+     HideGameplayLocked();
+     return {};
+diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_draw.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_draw.cpp
+index f9bbbde..4737e71 100644
+--- a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_draw.cpp
++++ b/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_draw.cpp
+@@ -75,6 +75,24 @@ void DrawContextTouchLayer(ImDrawList* draw, ImFont* font, float font_size,
+       }
+       continue;
+     }
++    const bool stick = control.kind == ContextTouchControlKind::kMovementStick ||
++                       control.kind == ContextTouchControlKind::kRightStick;
++    ContextTouchIcon icon;
++    bool has_icon = false;
++    if (resolver && control.icon_id[0]) {
++      has_icon = resolver(icon_context, control.icon_id.data(), &icon) && icon.texture &&
++                 std::isfinite(icon.aspect) && icon.aspect > 0.0f;
++    }
++    if (has_icon && !stick) {
++      // GTA-style icons carry their own round plate: draw them full size and
++      // tint the whole button while it is held.
++      const float half_width = icon.aspect >= 1.0f ? radius : radius * icon.aspect;
++      const float half_height = icon.aspect >= 1.0f ? radius / icon.aspect : radius;
++      draw->AddImage(icon.texture, ImVec2(center.x - half_width, center.y - half_height),
++                     ImVec2(center.x + half_width, center.y + half_height), icon.uv_min, icon.uv_max,
++                     active ? color(255, 170, 70, 255.0f) : color(255, 255, 255, 235.0f));
++      continue;
++    }
+     draw->AddCircleFilled(center, radius, active ? color(236, 135, 42, 255.0f)
+                                                : color(12, 18, 27, 210.0f), 48);
+     draw->AddCircle(center, radius, color(255, 255, 255, 255.0f), 48,
+@@ -87,12 +105,6 @@ void DrawContextTouchLayer(ImDrawList* draw, ImFont* font, float font_size,
+                                   center.y + y * radius * 0.55f),
+                             radius * 0.34f, color(255, 255, 255, 210.0f), 32);
+     }
+-    ContextTouchIcon icon;
+-    bool has_icon = false;
+-    if (resolver && control.icon_id[0]) {
+-      has_icon = resolver(icon_context, control.icon_id.data(), &icon) && icon.texture &&
+-                 std::isfinite(icon.aspect) && icon.aspect > 0.0f;
+-    }
+     if (has_icon) {
+       const float bound = radius * 0.62f;
+       const float half_width = icon.aspect >= 1.0f ? bound : bound * icon.aspect;
+diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_layout.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_layout.cpp
+index f1445d1..7d77956 100644
+--- a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_layout.cpp
++++ b/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_layout.cpp
+@@ -386,18 +386,25 @@ ContextTouchLayout BuildSemanticLayout(ContextTouchMode mode, const ContextTouch
+     AddControl(layout, c);
+     return layout.controls[layout.control_count - 1];
+   };
+-  const auto primary = [&](A action, const char* label, uint16_t buttons, uint8_t trigger,
+-                           size_t slot, V key = V::kNone) {
+-    add(action, label, buttons, trigger, right - padding - radius - float(slot % 2) * step,
+-        bottom - padding - radius - float(slot / 2) * step -
+-            (activity_sticks ? edge * kStickRadiusRatio * 2.0f + gap : 0.0f),
+-        radius, true,
+-        K::kNativeButton, key);
++  // GTA III / mobile-style geometry. Positions are in short-edge units from
++  // the bottom-right safe corner: the big action button sits in the corner,
++  // the frequent ones on an arc around it, GTA IV extras on a second arc.
++  const bool editing = options.editing;
++  const bool phone = options.phone_visible || mode == ContextTouchMode::kPhone;
++  const float big = std::clamp(edge * 0.105f * scale, radius, edge * 0.14f);
++  const float norm = std::clamp(edge * 0.075f * scale, radius * 0.8f, edge * 0.11f);
++  const float small = std::clamp(edge * 0.056f * scale, utility_radius * 0.8f, edge * 0.085f);
++  const float lift = activity_sticks ? edge * kStickRadiusRatio * 2.0f + gap : 0.0f;
++  const auto slot = [&](A action, const char* label, uint16_t buttons, uint8_t trigger, float fx, float fy,
++                        float r, bool visible = true, K kind = K::kNativeButton,
++                        V key = V::kNone) -> ContextTouchControl& {
++    return add(action, label, buttons, trigger, right - fx * edge, bottom - fy * edge - lift, r,
++               visible || editing, kind, key);
+   };
+-  const auto hidden = [&](A action, const char* label, uint16_t buttons, uint8_t trigger, V key = V::kNone) {
+-    for (size_t i = 0; i < layout.control_count; ++i) if (layout.controls[i].action == action) return;
+-    add(action, label, buttons, trigger, right - padding - radius, bottom - padding - radius,
+-        radius, false, K::kNativeButton, key);
++  const auto top_row = [&](A action, const char* label, uint16_t buttons, int index, bool visible,
++                           K kind = K::kNativeButton) {
++    const float x = cx + float(index) * (small * 2.0f + gap * 1.5f);
++    add(action, label, buttons, 0, x, viewport.safe_y + padding + small, small, visible || editing, kind);
+   };
+ 
+   {
+@@ -414,59 +421,83 @@ ContextTouchLayout BuildSemanticLayout(ContextTouchMode mode, const ContextTouch
+       right_stick.script = move.script;
+     }
+     if (mode == ContextTouchMode::kOnFoot || mode == ContextTouchMode::kPhone) {
++      const bool armed = options.armed || options.aiming || options.in_cover;
+       if (options.melee) {
+-        primary(A::kFire, "PUNCH", X_INPUT_GAMEPAD_B, 0, 0);
+-        primary(A::kContext, "ALT", X_INPUT_GAMEPAD_Y, 0, 1);
+-        primary(A::kJumpClimb, "KICK", X_INPUT_GAMEPAD_X, 0, 2);
+-        primary(A::kRunSprint, "BLOCK", X_INPUT_GAMEPAD_A, 0, 3);
+-      } else if (options.armed || options.aiming || options.in_cover) {
+-        primary(A::kFire, options.armed ? "FIRE" : "ATTACK", 0, 2, 0, V::kLButton);
+-        primary(A::kAim, "AIM", 0, 1, 1, V::kRButton);
+-        primary(A::kCover, options.in_cover ? "EXIT COVER" : "COVER", X_INPUT_GAMEPAD_RIGHT_SHOULDER, 0, 2, V::kQ);
+-        primary(A::kReload, "RELOAD", X_INPUT_GAMEPAD_B, 0, 3, V::kR);
++        auto& punch = slot(A::kFire, "PUNCH", X_INPUT_GAMEPAD_B, 0, 0.16f, 0.18f, big);
++        std::snprintf(punch.icon_id.data(), punch.icon_id.size(), "attack");
++        slot(A::kJumpClimb, "KICK", X_INPUT_GAMEPAD_X, 0, 0.40f, 0.12f, norm);
++        slot(A::kRunSprint, "BLOCK", X_INPUT_GAMEPAD_A, 0, 0.38f, 0.33f, norm);
++        slot(A::kContext, "ALT", X_INPUT_GAMEPAD_Y, 0, 0.17f, 0.43f, norm);
++        slot(A::kAim, "TARGET", 0, 1, 0.15f, 0.65f, norm, true, K::kNativeButton, V::kRButton);
+       } else {
+-        // Retail attack remains RT before a melee task is active. The melee
+-        // task uses B/Y/X/A for punch/alternate/kick/block above.
+-        primary(A::kFire, "ATTACK", 0, 2, 0, V::kLButton);
+-        primary(A::kRunSprint, "RUN", X_INPUT_GAMEPAD_A, 0, 1, V::kShift);
+-        primary(A::kJumpClimb, "JUMP", X_INPUT_GAMEPAD_X, 0, 2, V::kSpace);
+-        primary(A::kAim, "AIM", 0, 1, 3, V::kRButton);
++        auto& fire = slot(A::kFire, armed ? "FIRE" : "ATTACK", 0, 2, 0.16f, 0.18f, big, true, K::kNativeButton,
++                          V::kLButton);
++        if (!options.armed) std::snprintf(fire.icon_id.data(), fire.icon_id.size(), "attack");
++        slot(A::kJumpClimb, "JUMP", X_INPUT_GAMEPAD_X, 0, 0.40f, 0.12f, norm, !phone, K::kNativeButton, V::kSpace);
++        slot(A::kRunSprint, "RUN", X_INPUT_GAMEPAD_A, 0, 0.38f, 0.33f, norm, !phone, K::kNativeButton, V::kShift);
++        slot(A::kAim, "TARGET", 0, 1, 0.17f, 0.43f, norm, !phone, K::kNativeButton, V::kRButton);
++        slot(A::kContext, "ENTER", X_INPUT_GAMEPAD_Y, 0, 0.15f, 0.65f, norm,
++             options.can_enter_vehicle && !phone, K::kNativeButton, V::kF);
++        slot(A::kReload, "RELOAD", X_INPUT_GAMEPAD_B, 0, 0.37f, 0.53f, small, options.armed && !phone,
++             K::kNativeButton, V::kR);
++        slot(A::kCover, options.in_cover ? "EXIT COVER" : "COVER", X_INPUT_GAMEPAD_RIGHT_SHOULDER, 0,
++             0.58f, 0.20f, small, !phone, K::kNativeButton, V::kQ);
++        slot(A::kCrouch, "CROUCH", X_INPUT_GAMEPAD_LEFT_THUMB, 0, 0.58f, 0.40f, small, !phone);
++        slot(A::kFreeAim, "FREE AIM", 0, 1, 0.37f, 0.73f, small,
++             options.armed && options.free_aim_available && !phone);
++        slot(A::kZoomIn, "ZOOM +", 0, 0, 0.58f, 0.60f, small, options.scoped_zoom && !phone, K::kUtility);
++        slot(A::kZoomOut, "ZOOM -", 0, 0, 0.58f, 0.80f, small, options.scoped_zoom && !phone, K::kUtility);
+       }
+-      hidden(A::kFire, "FIRE", 0, 2, V::kLButton);
+-      hidden(A::kAim, "AIM", 0, 1, V::kRButton);
+-      hidden(A::kRunSprint, "RUN", X_INPUT_GAMEPAD_A, 0, V::kShift);
+-      hidden(A::kJumpClimb, "JUMP", X_INPUT_GAMEPAD_X, 0, V::kSpace);
+-      hidden(A::kContext, "ENTER", X_INPUT_GAMEPAD_Y, 0, V::kF);
+-      hidden(A::kReload, "RELOAD", X_INPUT_GAMEPAD_B, 0, V::kR);
+-      hidden(A::kCover, "COVER", X_INPUT_GAMEPAD_RIGHT_SHOULDER, 0, V::kQ);
++      slot(A::kWeaponWheel, "WEAPON", 0, 0, 0.13f, 0.88f, small, !phone && !options.activity.valid, K::kUtility);
+     } else if (mode == ContextTouchMode::kVehicleHelicopter) {
+-      primary(A::kHeliAscend, "ASCEND", 0, 2, 0, V::kW);
+-      primary(A::kHeliDescend, "DESCEND", 0, 1, 1, V::kS);
+-      primary(A::kHeliYawLeft, "YAW L", X_INPUT_GAMEPAD_LEFT_SHOULDER, 0, 2, V::kNumpad4);
+-      primary(A::kHeliYawRight, "YAW R", X_INPUT_GAMEPAD_RIGHT_SHOULDER, 0, 3, V::kNumpad6);
++      slot(A::kHeliAscend, "ASCEND", 0, 2, 0.16f, 0.18f, big, true, K::kNativeButton, V::kW);
++      slot(A::kHeliDescend, "DESCEND", 0, 1, 0.40f, 0.12f, norm, true, K::kNativeButton, V::kS);
++      slot(A::kHeliYawRight, "YAW R", X_INPUT_GAMEPAD_RIGHT_SHOULDER, 0, 0.38f, 0.33f, norm, true,
++           K::kNativeButton, V::kNumpad6);
++      slot(A::kHeliYawLeft, "YAW L", X_INPUT_GAMEPAD_LEFT_SHOULDER, 0, 0.60f, 0.33f, norm, true,
++           K::kNativeButton, V::kNumpad4);
++      slot(A::kVehicleFire, "FIRE", X_INPUT_GAMEPAD_A, 0, 0.17f, 0.43f, norm, !phone);
++      slot(A::kHeliAction, "ACTION", X_INPUT_GAMEPAD_X, 0, 0.60f, 0.13f, small, !phone);
++      slot(A::kContext, "EXIT", X_INPUT_GAMEPAD_Y, 0, 0.15f, 0.65f, norm, true, K::kNativeButton, V::kF);
+     } else if (mode == ContextTouchMode::kVehiclePassenger) {
+-      primary(A::kVehicleFire, "FIRE", X_INPUT_GAMEPAD_LEFT_SHOULDER, 0, 0, V::kLButton);
+-      primary(A::kAim, "AIM", 0, 1, 1, V::kRButton);
+-      primary(A::kContext, "EXIT", X_INPUT_GAMEPAD_Y, 0, 2, V::kF);
+-      primary(A::kCameraCycle, "CAMERA", X_INPUT_GAMEPAD_BACK, 0, 3, V::kV);
++      slot(A::kVehicleFire, "FIRE", X_INPUT_GAMEPAD_LEFT_SHOULDER, 0, 0.16f, 0.18f, big, true,
++           K::kNativeButton, V::kLButton);
++      slot(A::kAim, "TARGET", 0, 1, 0.40f, 0.12f, norm, true, K::kNativeButton, V::kRButton);
++      slot(A::kHeadlights, "WEAPON", X_INPUT_GAMEPAD_X, 0, 0.38f, 0.33f, small, !phone);
++      slot(A::kContext, "EXIT", X_INPUT_GAMEPAD_Y, 0, 0.15f, 0.65f, norm, true, K::kNativeButton, V::kF);
+     } else if (vehicle) {
+-      primary(A::kAccelerate, "THROTTLE", 0, 2, 0, V::kW);
+-      primary(A::kVehicleFire, "FIRE", X_INPUT_GAMEPAD_LEFT_SHOULDER, 0, 1, V::kLButton);
+-      primary(A::kBrake, "BRAKE", 0, 1, 2, V::kS);
+-      primary(A::kHandbrake, "HANDBRAKE", X_INPUT_GAMEPAD_RIGHT_SHOULDER, 0, 3, V::kSpace);
++      slot(A::kAccelerate, "GAS", 0, 2, 0.16f, 0.18f, big, true, K::kNativeButton, V::kW);
++      slot(A::kBrake, "BRAKE", 0, 1, 0.40f, 0.12f, norm, true, K::kNativeButton, V::kS);
++      slot(A::kHandbrake, "HANDBRAKE", X_INPUT_GAMEPAD_RIGHT_SHOULDER, 0, 0.38f, 0.33f, norm, true,
++           K::kNativeButton, V::kSpace);
++      slot(A::kVehicleFire, "FIRE", X_INPUT_GAMEPAD_LEFT_SHOULDER, 0, 0.17f, 0.43f, norm, !phone,
++           K::kNativeButton, V::kLButton);
++      slot(A::kContext, "EXIT", X_INPUT_GAMEPAD_Y, 0, 0.15f, 0.65f, norm, true, K::kNativeButton, V::kF);
++      slot(A::kHorn, "HORN", X_INPUT_GAMEPAD_LEFT_THUMB, 0, 0.60f, 0.13f, small, !phone);
++      slot(A::kHeadlights, "WEAPON / LIGHTS", X_INPUT_GAMEPAD_X, 0, 0.58f, 0.33f, small, !phone);
+     } else if (mode == ContextTouchMode::kParachuteFreefall) {
+-      primary(A::kDeploy, "DEPLOY", 0, 0, 0, V::kLButton);
++      slot(A::kDeploy, "DEPLOY", 0, 0, 0.16f, 0.18f, big, true, K::kNativeButton, V::kLButton);
+     } else if (mode == ContextTouchMode::kParachuteDeployed) {
+-      primary(A::kParachuteBrakeLeft, "L BRAKE", 0, 0, 0, V::kLButton);
+-      primary(A::kParachuteBrakeRight, "R BRAKE", 0, 0, 1, V::kRButton);
+-      primary(A::kDetach, "DETACH", 0, 0, 2, V::kF);
+-      primary(A::kSmoke, "SMOKE", 0, 0, 3, V::kControl);
++      slot(A::kParachuteBrakeRight, "R BRAKE", 0, 0, 0.16f, 0.18f, big, true, K::kNativeButton, V::kRButton);
++      slot(A::kParachuteBrakeLeft, "L BRAKE", 0, 0, 0.40f, 0.12f, norm, true, K::kNativeButton, V::kLButton);
++      slot(A::kSmoke, "SMOKE", 0, 0, 0.38f, 0.33f, norm, true, K::kNativeButton, V::kControl);
++      slot(A::kDetach, "DETACH", 0, 0, 0.15f, 0.65f, norm, true, K::kNativeButton, V::kF);
+     }
+     if (mode == ContextTouchMode::kParachuteFreefall || mode == ContextTouchMode::kParachuteDeployed) {
+       for (size_t i = 0; i < layout.control_count; ++i) {
+         if (layout.controls[i].key != V::kNone) layout.controls[i].kind = K::kButton;
+       }
+     }
++    const bool on_foot_mode = mode == ContextTouchMode::kOnFoot || mode == ContextTouchMode::kPhone;
++    if (on_foot_mode || vehicle) {
++      top_row(A::kPhone, "PHONE", X_INPUT_GAMEPAD_DPAD_UP, 0, !phone);
++      top_row(A::kCameraCycle, "CAMERA", X_INPUT_GAMEPAD_BACK, -1, !phone);
++      top_row(A::kLookBehind, "LOOK BACK", X_INPUT_GAMEPAD_RIGHT_THUMB, 1, !phone);
++      if (vehicle && mode != ContextTouchMode::kVehicleHelicopter) {
++        top_row(A::kRadioPrevious, "RADIO -", X_INPUT_GAMEPAD_DPAD_LEFT, -2, !phone);
++        top_row(A::kRadioNext, "RADIO +", X_INPUT_GAMEPAD_DPAD_RIGHT, 2, !phone);
++      }
++    }
+     if (mode != ContextTouchMode::kMinigame) {
+       AddLookSurface(layout, viewport);
+       auto& camera = layout.controls[layout.control_count - 1];
+@@ -475,8 +506,6 @@ ContextTouchLayout BuildSemanticLayout(ContextTouchMode mode, const ContextTouch
+     }
+   }
+ 
+-
+-
+   // Accepted native help tokens use available space in the active layout.
+   size_t script_index = 0;
+   const float script_radius = utility_radius;
+@@ -637,58 +666,18 @@ ContextTouchLayout BuildSemanticLayout(ContextTouchMode mode, const ContextTouch
+     }
+   }
+ 
+-  const bool on_foot = mode == ContextTouchMode::kOnFoot || mode == ContextTouchMode::kPhone;
+-  const bool phone = options.phone_visible || mode == ContextTouchMode::kPhone;
+-  if (on_foot) {
+-    compact(A::kContext, "ENTER", X_INPUT_GAMEPAD_Y, 0,
+-            !options.melee && (options.can_enter_vehicle || options.editing) && !phone,
+-            K::kNativeButton, V::kF);
+-    compact(A::kRunSprint, "RUN", X_INPUT_GAMEPAD_A, 0, !phone, K::kNativeButton, V::kShift);
+-    compact(A::kJumpClimb, "JUMP", X_INPUT_GAMEPAD_X, 0, !phone, K::kNativeButton, V::kSpace);
+-    compact(A::kCover, options.in_cover ? "EXIT COVER" : "COVER", X_INPUT_GAMEPAD_RIGHT_SHOULDER,
+-            0, !options.melee && !phone, K::kNativeButton, V::kQ);
+-    compact(A::kReload, "RELOAD", X_INPUT_GAMEPAD_B, 0,
+-            options.armed && !options.melee && !phone, K::kNativeButton, V::kR);
+-    compact(A::kAim, "AIM", 0, 1, !phone, K::kNativeTrigger, V::kRButton);
+-    compact(A::kCrouch, "CROUCH", X_INPUT_GAMEPAD_LEFT_THUMB, 0, !options.melee && !phone);
+-    compact(A::kWeaponWheel, "WEAPON", 0, 0, !phone && !options.activity.valid, K::kUtility);
+-    for (size_t i = 0; i < layout.control_count; ++i) {
+-      auto& selector = layout.controls[i];
+-      if (selector.action != A::kWeaponWheel || options.current_weapon_slot >= options.weapon_names.size()) continue;
+-      const auto& name = options.weapon_names[options.current_weapon_slot];
+-      if (name[0]) {
+-        SetLabel(selector, name.data());
+-        std::snprintf(selector.accessible_name.data(), selector.accessible_name.size(),
+-                      "%s: tap or swipe to cycle; hold to select", name.data());
+-        std::snprintf(selector.icon_id.data(), selector.icon_id.size(), "weapon_%u",
+-                      options.weapon_types[options.current_weapon_slot]);
+-      }
++  // Weapon selector label/icon follow the current weapon.
++  for (size_t i = 0; i < layout.control_count; ++i) {
++    auto& selector = layout.controls[i];
++    if (selector.action != A::kWeaponWheel || options.current_weapon_slot >= options.weapon_names.size()) continue;
++    const auto& name = options.weapon_names[options.current_weapon_slot];
++    if (name[0]) {
++      SetLabel(selector, name.data());
++      std::snprintf(selector.accessible_name.data(), selector.accessible_name.size(),
++                    "%s: tap or swipe to cycle; hold to select", name.data());
++      std::snprintf(selector.icon_id.data(), selector.icon_id.size(), "weapon_%u",
++                    options.weapon_types[options.current_weapon_slot]);
+     }
+-    compact(A::kFreeAim, "FREE AIM", 0, 1,
+-            options.armed && options.free_aim_available && !options.melee && !phone, K::kNativeTrigger);
+-    compact(A::kZoomIn, "ZOOM +", 0, 0, options.scoped_zoom && !phone, K::kUtility);
+-    compact(A::kZoomOut, "ZOOM -", 0, 0, options.scoped_zoom && !phone, K::kUtility);
+-  }
+-  if (vehicle) {
+-    compact(A::kContext, "EXIT", X_INPUT_GAMEPAD_Y, 0, true, K::kNativeButton, V::kF);
+-    if (mode == ContextTouchMode::kVehicleHelicopter) {
+-      // KeyboardControllerBindings publishes these same native A/X buttons;
+-      // the native helicopter consumer owns weapon and vehicle-specific use.
+-      compact(A::kVehicleFire, "FIRE", X_INPUT_GAMEPAD_A, 0, !phone);
+-      compact(A::kHeliAction, "ACTION", X_INPUT_GAMEPAD_X, 0, !phone);
+-    } else {
+-      compact(A::kHorn, "HORN", X_INPUT_GAMEPAD_LEFT_THUMB, 0,
+-              mode != ContextTouchMode::kVehiclePassenger && !phone);
+-      compact(A::kHeadlights, mode == ContextTouchMode::kVehiclePassenger ? "WEAPON" : "WEAPON / LIGHTS",
+-              X_INPUT_GAMEPAD_X, 0, !phone);
+-      compact(A::kRadioPrevious, "RADIO -", X_INPUT_GAMEPAD_DPAD_LEFT, 0, !phone);
+-      compact(A::kRadioNext, "RADIO +", X_INPUT_GAMEPAD_DPAD_RIGHT, 0, !phone);
+-    }
+-  }
+-  if (on_foot || vehicle) {
+-    compact(A::kCameraCycle, "CAMERA", X_INPUT_GAMEPAD_BACK, 0, !phone);
+-    compact(A::kLookBehind, "LOOK BACK", X_INPUT_GAMEPAD_RIGHT_THUMB, 0, !phone);
+-    compact(A::kPhone, "PHONE", X_INPUT_GAMEPAD_DPAD_UP, 0, !phone);
+   }
+ 
+   if (options.weapon_wheel_open) {
+diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/input/gamepad_touch_overlay.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/input/gamepad_touch_overlay.cpp
+index 2813b2e..63f35b2 100644
+--- a/glue/rexglue-sdk-main/gta4-recomp/src/input/gamepad_touch_overlay.cpp
++++ b/glue/rexglue-sdk-main/gta4-recomp/src/input/gamepad_touch_overlay.cpp
+@@ -16,7 +16,7 @@
+ #include <rex/input/absolute_pointer.h>
+ #include <rex/input/input.h>
+ 
+-REXCVAR_DEFINE_STRING(gta4_touch_layout, "gamepad", "GTA IV/Input/Touch",
++REXCVAR_DEFINE_STRING(gta4_touch_layout, "context", "GTA IV/Input/Touch",
+                       "On-screen touch controls: gamepad (a fixed Xbox 360 controller) or context "
+                       "(the context-sensitive layout)")
+     .allowed({"gamepad", "context"});
 diff --git a/glue/rexglue-sdk-main/src/filesystem/virtual_file_system.cpp b/glue/rexglue-sdk-main/src/filesystem/virtual_file_system.cpp
 index 95fbfb2..0695d80 100644
 --- a/glue/rexglue-sdk-main/src/filesystem/virtual_file_system.cpp
