@@ -1,5 +1,10 @@
 # Fallout Droid Native — CHANGELOG
 
+## 2.0.0-alpha51 (350)
+- Phone sun shadows: every cascade drawn every frame again. alpha50's staggered schedule
+  (merged from the owner's change) brought back what alpha35 had: pale vertical stripes over
+  the whole screen and shadows coming and going (a tester's video outside Vault 101).
+
 ## 2.0.0-alpha50 (349)
 Built; physics host tests 127 pass (2 ignored); script tests pass. No Android device here:
 nothing below was seen running.

@@ -4946,7 +4946,7 @@ index 0000000..6d21460
 +    );
 +}
 diff --git a/engine/nvforever/src/shadow_rate.rs b/engine/nvforever/src/shadow_rate.rs
-index d428306..e306276 100644
+index d428306..9e87692 100644
 --- a/engine/nvforever/src/shadow_rate.rs
 +++ b/engine/nvforever/src/shadow_rate.rs
 @@ -130,7 +130,14 @@ pub fn set_performance(world: &mut World, on: bool) {
@@ -4965,7 +4965,7 @@ index d428306..e306276 100644
          "performance (maps drawn every other frame, the farthest every fourth, trees cast near the camera only, no arms shade light)"
      } else if staggered() {
          "cascades on a staggered schedule (the nearest every frame, the farther ones less often)"
-@@ -319,7 +326,17 @@ pub(crate) fn hold_cascades(
+@@ -319,7 +326,20 @@ pub(crate) fn hold_cascades(
      if let Some(share) = share.as_mut().filter(|s| s.0.is_some()) {
          share.0 = None;
      }
@@ -4973,7 +4973,10 @@ index d428306..e306276 100644
 +    // [nvport] A phone: the nearest cascade every frame (held, it shimmered as the view
 +    // moved at a phone's uneven frame rate), the farther ones every other and fourth frame.
 +    // Every cascade every frame: a held far cascade still shimmered (owner report, alpha23).
-+    const PHONE_SCHEDULE: [(u32, u32); 3] = [(1, 0), (2, 0), (4, 1)];
++    // alpha50 put the staggered schedule back for speed: a tester's video (Fallout 3, the
++    // Capital Wasteland outside Vault 101) showed again the pale vertical stripes over the
++    // whole screen and rock shadows coming and going, as alpha35 did. Every frame again.
++    const PHONE_SCHEDULE: [(u32, u32); 3] = [(1, 0), (1, 0), (1, 0)];
 +    // [nvport] On a phone no cascade is ever held, whatever the shadow quality: Quality's
 +    // staggered schedule held cascades and remade the held 4096² array (4 and 5 layers by
 +    // turns) every few frames: yellow stripes over the screen, then a lost GPU (owner's
