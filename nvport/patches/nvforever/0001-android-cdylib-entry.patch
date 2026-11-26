@@ -5273,7 +5273,7 @@ index 7566f48..c5c142e 100644
      let source = view_target.main_texture_view();
  
 diff --git a/engine/vendor/bevy_render/src/batching/gpu_preprocessing.rs b/engine/vendor/bevy_render/src/batching/gpu_preprocessing.rs
-index fba76a2..d84acfd 100644
+index fba76a2..c0b96ba 100644
 --- a/engine/vendor/bevy_render/src/batching/gpu_preprocessing.rs
 +++ b/engine/vendor/bevy_render/src/batching/gpu_preprocessing.rs
 @@ -1542,6 +1542,14 @@ where
@@ -5291,7 +5291,7 @@ index fba76a2..d84acfd 100644
  impl FromWorld for GpuPreprocessingSupport {
      fn from_world(world: &mut World) -> Self {
          let adapter = world.resource::<RenderAdapter>();
-@@ -1580,6 +1588,24 @@ impl FromWorld for GpuPreprocessingSupport {
+@@ -1580,6 +1588,27 @@ impl FromWorld for GpuPreprocessingSupport {
  
          let adapter_info = RenderAdapterInfo::new(adapter.get_info());
  
@@ -5309,14 +5309,17 @@ index fba76a2..d84acfd 100644
 +            "none" => Some(GpuPreprocessingMode::None),
 +            "preprocess" => Some(GpuPreprocessingMode::PreprocessingOnly),
 +            "culling" => Some(GpuPreprocessingMode::Culling),
-+            _ if adreno8 && cfg!(target_os = "android") => Some(GpuPreprocessingMode::PreprocessingOnly),
++            // alpha47-49 ran the CPU path here and Fallout 3 stopped losing the device at its
++            // menu (alpha8-46 lost it every time on Snapdragon 8 Gen 5); alpha50's GPU
++            // preparation without culling is not proven there: the CPU path again.
++            _ if adreno8 && cfg!(target_os = "android") => Some(GpuPreprocessingMode::None),
 +            _ => None,
 +        };
 +
          let max_supported_mode = if device.limits().max_compute_workgroup_size_x == 0
              || is_non_supported_android_device(&adapter_info)
              || adapter_info.backend == wgpu::Backend::Gl
-@@ -1598,6 +1624,24 @@ impl FromWorld for GpuPreprocessingSupport {
+@@ -1598,6 +1627,24 @@ impl FromWorld for GpuPreprocessingSupport {
              info_once!("GPU preprocessing is fully supported on this device.");
              GpuPreprocessingMode::Culling
          };

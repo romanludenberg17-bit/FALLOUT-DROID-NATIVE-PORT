@@ -4,6 +4,9 @@
 - Phone sun shadows: every cascade drawn every frame again. alpha50's staggered schedule
   (merged from the owner's change) brought back what alpha35 had: pale vertical stripes over
   the whole screen and shadows coming and going (a tester's video outside Vault 101).
+- Adreno 8xx: meshes prepared on the CPU again (alpha50 had GPU preparation without culling);
+  the CPU path is the one with which Fallout 3 stopped losing the GPU device. `fdgpu` still
+  chooses per phone.
 
 ## 2.0.0-alpha50 (349)
 Built; physics host tests 127 pass (2 ignored); script tests pass. No Android device here:
