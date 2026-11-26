@@ -66,6 +66,43 @@ index bf36d9e..5968bf0 100644
      }
  }
  
+diff --git a/crates/fnv-phys/tests/synthetic.rs b/crates/fnv-phys/tests/synthetic.rs
+index 0687d23..4f73dbf 100644
+--- a/crates/fnv-phys/tests/synthetic.rs
++++ b/crates/fnv-phys/tests/synthetic.rs
+@@ -1042,6 +1042,32 @@ fn person(feet: [f32; 3], dead: bool) -> HitVolume {
+     HitVolume { feet, radius: 20.0, height: 128.0, dead }
+ }
+ 
++/// [nvport] A loose body meets a living actor (a cart pushed onto an NPC's head stopped
++/// there in the original, goes through in NVForever: actor hit volumes take no contacts,
++/// `crate::actors` NO_CONTACTS); a dead actor's capsule lets it by (its ragdoll lies there).
++/// Ignored: every way of giving living actors a contact collider tried (their capsules, a
++/// collider on their kinematic body, on a kinematic or a fixed body of its own) broke
++/// rapier 0.36.1's persistent-island check in the `hitvol_*_crowd_*` tests ("touching pair
++/// linked into the wrong island", debug builds) — to be done with a rapier fix.
++#[test]
++#[ignore = "needs rapier's persistent islands to accept actor contacts (hitvol crowd tests)"]
++fn loose_bodies_stop_on_living_actors_only() {
++    for (dead, rests_on_head) in [(false, true), (true, false)] {
++        let mut w = ground();
++        w.set_actor_volume(0x10, person([0.0, 0.0, 0.0], dead));
++        let ball = CollisionObject { mass: 2.0, ..object(Shape::Sphere { radius: 10.0 }, Motion::Dynamic) };
++        let params = w.params;
++        w.insert_ref(PreparedRef::new(&params, &at(1, [0.0, 0.0, 220.0]), &[ball]));
++        for _ in 0..180 {
++            w.step();
++        }
++        let z = w.ref_bodies(1)[0].translation[2];
++        // The head's top is 128 up: on it the ball's centre rests near 138; through it, on
++        // the ground near 10.
++        assert_eq!(z > 120.0, rests_on_head, "dead {dead}: the ball stands at z {z}");
++    }
++}
++
+ #[test]
+ fn actor_volumes_take_shots() {
+     let mut w = ground();
 diff --git a/crates/fnv-script/src/vm.rs b/crates/fnv-script/src/vm.rs
 index d7cea9d..11a2607 100644
 --- a/crates/fnv-script/src/vm.rs
@@ -977,7 +1014,7 @@ index 2ea26c6..bb9eb07 100644
  }
  
 diff --git a/engine/nvf-play/src/console.rs b/engine/nvf-play/src/console.rs
-index 4e8f628..139afb6 100644
+index 4e8f628..a8817f5 100644
 --- a/engine/nvf-play/src/console.rs
 +++ b/engine/nvf-play/src/console.rs
 @@ -720,6 +720,7 @@ fn typing(
@@ -988,7 +1025,7 @@ index 4e8f628..139afb6 100644
                      c.print("Quests and info: sq, sqt, movetoqt [n], sqs <quest>, sqv <quest>, sv, caqs, inv, getavinfo <av>, setgs <setting> <value>, cam, qqq, advlevel (level up), poker [casino] (a poker table)");
                      c.print("Toggles: tcl (collision), tai (actors' AI), tdetect, tgm, tscr (scripts), tg (grass), ts (sky), tws (water), tt (trees), tlv (leaves), ToggleLODLand, ToggleNavmesh, tlik (head tracking), temo (emotions), tcg [radius] (collision shapes)");
                      c.print("bat <file> (console lines from a text file), rbat [file] (record lines for bat), scof [file] (write the console to a file), slpm [1-5] (a practice lock), [ref.]mfg expression|phoneme|modifier <id> <0-100>, mfg reset");
-@@ -777,6 +778,81 @@ fn typing(
+@@ -777,6 +778,97 @@ fn typing(
                  return;
              }
              // `bat <file>`: the file's lines run next, in order, as if typed.
@@ -1055,6 +1092,22 @@ index 4e8f628..139afb6 100644
 +                    _ => c.print("fddecals projected|flat"),
 +                }
 +            }
++            // [nvport] `fdskin uniform|storage|auto`: where skinned shapes read their joints
++            // from the next start (bevy_pbr skin.rs, `NVPORT_SKIN_UNIFORM`; auto: uniform on
++            // Adreno 5xx/6xx).
++            "fdskin" => {
++                let file = std::env::var_os("NVFOREVER_HOME").map(|h| std::path::PathBuf::from(h).join("skinning.txt"));
++                match (rest.trim(), file) {
++                    (m @ ("uniform" | "storage" | "auto"), Some(f)) => {
++                        let _ = std::fs::write(&f, m);
++                        c.print(format!("fdskin: {m} from the next start"));
++                    }
++                    _ => c.print(format!(
++                        "fdskin uniform|storage|auto (this run: {})",
++                        if std::env::var("NVPORT_SKIN_UNIFORM").is_ok_and(|v| v == "1") { "uniform" } else { "storage" }
++                    )),
++                }
++            }
 +            "fxtest" => {
 +                FX_TEST.store(true, std::sync::atomic::Ordering::Relaxed);
 +                c.print("fxtest: three cards before the camera for 20 s: red opaque (left), green blended (middle), blue added (right)");
@@ -1070,7 +1123,7 @@ index 4e8f628..139afb6 100644
              "bat" => {
                  batches += 1;
                  let found = if batches > MAX_BATCHES { Err(format!("bat: more than {MAX_BATCHES} batch files on one line")) } else { batch_lines(rest, &batch_roots(data.as_deref())) };
-@@ -1067,6 +1143,12 @@ pub fn place_name(d: &PlayData, cell: u32) -> String {
+@@ -1067,6 +1159,12 @@ pub fn place_name(d: &PlayData, cell: u32) -> String {
  
  /// The player's Extra Console Details tweak: a selected reference's details add its
  /// base's model [design: docs/design/tweaks.md].
@@ -1083,7 +1136,7 @@ index 4e8f628..139afb6 100644
  static MODEL_DETAILS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
  
  /// Set by the Tweaks tab.
-@@ -1141,6 +1223,57 @@ pub fn describe(id: u32, d: &PlayData, sim: &SimState, rt: Option<&mut Runtime>)
+@@ -1141,6 +1239,57 @@ pub fn describe(id: u32, d: &PlayData, sim: &SimState, rt: Option<&mut Runtime>)
  }
  
  /// Where `coc <cell>` goes: the cell's COC spot (interiors and exterior cells alike).
@@ -1997,6 +2050,23 @@ index 2695b68..397ac53 100644
          ("terrain-height-blend", "Graphics"),
          ("terrain-anti-tiling", "Graphics"),
          ("mesh-terrain-blend", "Graphics"),
+diff --git a/engine/nvf-play/src/tiles/mod.rs b/engine/nvf-play/src/tiles/mod.rs
+index 33d3700..da941d9 100644
+--- a/engine/nvf-play/src/tiles/mod.rs
++++ b/engine/nvf-play/src/tiles/mod.rs
+@@ -347,7 +347,11 @@ impl HudTiles<'_> {
+             messages: notices && self.corner.as_ref().is_some_and(|c| c.showing().is_some()),
+             subtitles: {
+                 let _span = info_span!("tiles::write::subtitles").entered();
+-                !creating && self.hud.as_ref().is_some_and(|h| crate::script_hud::hud_subtitles_shown(h, game, &self.sim, self.player.as_deref()))
++                // [nvport] Only over play, as the rest of the HUD: a line said nearby stayed on
++                // screen over the Pip-Boy, the inventory, a terminal and the pause menu
++                // (players' reports). The line goes on being said; its subtitle comes back
++                // with the HUD when the menu closes.
++                root && !creating && self.hud.as_ref().is_some_and(|h| crate::script_hud::hud_subtitles_shown(h, game, &self.sim, self.player.as_deref()))
+             },
+             info,
+             location: notices && location,
 diff --git a/engine/nvforever/Cargo.toml b/engine/nvforever/Cargo.toml
 index bbdb0c0..0c6c5d1 100644
 --- a/engine/nvforever/Cargo.toml
@@ -3345,10 +3415,10 @@ index 9493eaa..cbbeece 100644
              // mask meters the complete screen.
 diff --git a/engine/nvforever/src/gpu_report.rs b/engine/nvforever/src/gpu_report.rs
 new file mode 100644
-index 0000000..ab9a6fb
+index 0000000..9568649
 --- /dev/null
 +++ b/engine/nvforever/src/gpu_report.rs
-@@ -0,0 +1,221 @@
+@@ -0,0 +1,224 @@
 +//! [nvport] What GPU the game runs on, read from the Vulkan device itself (not from the
 +//! phone's maker or chip name), logged once at the start:
 +//!
@@ -3439,6 +3509,9 @@ index 0000000..ab9a6fb
 +    );
 +    if let Some(home) = std::env::var_os("NVFOREVER_HOME") {
 +        let _ = std::fs::write(std::path::Path::new(&home).join("gpu_family.txt"), family.0.name());
++        // The device's own name, for the launcher's per-GPU choices on the next start
++        // (`DeviceProfile.adreno6OrOlder`).
++        let _ = std::fs::write(std::path::Path::new(&home).join("gpu_name.txt"), &a.name);
 +    }
 +    let Some(device) = device else {
 +        warn!("gpu: no render device to read the Vulkan details from");
@@ -5140,6 +5213,32 @@ index b970315..7cb7525 100644
  
  /// Entities given a mesh while the upload limit was on, with the frame they got it.
  #[derive(Resource, Default)]
+diff --git a/engine/vendor/bevy_pbr/src/render/skin.rs b/engine/vendor/bevy_pbr/src/render/skin.rs
+index c9ab356..9599981 100644
+--- a/engine/vendor/bevy_pbr/src/render/skin.rs
++++ b/engine/vendor/bevy_pbr/src/render/skin.rs
+@@ -169,7 +169,20 @@ impl SkinUniformInfo {
+ /// Returns true if skinning must use uniforms (and dynamic offsets) because
+ /// storage buffers aren't supported on the current platform.
+ pub fn skins_use_uniform_buffers(limits: &WgpuLimits) -> bool {
+-    bevy_render::storage_buffers_are_unsupported(limits)
++    bevy_render::storage_buffers_are_unsupported(limits) || nvport_uniform_skins()
++}
++
++/// NVForever (nvport): joints from uniform buffers (Bevy's own path where storage buffers
++/// are missing) when `NVPORT_SKIN_UNIFORM=1`: the launcher asks it on Adreno 5xx/6xx
++/// (Snapdragon 778G's Adreno 642L drew characters as a floating head, the skinned body
++/// gone), and console `fdskin uniform|storage|auto` chooses for the next start.
++fn nvport_uniform_skins() -> bool {
++    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
++    *ON.get_or_init(|| {
++        let on = std::env::var("NVPORT_SKIN_UNIFORM").is_ok_and(|v| v.trim() == "1");
++        bevy_log::warn!("skinning: joints read from {} buffers", if on { "uniform (NVPORT_SKIN_UNIFORM=1)" } else { "storage" });
++        on
++    })
+ }
+ 
+ /// Uploads the buffers containing the joints to the GPU.
 diff --git a/engine/vendor/bevy_post_process/src/auto_exposure/mod.rs b/engine/vendor/bevy_post_process/src/auto_exposure/mod.rs
 index 7566f48..c5c142e 100644
 --- a/engine/vendor/bevy_post_process/src/auto_exposure/mod.rs

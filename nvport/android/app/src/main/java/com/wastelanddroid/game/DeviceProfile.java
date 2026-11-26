@@ -137,13 +137,52 @@ public final class DeviceProfile {
     }
 
     /** The GPU family of the chip, for the launcher. */
+    /**
+     * The GPU family by the chip, before the engine has read the Vulkan device (the engine
+     * writes the device's own name and family on its first start, {@link #vulkanGpu}); an
+     * unknown chip is "Unknown", never taken for a Mali.
+     */
     public static String gpuName() {
         String c = chipName();
         String m = (Build.VERSION.SDK_INT >= 31 ? Build.SOC_MANUFACTURER : Build.HARDWARE).toLowerCase(Locale.ROOT);
         if (c.startsWith("Snapdragon") || m.contains("qti") || m.contains("qualcomm")) return "Adreno";
         if (c.startsWith("Exynos 2")) return "Xclipse";
-        if (c.startsWith("Helio G35") || c.startsWith("Helio P22")) return "PowerVR";
-        return "Mali";
+        if (c.startsWith("Helio G35") || c.startsWith("Helio P22") || c.equals("Tensor G5")) return "PowerVR";
+        if (c.startsWith("Dimensity") || c.startsWith("Helio") || c.startsWith("Exynos 1") || c.startsWith("Tensor") || c.startsWith("Unisoc")) return "Mali";
+        return "Unknown";
+    }
+
+    /** The Vulkan device's name as the engine read it ("Adreno (TM) 642L"), or null. */
+    public static String vulkanGpu(java.io.File home) {
+        try {
+            java.io.File f = new java.io.File(home, "gpu_name.txt");
+            if (!f.isFile()) return null;
+            byte[] b = java.nio.file.Files.readAllBytes(f.toPath());
+            String s = new String(b, java.nio.charset.StandardCharsets.UTF_8).trim();
+            return s.isEmpty() ? null : s;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * An Adreno 5xx/6xx (their joints read from storage buffers in the vertex shader drew
+     * characters as a floating head on Snapdragon 778G): from the Vulkan name when the engine
+     * has written it, else from the chip.
+     */
+    public static boolean adreno6OrOlder(java.io.File home) {
+        String v = vulkanGpu(home);
+        if (v != null) {
+            java.util.regex.Matcher mm = java.util.regex.Pattern.compile("Adreno \\(TM\\) (\\d)\\d\\d").matcher(v);
+            return mm.find() && (mm.group(1).equals("5") || mm.group(1).equals("6"));
+        }
+        String c = chipName();
+        for (String s : new String[]{"Snapdragon 888", "Snapdragon 865", "Snapdragon 855", "Snapdragon 780G", "Snapdragon 778G",
+                "Snapdragon 765G", "Snapdragon 750G", "Snapdragon 730G", "Snapdragon 695", "Snapdragon 680", "Snapdragon 675",
+                "Snapdragon 7 Gen 1", "Snapdragon 4 Gen 1", "Snapdragon 4 Gen 2"}) {
+            if (c.equals(s)) return true;
+        }
+        return false;
     }
 
     static String socModel() {

@@ -203,6 +203,17 @@ public final class FalloutEngine {
             if (mode.matches("none|preprocess|culling|auto")) args.add("env:NVPORT_GPU_PREPROCESS=" + mode);
         } catch (Exception ignored) {
         }
+        // Skinning: joints from uniform buffers on Adreno 5xx/6xx (characters drawn as a
+        // floating head on Snapdragon 778G), Bevy's storage buffers elsewhere; console
+        // `fdskin uniform|storage|auto` (skinning.txt) chooses.
+        try {
+            java.io.File home = homeDir(context, game.id);
+            java.io.File sk = new java.io.File(home, "skinning.txt");
+            String mode = sk.isFile() ? readText(sk).trim() : "auto";
+            boolean uniform = mode.equals("uniform") || (mode.equals("auto") && com.wastelanddroid.game.DeviceProfile.adreno6OrOlder(home));
+            if (uniform) args.add("env:NVPORT_SKIN_UNIFORM=1");
+        } catch (Exception ignored) {
+        }
         // The resolution row of the game's settings shows the height in use (0: native).
         args.add("env:NVPORT_RENDER_HEIGHT=" + Math.max(0, renderHeight(context)));
         // Snapdragon 7+ Gen 2 and up, and every high class chip: the engine's settings page
@@ -326,9 +337,49 @@ public final class FalloutEngine {
             writeText(new File(ext, "nvport_args.txt"), sb.toString());
         }
         Prefs.get(activity).edit().putString("last_scope", ok.getScope()).commit();
-        Intent intent = new Intent(activity, NativeGameActivityFo3.forGame(ok.getGame().id));
+        final Intent intent = new Intent(activity, NativeGameActivityFo3.forGame(ok.getGame().id));
         intent.putExtra("game", ok.getGame().id);
-        activity.startActivity(intent);
+        // Both games run in the one ":game" process, and the engine can start only once in a
+        // process (winit's event loop, the engine's global state). The other game still alive
+        // there (put in the background, not quit) made the new one start inside it and the
+        // app stopped ("Во время работы приложения произошёл сбой"). That process ends first,
+        // and the new game starts once it is gone. The same game alive is brought back as it is.
+        String running = Prefs.get(activity).getString(RUNNING_GAME, null);
+        boolean alive = gameProcessAlive(activity);
+        Prefs.get(activity).edit().putString(RUNNING_GAME, ok.getGame().id).commit();
+        if (!alive || ok.getGame().id.equals(running)) {
+            activity.startActivity(intent);
+            return;
+        }
+        android.util.Log.i("NVForever", "launch: " + running + " still runs; its process ends before " + ok.getGame().id + " starts");
+        killGameProcess(activity);
+        final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+        final long since = android.os.SystemClock.uptimeMillis();
+        h.post(new Runnable() {
+            @Override
+            public void run() {
+                if (gameProcessAlive(activity) && android.os.SystemClock.uptimeMillis() - since < 6000) {
+                    killGameProcess(activity);
+                    h.postDelayed(this, 100);
+                    return;
+                }
+                activity.startActivity(intent);
+            }
+        });
+    }
+
+    /** The game started last (pref), to tell whether the live game process is this one. */
+    static final String RUNNING_GAME = "running_game";
+
+    /** Ends the game process (both games run in it). */
+    static void killGameProcess(Context context) {
+        android.app.ActivityManager am = (android.app.ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        List<android.app.ActivityManager.RunningAppProcessInfo> list = am == null ? null : am.getRunningAppProcesses();
+        if (list == null) return;
+        String name = context.getPackageName() + GAME_PROCESS_SUFFIX;
+        for (android.app.ActivityManager.RunningAppProcessInfo p : list) {
+            if (name.equals(p.processName)) android.os.Process.killProcess(p.pid);
+        }
     }
 
     // ---------------------------------------------------------------- mobile profile

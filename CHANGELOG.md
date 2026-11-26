@@ -1,5 +1,28 @@
 # Fallout Droid Native — CHANGELOG
 
+## 2.0.0-alpha50 (349)
+Built; physics host tests 127 pass (2 ignored); script tests pass. No Android device here:
+nothing below was seen running.
+- Switching Fallout 3 / New Vegas no longer stops the app: both games run in the one
+  ":game" process and the engine starts only once per process (winit's event loop, global
+  state); the other game left in the background made the new one start inside it. The
+  launcher now ends that process and starts the new game once it is gone (the same game
+  alive is brought back as before).
+- Subtitles of lines said nearby are drawn over play only: they stayed over the Pip-Boy,
+  inventory, terminals and the pause menu. The lines go on being said; their subtitles
+  come back when the menu closes.
+- Adreno 5xx/6xx (Snapdragon 778G's 642L: characters drawn as a floating head): skinned
+  shapes read their joints from uniform buffers (Bevy's own path where storage buffers are
+  missing) instead of storage buffers. Chosen by the Vulkan device's name the engine wrote
+  on the run before (`gpu_name.txt`), else by the chip; console `fdskin
+  uniform|storage|auto`. Run log: `skinning: joints read from …`. Unverified on a 778G.
+- GPU naming in the launcher: the Vulkan device's own name when known; an unknown chip is
+  "Unknown", no longer taken for a Mali.
+- Found, not changed: NPC hit volumes take no physics contacts by design, so a held cart
+  passes through an NPC. Giving living actors contact colliders broke rapier 0.36's
+  persistent-island check in the crowd tests every way tried; a regression test is kept
+  (ignored) for when rapier allows it.
+
 ## 2.0.0-alpha49 (348)
 Built; the new texture rule's unit test passes; the launcher's scripts parse and its header
 was rendered in Chromium at a phone's size. Nothing verified on a device.
