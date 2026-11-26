@@ -357,10 +357,43 @@ index 68d694b..6ebe9de 100644
        drawer, [this](bool captured) {
          SetTitleInputCaptured(captured);
 diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.cpp
-index 5f3e537..c0e4b8e 100644
+index 5f3e537..5536bf6 100644
 --- a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.cpp
 +++ b/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.cpp
-@@ -480,6 +480,31 @@ ContextTouchViewport ReadViewport() {
+@@ -31,6 +31,12 @@
+ #include "input/gamepad_touch_overlay.h"
+ 
+ REXCVAR_DECLARE(bool, gta4_touch_trace);
++REXCVAR_DEFINE_DOUBLE(gta4_touch_look_smoothing, 0.05, "GTA IV/Input/Touch",
++                      "Touch camera smoothing time constant in seconds (0 = off)")
++    .range(0.0, 0.25);
++REXCVAR_DEFINE_DOUBLE(gta4_touch_camera_recenter_delay, 4.0, "GTA IV/Input/Touch",
++                      "Seconds after the last touch camera movement before the game may recenter it")
++    .range(0.0, 30.0);
+ 
+ namespace gta4::input {
+ bool ContextTouchHudLayoutActive() noexcept {
+@@ -185,6 +191,11 @@ struct RuntimeState {
+   int32_t right_y = 0;
+   double completed_look_x = 0.0;
+   double completed_look_y = 0.0;
++  // Smoothed touch camera: deltas wait here and are released over a few
++  // frames, so irregular touch event timing never reaches the camera as jerks.
++  double look_pending_x = 0.0;
++  double look_pending_y = 0.0;
++  uint64_t last_look_ns = 0;
+   int32_t look_x = 0;
+   int32_t look_y = 0;
+   double frame_seconds = kReferenceFrameSeconds;
+@@ -328,6 +339,7 @@ void CancelAllLocked() {
+   g_runtime.right_x = g_runtime.right_y = 0;
+   g_runtime.look_x = g_runtime.look_y = 0;
+   g_runtime.completed_look_x = g_runtime.completed_look_y = 0.0;
++  g_runtime.look_pending_x = g_runtime.look_pending_y = 0.0;
+   g_runtime.completed_zoom = 0.0;
+   g_runtime.zoom = 0;
+   g_runtime.weapon_wheel_open = false;
+@@ -480,6 +492,31 @@ ContextTouchViewport ReadViewport() {
    };
  }
  
@@ -392,7 +425,7 @@ index 5f3e537..c0e4b8e 100644
  void RecalculateAxesLocked() {
    g_runtime.movement_x = g_runtime.movement_y = 0;
    g_runtime.right_x = g_runtime.right_y = 0;
-@@ -915,6 +940,20 @@ bool OnPointerEvent(const rex::input::AbsolutePointerEvent& event, PPCContext&,
+@@ -915,6 +952,20 @@ bool OnPointerEvent(const rex::input::AbsolutePointerEvent& event, PPCContext&,
        (!rex::input::TouchControlsActive() && !ContextTouchEditorOpen())) return false;
    std::lock_guard lock(g_runtime.mutex);
    if (g_runtime.epoch != epoch || g_runtime.frozen_epoch == epoch) return false;
@@ -413,7 +446,43 @@ index 5f3e537..c0e4b8e 100644
    if (!g_runtime.editing && !GameplayPresentationAdmittedLocked(GetTouchContextSnapshot())) {
      if (!g_runtime.editor_session) HideGameplayLocked();
      return false;
-@@ -1291,6 +1330,10 @@ bool NativePadProvider(uint32_t user, rex::input::X_INPUT_GAMEPAD* output) noexc
+@@ -1154,6 +1205,21 @@ void FreezeLocked(uint64_t epoch) {
+     dx += std::exchange(owner.look_dx, 0.0);
+     dy += std::exchange(owner.look_dy, 0.0);
+   }
++  {
++    const double tau = REXCVAR_GET(gta4_touch_look_smoothing);
++    const double frame = std::isfinite(g_runtime.frame_seconds) && g_runtime.frame_seconds > 0.0
++                             ? std::min(g_runtime.frame_seconds, 0.1) : kReferenceFrameSeconds;
++    g_runtime.look_pending_x += dx;
++    g_runtime.look_pending_y += dy;
++    const double share = tau > 0.0 ? 1.0 - std::exp(-frame / tau) : 1.0;
++    dx = g_runtime.look_pending_x * share;
++    dy = g_runtime.look_pending_y * share;
++    g_runtime.look_pending_x -= dx;
++    g_runtime.look_pending_y -= dy;
++    if (std::abs(g_runtime.look_pending_x) < 0.05) { dx += g_runtime.look_pending_x; g_runtime.look_pending_x = 0.0; }
++    if (std::abs(g_runtime.look_pending_y) < 0.05) { dy += g_runtime.look_pending_y; g_runtime.look_pending_y = 0.0; }
++    if (std::abs(dx) > 0.01 || std::abs(dy) > 0.01) g_runtime.last_look_ns = MonotonicNanoseconds();
++  }
+   const double sensitivity = CameraSensitivityLocked();
+   if (g_runtime.preferences.invert_camera_y) dy = -dy;
+   g_runtime.look_x = g_runtime.look_quantizer_x.Quantize(dx, sensitivity, kLookUnitsPerPixel,
+@@ -1278,6 +1344,13 @@ void OnControlReplay(PPCContext&, uint8_t* base, uint32_t control, uint32_t, uin
+     changed |= MergeAxis(base, control, Action::kVehicleGunUp, Action::kVehicleGunDown, g_runtime.look_y);
+     changed |= MergeAxis(base, control, Action::kVehicleLookLeft, Action::kVehicleLookRight, g_runtime.look_x);
+   }
++  // The title recenters its camera a while after the last input on this
++  // control. Hold that off until the configured delay after a touch look.
++  const double recenter_delay = REXCVAR_GET(gta4_touch_camera_recenter_delay);
++  if (!changed && g_runtime.last_look_ns && recenter_delay > 0.0 &&
++      double(MonotonicNanoseconds() - g_runtime.last_look_ns) < recenter_delay * 1e9) {
++    changed = true;
++  }
+   if (changed) StoreU32(base, control + kLastInputTimeOffset, LoadU32(base, kGameInputTimeAddress));
+ }
+ 
+@@ -1291,6 +1364,10 @@ bool NativePadProvider(uint32_t user, rex::input::X_INPUT_GAMEPAD* output) noexc
    if (!g_runtime.initialized || !g_runtime.context.valid || !g_runtime.context.input_user_known ||
        user != g_runtime.context.input_user) return false;
    *output = {};
@@ -424,7 +493,7 @@ index 5f3e537..c0e4b8e 100644
    if (owned || !active || !pad.active || pad.epoch != g_runtime.epoch ||
        !GameplayPresentationAdmittedLocked(GetTouchContextSnapshot())) return true;
    output->buttons = pad.buttons;
-@@ -1565,6 +1608,19 @@ ContextTouchOverlaySnapshot GetContextTouchDrawableOverlaySnapshot(uint64_t mono
+@@ -1565,6 +1642,19 @@ ContextTouchOverlaySnapshot GetContextTouchDrawableOverlaySnapshot(uint64_t mono
                           g_runtime.context.frontend || g_runtime.context.map;
    const bool editor_drawable = g_runtime.editor_session &&
        (g_runtime.editing || (g_runtime.editor_closing && g_runtime.last_drawable.editor));
