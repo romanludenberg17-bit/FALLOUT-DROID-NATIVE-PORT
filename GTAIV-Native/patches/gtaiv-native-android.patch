@@ -1,8 +1,24 @@
 diff --git a/glue/rexglue-sdk-main/gta4-recomp/CMakeLists.txt b/glue/rexglue-sdk-main/gta4-recomp/CMakeLists.txt
-index 3b03306..78d588e 100644
+index 3b03306..415c32f 100644
 --- a/glue/rexglue-sdk-main/gta4-recomp/CMakeLists.txt
 +++ b/glue/rexglue-sdk-main/gta4-recomp/CMakeLists.txt
-@@ -412,6 +412,10 @@ elseif(ANDROID)
+@@ -329,6 +329,15 @@ elseif(ANDROID)
+     set_property(SOURCE generated/gta4_register.cpp APPEND PROPERTY COMPILE_OPTIONS
+         "$<$<CONFIG:Release,RelWithDebInfo>:-O0>")
+ 
++    # Recompiled game code is the hot path: no stack canaries or fortify
++    # checks in it, and direct (non-interposable) calls between its functions.
++    set(GTA4_ANDROID_HOT_SOURCES ${GENERATED_SOURCES})
++    list(FILTER GTA4_ANDROID_HOT_SOURCES EXCLUDE REGEX "gta4_register\\.cpp$")
++    set_property(SOURCE ${GTA4_ANDROID_HOT_SOURCES} APPEND PROPERTY COMPILE_OPTIONS
++        "$<$<CONFIG:Release,RelWithDebInfo>:-fno-stack-protector>"
++        "$<$<CONFIG:Release,RelWithDebInfo>:-U_FORTIFY_SOURCE>"
++        "$<$<CONFIG:Release,RelWithDebInfo>:-fno-semantic-interposition>")
++
+     target_include_directories(LibertyRecomp PRIVATE
+         ${CMAKE_CURRENT_SOURCE_DIR}/src
+         ${CMAKE_CURRENT_SOURCE_DIR}/generated
+@@ -412,6 +421,10 @@ elseif(ANDROID)
          src/install/gta4_rpf_extractor.cpp
          src/install/gta4_source_inspector.cpp
          src/android/android_install_jni.cpp
@@ -294,18 +310,29 @@ index 0000000..2c66a55
 +
 +}  // extern "C"
 diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/gta4_app.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/gta4_app.cpp
-index 68d694b..6ebe9de 100644
+index 68d694b..27d8d9e 100644
 --- a/glue/rexglue-sdk-main/gta4-recomp/src/gta4_app.cpp
 +++ b/glue/rexglue-sdk-main/gta4-recomp/src/gta4_app.cpp
-@@ -12,6 +12,7 @@
+@@ -12,6 +12,8 @@
  #include <unordered_set>
  #include <vector>
  
++#include <cstdlib>
 +#include <rex/filesystem.h>
  #include <rex/graphics/gta4_native/title_commands.h>
  #include <rex/graphics/gta4_native/anti_aliasing_policy.h>
  #include <rex/graphics/gta4_native/hdr_policy.h>
-@@ -74,7 +75,7 @@ REXCVAR_DEFINE_STRING(gta4_relay_policy, "auto", "GTA IV/Multiplayer",
+@@ -64,6 +66,9 @@ REXCVAR_DEFINE_STRING(gta4_multiplayer_backend, "community", "GTA IV/Multiplayer
+                       "Compatibility service: offline, lan, or community")
+     .allowed({"offline", "lan", "community"})
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
++REXCVAR_DEFINE_STRING(gta4_lan_ipv4, "", "GTA IV/Multiplayer",
++                      "IPv4 address to advertise for LAN play (e.g. a ZeroTier/Tailscale address); "
++                      "empty picks the Wi-Fi / hotspot interface");
+ REXCVAR_DEFINE_STRING(gta4_community_url, "http://127.0.0.1:8080", "GTA IV/Multiplayer",
+                       "Community session service base URL")
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+@@ -74,7 +79,7 @@ REXCVAR_DEFINE_STRING(gta4_relay_policy, "auto", "GTA IV/Multiplayer",
                        "Peer route policy: auto, direct_only, or relay_only")
      .allowed({"auto", "direct_only", "relay_only"})
      .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
@@ -314,7 +341,7 @@ index 68d694b..6ebe9de 100644
                        "LAN discovery UDP port")
      .range(1, 65535)
      .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-@@ -627,10 +628,31 @@ struct GTA4App::TitleProfileSyncState {
+@@ -627,10 +632,31 @@ struct GTA4App::TitleProfileSyncState {
    bool stopping = false;
  };
  
@@ -347,7 +374,17 @@ index 68d694b..6ebe9de 100644
    paths.marketplace_content_root = liberty_root_ / "dlc";
    paths.config_path = native_config_path_;
  
-@@ -1334,7 +1356,7 @@ void GTA4App::OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) {
+@@ -794,6 +820,9 @@ void GTA4App::OnPreSetup(rex::RuntimeConfig& config) {
+   config.live.community_url = REXCVAR_GET(gta4_community_url);
+   config.live.player_name = REXCVAR_GET(gta4_player_name);
+   config.live.lan_discovery_port = static_cast<uint16_t>(REXCVAR_GET(gta4_lan_discovery_port));
++  if (const std::string lan_ip = REXCVAR_GET(gta4_lan_ipv4); !lan_ip.empty()) {
++    ::setenv("REX_LAN_IPV4", lan_ip.c_str(), 1);  // read by the LAN backend
++  }
+   config.live.community_backend_factory =
+       &LibertyRecomp::Network::CreateCommunityMultiplayerBackend;
+   config.live.voice_audio_device = gta4::voice::CreateAudioDevice();
+@@ -1334,7 +1363,7 @@ void GTA4App::OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) {
    gta4::game_center::Initialize();
    context_touch_overlay_ =
        std::make_unique<gta4::input::ContextTouchOverlay>(
@@ -356,6 +393,246 @@ index 68d694b..6ebe9de 100644
    text_chat_dialog_ = std::make_unique<gta4::input::TextChatDialog>(
        drawer, [this](bool captured) {
          SetTitleInputCaptured(captured);
+diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/gta4_frontend_hooks.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/gta4_frontend_hooks.cpp
+index b63d73e..56b9be5 100644
+--- a/glue/rexglue-sdk-main/gta4-recomp/src/gta4_frontend_hooks.cpp
++++ b/glue/rexglue-sdk-main/gta4-recomp/src/gta4_frontend_hooks.cpp
+@@ -31,6 +31,7 @@
+ #include "gta4_init.h"
+ #include "gta4_touch_coordinator.h"
+ #include "input/context_touch_controls.h"
++#include "input/context_touch_settings.h"
+ 
+ REXCVAR_DECLARE(std::string, gta4_episode_startup_prompt);
+ REXCVAR_DEFINE_BOOL(gta4_frontend_advanced_graphics_menu, true, "GTA IV/Frontend",
+@@ -206,6 +207,40 @@ enum class TextId : uint8_t {
+   kUltraPerformance,
+   kFsr3FrameGeneration,
+   kDlssFrameGeneration,
++  kTouchSizeLabel,
++  kTouchOpacityLabel,
++  kTouchCameraLabel,
++  kTouchAimLabel,
++  kTouchCarCameraLabel,
++  kTouchInvertLabel,
++  kTouchLeftHandLabel,
++  kTouchFloatingLabel,
++  kTouchVibrationLabel,
++  kTouchSmoothingLabel,
++  kTouchRecenterLabel,
++  kPct15,
++  kPct25,
++  kPct30,
++  kPct35,
++  kPct45,
++  kPct50,
++  kPct60,
++  kPct70,
++  kPct75,
++  kPct85,
++  kPct90,
++  kPct100,
++  kPct115,
++  kPct125,
++  kPct130,
++  kPct150,
++  kPct175,
++  kPct200,
++  kAfter1s,
++  kAfter2s,
++  kAfter4s,
++  kAfter6s,
++  kNever,
+   kCount,
+ };
+ 
+@@ -224,6 +259,7 @@ enum class SettingBinding : uint8_t {
+   kDrawDistanceSlider,
+   kTouchLayoutEditor,
+   kSonyFeatures,
++  kTouchSetting,  // touch preference (touch-controls.ini) or a gta4_touch_* cvar
+ };
+ 
+ struct Setting {
+@@ -403,6 +439,31 @@ constexpr std::array kShadowChoices = {
+     Choice{"512", TextId::kHigh},
+     Choice{"1024", TextId::kUltra},
+ };
++constexpr std::array kTouchSizeChoices = {
++    Choice{"0.70", TextId::kPct70}, Choice{"0.85", TextId::kPct85}, Choice{"1.00", TextId::kPct100},
++    Choice{"1.15", TextId::kPct115}, Choice{"1.30", TextId::kPct130}, Choice{"1.50", TextId::kPct150},
++};
++constexpr std::array kTouchOpacityChoices = {
++    Choice{"0.30", TextId::kPct30}, Choice{"0.45", TextId::kPct45}, Choice{"0.60", TextId::kPct60},
++    Choice{"0.75", TextId::kPct75}, Choice{"0.90", TextId::kPct90}, Choice{"1.00", TextId::kPct100},
++};
++constexpr std::array kTouchSpeedChoices = {
++    Choice{"0.50", TextId::kPct50}, Choice{"0.75", TextId::kPct75}, Choice{"1.00", TextId::kPct100},
++    Choice{"1.25", TextId::kPct125}, Choice{"1.50", TextId::kPct150}, Choice{"1.75", TextId::kPct175},
++    Choice{"2.00", TextId::kPct200},
++};
++constexpr std::array kTouchAimChoices = {
++    Choice{"0.15", TextId::kPct15}, Choice{"0.25", TextId::kPct25}, Choice{"0.35", TextId::kPct35},
++    Choice{"0.50", TextId::kPct50}, Choice{"0.75", TextId::kPct75}, Choice{"1.00", TextId::kPct100},
++};
++constexpr std::array kTouchSmoothingChoices = {
++    Choice{"0.00", TextId::kOff}, Choice{"0.03", TextId::kLow}, Choice{"0.05", TextId::kMedium},
++    Choice{"0.09", TextId::kHigh},
++};
++constexpr std::array kTouchRecenterChoices = {
++    Choice{"1.00", TextId::kAfter1s}, Choice{"2.00", TextId::kAfter2s}, Choice{"4.00", TextId::kAfter4s},
++    Choice{"6.00", TextId::kAfter6s}, Choice{"30.00", TextId::kNever},
++};
+ constexpr std::array kSettings = {
+     Setting{"LR_RENDERER", TextId::kRendererLabel, "gpu_plugin", kRendererChoices.data(),
+             kRendererChoices.size(), true},
+@@ -459,6 +520,30 @@ constexpr std::array kSettings = {
+             kTouchControlsChoices.data(), kTouchControlsChoices.size()},
+     Setting{"LR_TOUCH_EDIT", TextId::kEditTouchLayoutLabel, "", nullptr, 0, false,
+             SettingBinding::kTouchLayoutEditor},
++    Setting{"LR_T_SIZE", TextId::kTouchSizeLabel, "button_scale", kTouchSizeChoices.data(),
++            kTouchSizeChoices.size(), false, SettingBinding::kTouchSetting},
++    Setting{"LR_T_ALPHA", TextId::kTouchOpacityLabel, "opacity", kTouchOpacityChoices.data(),
++            kTouchOpacityChoices.size(), false, SettingBinding::kTouchSetting},
++    Setting{"LR_T_CAM", TextId::kTouchCameraLabel, "camera_sensitivity", kTouchSpeedChoices.data(),
++            kTouchSpeedChoices.size(), false, SettingBinding::kTouchSetting},
++    Setting{"LR_T_AIM", TextId::kTouchAimLabel, "aim_sensitivity", kTouchAimChoices.data(),
++            kTouchAimChoices.size(), false, SettingBinding::kTouchSetting},
++    Setting{"LR_T_CAR", TextId::kTouchCarCameraLabel, "vehicle_sensitivity", kTouchSpeedChoices.data(),
++            kTouchSpeedChoices.size(), false, SettingBinding::kTouchSetting},
++    Setting{"LR_T_INVERT", TextId::kTouchInvertLabel, "invert_camera_y", kToggleChoices.data(),
++            kToggleChoices.size(), false, SettingBinding::kTouchSetting},
++    Setting{"LR_T_LEFT", TextId::kTouchLeftHandLabel, "left_handed", kToggleChoices.data(),
++            kToggleChoices.size(), false, SettingBinding::kTouchSetting},
++    Setting{"LR_T_FLOAT", TextId::kTouchFloatingLabel, "floating_stick", kToggleChoices.data(),
++            kToggleChoices.size(), false, SettingBinding::kTouchSetting},
++    Setting{"LR_T_VIBRA", TextId::kTouchVibrationLabel, "haptics", kToggleChoices.data(),
++            kToggleChoices.size(), false, SettingBinding::kTouchSetting},
++    Setting{"LR_T_SMOOTH", TextId::kTouchSmoothingLabel, "gta4_touch_look_smoothing",
++            kTouchSmoothingChoices.data(), kTouchSmoothingChoices.size(), false,
++            SettingBinding::kTouchSetting},
++    Setting{"LR_T_CENTER", TextId::kTouchRecenterLabel, "gta4_touch_camera_recenter_delay",
++            kTouchRecenterChoices.data(), kTouchRecenterChoices.size(), false,
++            SettingBinding::kTouchSetting},
+     Setting{"LR_SONY", TextId::kSonyFeaturesLabel, "gta4_sony_enabled",
+             kToggleChoices.data(), kToggleChoices.size(), false, SettingBinding::kSonyFeatures},
+     Setting{"LR_SKIPINTRO", TextId::kSkipIntroLabel, "gta4_skip_intro",
+@@ -598,6 +683,40 @@ constexpr std::array<std::string_view, static_cast<size_t>(TextId::kCount)> kStr
+     "Ultra Performance",
+     "FSR 2x",
+     "DLSS 2x",
++    "Button Size",
++    "Button Opacity",
++    "Camera Sensitivity",
++    "Aim Sensitivity",
++    "Car Camera Sensitivity",
++    "Invert Look",
++    "Left-Handed Layout",
++    "Floating Stick",
++    "Vibration",
++    "Camera Smoothing",
++    "Camera Auto-Center",
++    "15%",
++    "25%",
++    "30%",
++    "35%",
++    "45%",
++    "50%",
++    "60%",
++    "70%",
++    "75%",
++    "85%",
++    "90%",
++    "100%",
++    "115%",
++    "125%",
++    "130%",
++    "150%",
++    "175%",
++    "200%",
++    "After 1 s",
++    "After 2 s",
++    "After 4 s",
++    "After 6 s",
++    "Never",
+ };
+ 
+ struct NativePageState {
+@@ -1127,8 +1246,62 @@ bool SettingAvailable(const Setting& setting, uint32_t capabilities) {
+   return true;
+ }
+ 
++std::string TouchSettingRawValue(std::string_view name) {
++  if (name.starts_with("gta4_")) return rex::cvar::GetFlagByName(name);
++  const auto p = gta4::input::GetContextTouchPreferences();
++  const auto flag = [](bool v) { return std::string(v ? "true" : "false"); };
++  if (name == "button_scale") return std::to_string(p.button_scale);
++  if (name == "opacity") return std::to_string(p.opacity);
++  if (name == "camera_sensitivity") return std::to_string(p.camera_sensitivity);
++  if (name == "aim_sensitivity") return std::to_string(p.aim_sensitivity);
++  if (name == "vehicle_sensitivity") return std::to_string(p.vehicle_sensitivity);
++  if (name == "invert_camera_y") return flag(p.invert_camera_y);
++  if (name == "left_handed") return flag(p.left_handed);
++  if (name == "floating_stick") return flag(p.floating_stick);
++  if (name == "haptics") return flag(p.haptics);
++  return {};
++}
++
++// Numeric values snap to the nearest listed step so the row always shows one.
++std::string TouchSettingValue(const Setting& setting) {
++  const std::string raw = TouchSettingRawValue(setting.cvar);
++  if (raw == "true" || raw == "false" || raw.empty()) return raw;
++  const double value = std::strtod(raw.c_str(), nullptr);
++  std::string best = raw;
++  double distance = std::numeric_limits<double>::max();
++  for (uint8_t i = 0; i < setting.choice_count; ++i) {
++    const double candidate = std::strtod(std::string(setting.choices[i].value).c_str(), nullptr);
++    if (std::abs(candidate - value) < distance) {
++      distance = std::abs(candidate - value);
++      best = std::string(setting.choices[i].value);
++    }
++  }
++  return best;
++}
++
++bool SetTouchSetting(std::string_view name, std::string_view value) {
++  if (name.starts_with("gta4_")) return rex::cvar::SetFlagByName(name, std::string(value));
++  auto p = gta4::input::GetContextTouchPreferences();
++  const float number = std::strtof(std::string(value).c_str(), nullptr);
++  const bool on = value == "true";
++  if (name == "button_scale") p.button_scale = number;
++  else if (name == "opacity") p.opacity = number;
++  else if (name == "camera_sensitivity") p.camera_sensitivity = number;
++  else if (name == "aim_sensitivity") p.aim_sensitivity = number;
++  else if (name == "vehicle_sensitivity") p.vehicle_sensitivity = number;
++  else if (name == "invert_camera_y") p.invert_camera_y = on;
++  else if (name == "left_handed") p.left_handed = on;
++  else if (name == "floating_stick") p.floating_stick = on;
++  else if (name == "haptics") p.haptics = on;
++  else return false;
++  gta4::input::SetContextTouchPreferences(p);
++  gta4::input::FlushContextTouchSettings();
++  return true;
++}
++
+ std::string CurrentSettingValue(const Setting& source) {
+   const Setting setting = ResolveSetting(source);
++  if (setting.binding == SettingBinding::kTouchSetting) return TouchSettingValue(setting);
+   if (setting.binding == SettingBinding::kAntiAliasing) {
+     return std::string(
+         rex::graphics::gta4_native::GetConfiguredAntiAliasingModeName());
+@@ -1664,6 +1837,11 @@ void ChangeSetting(const Setting& source, int32_t delta) {
+       REXLOG_ERROR("GTA IV Advanced Graphics: rejected {}={}", setting.cvar, choice.value);
+       return;
+     }
++  } else if (setting.binding == SettingBinding::kTouchSetting) {
++    if (!SetTouchSetting(setting.cvar, choice.value)) {
++      REXLOG_ERROR("GTA IV touch settings: rejected {}={}", setting.cvar, choice.value);
++      return;
++    }
+   } else if (setting.binding == SettingBinding::kSonyFeatures) {
+     if (!rex::input::sony::SetFeaturesEnabled(choice.value == "true")) {
+       REXLOG_ERROR("GTA IV controller features: rejected enabled={}", choice.value);
 diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.cpp
 index 5f3e537..5536bf6 100644
 --- a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.cpp
@@ -514,10 +791,10 @@ index 5f3e537..5536bf6 100644
      HideGameplayLocked();
      return {};
 diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_draw.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_draw.cpp
-index f9bbbde..4737e71 100644
+index f9bbbde..3991c16 100644
 --- a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_draw.cpp
 +++ b/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_draw.cpp
-@@ -75,6 +75,24 @@ void DrawContextTouchLayer(ImDrawList* draw, ImFont* font, float font_size,
+@@ -75,6 +75,42 @@ void DrawContextTouchLayer(ImDrawList* draw, ImFont* font, float font_size,
        }
        continue;
      }
@@ -528,6 +805,24 @@ index f9bbbde..4737e71 100644
 +    if (resolver && control.icon_id[0]) {
 +      has_icon = resolver(icon_context, control.icon_id.data(), &icon) && icon.texture &&
 +                 std::isfinite(icon.aspect) && icon.aspect > 0.0f;
++    }
++    if (stick && resolver) {
++      ContextTouchIcon base, nub;
++      if (resolver(icon_context, "stick_base", &base) && base.texture &&
++          resolver(icon_context, "stick_nub", &nub) && nub.texture) {
++        const bool right = control.kind == ContextTouchControlKind::kRightStick;
++        const float sx = std::clamp(right ? (input ? input->right_x : 0.0f) : (input ? input->movement_x : 0.0f), -255.0f, 255.0f) / 255.0f;
++        const float sy = std::clamp(right ? (input ? input->right_y : 0.0f) : (input ? input->movement_y : 0.0f), -255.0f, 255.0f) / 255.0f;
++        draw->AddImage(base.texture, ImVec2(center.x - radius, center.y - radius),
++                       ImVec2(center.x + radius, center.y + radius), base.uv_min, base.uv_max,
++                       color(255, 255, 255, active ? 255.0f : 200.0f));
++        const float nub_radius = radius * 0.42f;
++        const ImVec2 nub_center(center.x + sx * radius * 0.58f, center.y + sy * radius * 0.58f);
++        draw->AddImage(nub.texture, ImVec2(nub_center.x - nub_radius, nub_center.y - nub_radius),
++                       ImVec2(nub_center.x + nub_radius, nub_center.y + nub_radius), nub.uv_min, nub.uv_max,
++                       color(255, 255, 255, 255.0f));
++        continue;
++      }
 +    }
 +    if (has_icon && !stick) {
 +      // GTA-style icons carry their own round plate: draw them full size and
@@ -542,7 +837,7 @@ index f9bbbde..4737e71 100644
      draw->AddCircleFilled(center, radius, active ? color(236, 135, 42, 255.0f)
                                                 : color(12, 18, 27, 210.0f), 48);
      draw->AddCircle(center, radius, color(255, 255, 255, 255.0f), 48,
-@@ -87,12 +105,6 @@ void DrawContextTouchLayer(ImDrawList* draw, ImFont* font, float font_size,
+@@ -87,12 +123,6 @@ void DrawContextTouchLayer(ImDrawList* draw, ImFont* font, float font_size,
                                    center.y + y * radius * 0.55f),
                              radius * 0.34f, color(255, 255, 255, 210.0f), 32);
      }
@@ -798,6 +1093,57 @@ index f1445d1..7d77956 100644
    }
  
    if (options.weapon_wheel_open) {
+diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_settings.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_settings.cpp
+index 9dcce67..896333b 100644
+--- a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_settings.cpp
++++ b/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_settings.cpp
+@@ -74,6 +74,17 @@ void Place(ContextTouchControl& c, const ContextTouchViewport& v, const Placemen
+   c.maximum_y = c.center_y + c.radius;
+ }
+ 
++// Buttons may touch or overlap a little (the user chose the spot); only a
++// near-complete stack would make one of them unreachable.
++bool Stacked(const ContextTouchControl& a, const ContextTouchControl& b) {
++  if (!a.visible || !b.visible || a.kind == ContextTouchControlKind::kLookSurface ||
++      b.kind == ContextTouchControlKind::kLookSurface || a.kind == ContextTouchControlKind::kUtility ||
++      b.kind == ContextTouchControlKind::kUtility) return false;
++  const float dx = a.center_x - b.center_x;
++  const float dy = a.center_y - b.center_y;
++  const float limit = std::min(a.radius, b.radius) * 0.6f;
++  return dx * dx + dy * dy < limit * limit;
++}
+ bool Overlaps(const ContextTouchControl& a, const ContextTouchControl& b) {
+   if (!a.visible || !b.visible || a.kind == ContextTouchControlKind::kLookSurface ||
+       b.kind == ContextTouchControlKind::kLookSurface) return false;
+@@ -192,7 +203,7 @@ void ApplyContextTouchSavedLayout(ContextTouchLayout& layout) noexcept {
+       Place(candidate, layout.viewport, placement);
+       bool overlaps = false;
+       for (size_t other = 0; other < layout.control_count; ++other) {
+-        if (index != other && Overlaps(candidate, layout.controls[other])) overlaps = true;
++        if (index != other && Stacked(candidate, layout.controls[other])) overlaps = true;
+       }
+       if (!overlaps) control = candidate;
+       break;
+@@ -213,6 +224,10 @@ bool SetContextTouchPlacement(const ContextTouchLayout& layout, TouchAction acti
+                 .large_screen = std::min(v.safe_width, v.safe_height) >= 600.0f,
+                 .x = (x - v.safe_x) / v.safe_width, .y = (y - v.safe_y) / v.safe_height,
+                 .radius = radius / std::min(v.safe_width, v.safe_height)};
++    // Dragging past an edge keeps the button at the edge instead of failing.
++    p.x = std::clamp(p.x, 0.0f, 1.0f);
++    p.y = std::clamp(p.y, 0.0f, 1.0f);
++    p.radius = std::clamp(p.radius, 0.02f, 0.3f);
+     if (!ValidPlacement(p)) return false;
+     const ContextTouchControl* original = nullptr;
+     for (size_t i = 0; i < layout.control_count; ++i) {
+@@ -223,7 +238,7 @@ bool SetContextTouchPlacement(const ContextTouchLayout& layout, TouchAction acti
+     auto candidate = *original;
+     Place(candidate, v, p);
+     for (size_t i = 0; i < layout.control_count; ++i) {
+-      if (&layout.controls[i] != original && Overlaps(candidate, layout.controls[i])) return false;
++      if (&layout.controls[i] != original && Stacked(candidate, layout.controls[i])) return false;
+     }
+     for (auto& existing : g_placements) {
+       if (existing.action == action && SameProfile(existing, layout)) {
 diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/input/gamepad_touch_overlay.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/input/gamepad_touch_overlay.cpp
 index 2813b2e..63f35b2 100644
 --- a/glue/rexglue-sdk-main/gta4-recomp/src/input/gamepad_touch_overlay.cpp

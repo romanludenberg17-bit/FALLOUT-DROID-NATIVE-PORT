@@ -115,23 +115,27 @@
       <span class="btn" id="coopAuto">Найти по Wi-Fi</span>
       <div class="field"><label>IP хоста</label><input id="hostIp" maxlength="15" inputmode="decimal" placeholder="192.168.43.1"></div>
       <span class="btn" id="coopJoinIp">Подключиться по IP</span>
+      <div class="field"><label>Мой IP VPN</label><input id="myVpnIp" maxlength="15" inputmode="decimal" placeholder="только для игры через VPN"></div>
       <ul>
         <li>Игра сначала загрузит сюжет — так устроена GTA IV: мультиплеер открывается из телефона Нико (<b>телефон → Мультиплеер</b>).</li>
         <li><b>Хост</b> жмёт «Я хост», в игре: телефон → Мультиплеер → кооп-миссия → создать.</li>
         <li><b>Второй игрок</b> жмёт «Найти по Wi-Fi» и выбирает игру хоста в списке.</li>
-        <li>Если игра не видна — «Подключиться по IP». IP хоста: Настройки → Wi-Fi → сеть → IP-адрес (у точки доступа обычно 192.168.43.1).</li>
+        <li>Через VPN (ZeroTier/Tailscale/Radmin) оба игрока вписывают свой VPN-IP в «Мой IP VPN», второй — «Подключиться по IP» с VPN-IP хоста. Если в Wi-Fi игра не видна — «Подключиться по IP». IP хоста: Настройки → Wi-Fi → сеть → IP-адрес (у точки доступа обычно 192.168.43.1).</li>
       </ul>
     </div>
 
     <!-- ===== СЕРВЕРЫ ===== -->
     <div class="col-left hidden" data-page="servers">
-      <div class="row sel"><span class="row-lbl">Локальная сеть</span><span class="row-val">авто</span></div>
+      <div class="row sel" data-srv="lan"><span class="row-lbl">Локальная сеть / точка доступа</span><span class="row-val">авто</span></div>
+      <div class="row" data-srv="zt"><span class="row-lbl">Интернет: ZeroTier</span><span class="row-val">авто</span></div>
+      <div class="row" data-srv="vpn"><span class="row-lbl">Интернет: Tailscale / Radmin</span><span class="row-val">по IP</span></div>
+      <div class="row" data-srv="own"><span class="row-lbl">Свой сервер сообщества</span><span class="row-val">VPS</span></div>
       <div class="row-sep"></div>
       <div id="recentList"></div>
     </div>
     <div class="col-right hidden" data-page="servers">
-      <h2>Серверы не нужны</h2><div class="line"></div>
-      <p>Игра работает напрямую между телефонами (P2P): хост — это игрок, создавший матч. Сессии в одной сети находятся автоматически.</p>
+      <h2 id="srvTitle">Локальная сеть</h2><div class="line"></div>
+      <p id="srvText"></p>
       <p style="margin-top:8px">Слева — хосты, к которым вы подключались. Нажмите, чтобы зайти снова.</p>
       <span class="btn main" id="srvScan">Искать в сети</span>
       <span class="btn" id="srvClear">Очистить список</span>
@@ -172,7 +176,15 @@ function remember(ip, name) {
   var list = store.get("recent", []).filter(function (r) { return r.ip !== ip; });
   list.unshift({ ip: ip, name: name || ip }); store.set("recent", list.slice(0, 8));
 }
-function launch(params) { go("nmp://launch_coop?" + params + "&nick=" + encodeURIComponent(nick())); }
+// The launcher writes "--gta4_player_name=<nick>" as its own args.txt line;
+// a VPN address rides along as the next line (--gta4_lan_ipv4).
+function launch(params) {
+  var extra = "", vpn = ($("myVpnIp").value || "").trim();
+  store.set("vpnIp", vpn);
+  if (vpn && validIp(vpn)) extra = "\n--gta4_lan_ipv4=" + vpn;
+  else extra = "\n--gta4_lan_ipv4=";
+  go("nmp://launch_coop?" + params + "&nick=" + encodeURIComponent(nick() + extra));
+}
 function join(ip, name) {
   if (!validIp(ip)) { toast("Введите IP вида 192.168.0.10"); return; }
   remember(ip, name); launch("ip=" + encodeURIComponent(ip));
@@ -220,6 +232,7 @@ $("nick1").value = $("nick2").value = store.get("nick", "");
 $("nick1").oninput = function () { $("nick2").value = this.value; };
 $("nick2").oninput = function () { $("nick1").value = this.value; };
 $("hostIp").value = (store.get("recent", [])[0] || {}).ip || "";
+$("myVpnIp").value = store.get("vpnIp", "");
 $("mpHost").onclick = function () { launch("host=1"); };
 $("mpJoin").onclick = function () { launch("lan=1"); };
 $("coopHost").onclick = function () { launch("host=1"); };
@@ -239,6 +252,20 @@ $("back").onclick = closeHub;
 window.addEventListener("keydown", function (e) {
   if (e.key === "Escape" || (e.key === "Backspace" && document.activeElement.tagName !== "INPUT")) closeHub();
 });
+var SRV = {
+  lan: ["Локальная сеть", "Телефоны в одной Wi-Fi сети или на точке доступа одного из них. Сессии находятся автоматически, сервер не нужен."],
+  zt: ["Интернет: ZeroTier", "Бесплатная виртуальная сеть через интернет. Установите ZeroTier One на оба телефона, создайте сеть на my.zerotier.com и подключите к ней оба устройства. Во вкладке Co-op оба игрока вписывают свой ZeroTier-IP в «Мой IP VPN»; второй жмёт «Подключиться по IP» с ZeroTier-IP хоста."],
+  vpn: ["Интернет: Tailscale / Radmin", "Подключите оба телефона к одной сети Tailscale (или Radmin VPN). Multicast там не проходит, поэтому второй игрок жмёт «Подключиться по IP» и вводит адрес хоста из приложения VPN (100.x.x.x)."],
+  own: ["Свой сервер сообщества", "Публичных серверов для этой версии игры нет. Сервер сообщества Liberty Recompiled (community-server, Docker) можно поднять на своём VPS, но режим Community в Android-сборке пока не включён — используйте ZeroTier."]
+};
+function showSrv(k) { $("srvTitle").textContent = SRV[k][0]; $("srvText").textContent = SRV[k][1]; }
+Array.prototype.forEach.call(document.querySelectorAll("[data-srv]"), function (r) {
+  r.addEventListener("click", function () {
+    Array.prototype.forEach.call(document.querySelectorAll("[data-srv]"), function (x) { x.classList.remove("sel"); });
+    r.classList.add("sel"); showSrv(r.dataset.srv);
+  });
+});
+showSrv("lan");
 show(store.get("tab", "coop"));
 </script>
 </body>

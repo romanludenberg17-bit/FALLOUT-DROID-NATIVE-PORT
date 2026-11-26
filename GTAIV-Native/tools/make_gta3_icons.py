@@ -204,6 +204,24 @@ def settings(d):
     d.ellipse((106, 106, 150, 150), fill=EDGE)
 icons["settings"] = draw(settings)
 
+
+# --- analog stick (GTA III mobile style): translucent plate, gold rim, nub
+def stick_base():
+    im = Image.new("RGBA", (S, S), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
+    d.ellipse((6, 6, S - 6, S - 6), fill=(30, 36, 30, 120), outline=EDGE, width=10)
+    d.ellipse((14, 14, S - 14, S - 14), outline=(200, 160, 88, 210), width=6)
+    for ang in (0, 90, 180, 270):
+        poly(d, tri(128 + 92 * math.cos(math.radians(ang)), 128 + 92 * math.sin(math.radians(ang)), 14, ang), 3)
+    return im
+def stick_nub():
+    im = Image.new("RGBA", (S, S), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
+    d.ellipse((8, 8, S - 8, S - 8), fill=EDGE)
+    nub = Image.open(os.path.join(SRC, "analognub.png")).convert("RGBA").resize((S - 36, S - 36), Image.LANCZOS)
+    im.alpha_composite(nub, (18, 18))
+    d.ellipse((70, 52, 120, 92), fill=(255, 235, 190, 90))
+    return im
+icons["stick_base"] = stick_base(); icons["stick_nub"] = stick_nub()
+
 for name, im in icons.items():
     im.resize((192, 192), Image.LANCZOS).save(os.path.join(OUT, name + ".png"), optimize=True)
 print(len(icons), "icons ->", OUT)

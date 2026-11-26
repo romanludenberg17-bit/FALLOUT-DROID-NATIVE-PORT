@@ -22,6 +22,8 @@ import zipfile
 import zlib
 
 PACKAGE = "com.rommy.gtaiv"
+VERSION_CODE = 610          # above the 4NMP shell's 502 so updates always replace it
+VERSION_NAME = "1.1.0-native"
 LABEL = "GTA IV Native"
 EXTRA_PERMISSIONS = ["android.permission.ACCESS_WIFI_STATE",
                      "android.permission.CHANGE_WIFI_MULTICAST_STATE"]
@@ -108,6 +110,27 @@ def patch_manifest(axml):
         struct.pack_into("<I", el, attr_rel + 16, idx)      # typed value data
         extra += el + end
     rest[insert_at:insert_at] = extra
+    # versionCode / versionName (android attr ids 0x0101021b / 0x0101021c)
+    if VERSION_NAME not in strings: strings.append(VERSION_NAME)
+    name_index = strings.index(VERSION_NAME)
+    typ, _, size = struct.unpack_from("<HHI", rest, 0)
+    ids = list(struct.unpack_from("<%dI" % ((size - 8) // 4), rest, 8)) if typ == 0x0180 else []
+    off = 0
+    while off < len(rest):
+        typ, hsz, size = struct.unpack_from("<HHI", rest, off)
+        if typ == 0x0102:
+            attr_start, attr_size, attr_count = struct.unpack_from("<HHH", rest, off + 16 + 8)
+            for i in range(attr_count):
+                a = off + 16 + attr_start + i * attr_size
+                name = struct.unpack_from("<I", rest, a + 4)[0]
+                rid = ids[name] if name < len(ids) else 0
+                if rid == 0x0101021b:
+                    struct.pack_into("<I", rest, a + 16, VERSION_CODE)
+                elif rid == 0x0101021c:
+                    struct.pack_into("<I", rest, a + 8, name_index)
+                    struct.pack_into("<I", rest, a + 16, name_index)
+            break  # <manifest> is the first element
+        off += size
     pool = write_pool(strings, utf8, flags)
     total = 8 + len(pool) + len(rest)
     return struct.pack("<HHI", 0x0003, 8, total) + pool + bytes(rest)
