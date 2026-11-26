@@ -1,0 +1,490 @@
+diff --git a/glue/rexglue-sdk-main/src/graphics/CMakeLists.txt b/glue/rexglue-sdk-main/src/graphics/CMakeLists.txt
+index af36910..96d7058 100644
+--- a/glue/rexglue-sdk-main/src/graphics/CMakeLists.txt
++++ b/glue/rexglue-sdk-main/src/graphics/CMakeLists.txt
+@@ -238,7 +238,11 @@ if(REXGLUE_USE_VULKAN)
+             endif()
+         endif()
+     elseif(CMAKE_HOST_UNIX AND GTA4_NATIVE_DXC_ARCH STREQUAL "x64")
+-        set(GTA4_NATIVE_DXC "${GTA4_NATIVE_DXC_ROOT}/bin/x64/dxc-linux")
++        if(GTA4_NATIVE_DXC_LIBRARY_PATH AND EXISTS "${GTA4_NATIVE_DXC_LIBRARY_PATH}/../bin/dxc")
++            set(GTA4_NATIVE_DXC "${GTA4_NATIVE_DXC_LIBRARY_PATH}/../bin/dxc")
++        else()
++            set(GTA4_NATIVE_DXC "${GTA4_NATIVE_DXC_ROOT}/bin/x64/dxc-linux")
++        endif()
+         if(NOT GTA4_NATIVE_DXC_LIBRARY_PATH)
+             set(GTA4_NATIVE_DXC_LIBRARY_PATH "${GTA4_NATIVE_DXC_ROOT}/lib/x64")
+         endif()
+diff --git a/glue/rexglue-sdk-main/src/system/xam/live_compatibility.cpp b/glue/rexglue-sdk-main/src/system/xam/live_compatibility.cpp
+index b5d7b20..206d004 100644
+--- a/glue/rexglue-sdk-main/src/system/xam/live_compatibility.cpp
++++ b/glue/rexglue-sdk-main/src/system/xam/live_compatibility.cpp
+@@ -36,6 +36,8 @@
+ #include <sys/select.h>
+ #include <sys/socket.h>
+ #include <unistd.h>
++#include <ifaddrs.h>
++#include <net/if.h>
+ #endif
+ 
+ namespace rex::system::xam {
+@@ -1475,6 +1477,51 @@ std::string LanSessionDirectory::last_error() const {
+   return last_error_;
+ }
+ 
++namespace {
++// Android: gethostname() is "localhost", so the hostname lookup below always
++// yields 127.0.0.1 and LAN sessions advertise an unreachable host. Pick the
++// Wi-Fi / hotspot / Ethernet interface instead. REX_LAN_IPV4 (set by the
++// launcher from WifiManager) wins. Returns 0 when nothing usable is found.
++uint32_t PreferredLanIpv4() {
++  if (const char* forced = std::getenv("REX_LAN_IPV4"); forced && *forced) {
++    in_addr address{};
++    if (inet_pton(AF_INET, forced, &address) == 1 && address.s_addr) return address.s_addr;
++  }
++#if !REX_PLATFORM_WIN32
++  ifaddrs* list = nullptr;
++  if (getifaddrs(&list) != 0) return 0;
++  uint32_t best = 0;
++  int best_rank = -1;
++  for (auto* current = list; current; current = current->ifa_next) {
++    if (!current->ifa_addr || current->ifa_addr->sa_family != AF_INET) continue;
++    if (!(current->ifa_flags & IFF_UP) || (current->ifa_flags & IFF_LOOPBACK)) continue;
++    const uint32_t address = reinterpret_cast<const sockaddr_in*>(current->ifa_addr)->sin_addr.s_addr;
++    const uint32_t host = ntohl(address);
++    const bool is_private = (host >> 24) == 10 || (host >> 20) == 0xAC1 || (host >> 16) == 0xC0A8;
++    const std::string_view name = current->ifa_name ? current->ifa_name : "";
++    int rank = is_private ? 1 : 0;
++    if (name.starts_with("wlan") || name.starts_with("ap") || name.starts_with("swlan") ||
++        name.starts_with("softap") || name.starts_with("eth") || name.starts_with("p2p")) {
++      rank += 4;
++    }
++    if (name.starts_with("rmnet") || name.starts_with("ccmni") || name.starts_with("tun") ||
++        name.starts_with("dummy")) {
++      rank -= 4;
++    }
++    if (rank > best_rank) {
++      best_rank = rank;
++      best = address;
++    }
++  }
++  freeifaddrs(list);
++  return best;
++#else
++  return 0;
++#endif
++}
++}  // namespace
++
++
+ bool LanSessionDirectory::Create(const SessionRecord& session) {
+   if (!ready() || !ValidateRecord(session) ||
+       detail::SerializeLanSessionRecord(session).empty()) {
+@@ -1768,7 +1815,22 @@ bool LanSessionDirectory::OpenSocket() {
+     return false;
+   }
+   membership.imr_interface.s_addr = htonl(INADDR_ANY);
+-  if (setsockopt(static_cast<int>(socket_), IPPROTO_IP, IP_ADD_MEMBERSHIP,
++  const uint32_t lan_interface = PreferredLanIpv4();
++  bool joined = false;
++  if (lan_interface) {
++    // Join and send on the Wi-Fi / hotspot interface, not on whatever the
++    // default route is (mobile data on phones).
++    ip_mreq on_lan = membership;
++    on_lan.imr_interface.s_addr = lan_interface;
++    joined = setsockopt(static_cast<int>(socket_), IPPROTO_IP, IP_ADD_MEMBERSHIP,
++                        reinterpret_cast<const char*>(&on_lan), sizeof(on_lan)) == 0;
++    in_addr outgoing{};
++    outgoing.s_addr = lan_interface;
++    setsockopt(static_cast<int>(socket_), IPPROTO_IP, IP_MULTICAST_IF,
++               reinterpret_cast<const char*>(&outgoing), sizeof(outgoing));
++  }
++  if (!joined &&
++      setsockopt(static_cast<int>(socket_), IPPROTO_IP, IP_ADD_MEMBERSHIP,
+                  reinterpret_cast<const char*>(&membership), sizeof(membership)) != 0) {
+     SetError("Unable to join LAN multicast group");
+     return false;
+@@ -2492,7 +2554,11 @@ bool LiveCompatibilityRuntime::LoadOrCreateIdentity(const std::filesystem::path&
+   return true;
+ }
+ 
++
+ uint32_t LiveCompatibilityRuntime::DiscoverLocalIpv4() {
++  if (const uint32_t preferred = PreferredLanIpv4()) {
++    return preferred;
++  }
+   char hostname[256]{};
+   if (gethostname(hostname, sizeof(hostname)) != 0) {
+     return htonl(INADDR_LOOPBACK);
+diff --git a/os/android/app/build.gradle.kts b/os/android/app/build.gradle.kts
+index edf46fc..d3921f7 100644
+--- a/os/android/app/build.gradle.kts
++++ b/os/android/app/build.gradle.kts
+@@ -22,12 +22,12 @@ android {
+     ndkVersion  = "29.0.14206865"
+ 
+     defaultConfig {
+-        applicationId = "com.libertyrecomp"
++        applicationId = "com.rommy.gtaiv"
+         // 28: ASharedMemory (26) for guest memory and AAudio (27) for audio.
+         minSdk        = 29
+         targetSdk     = 35
+-        versionCode   = 18
+-        versionName   = "0.5.9.3"
++        versionCode   = 19
++        versionName   = "0.5.9.3-native-coop1"
+ 
+         ndk {
+             abiFilters += listOf("arm64-v8a")
+diff --git a/os/android/app/src/main/AndroidManifest.xml b/os/android/app/src/main/AndroidManifest.xml
+index d57f8ea..b533f86 100644
+--- a/os/android/app/src/main/AndroidManifest.xml
++++ b/os/android/app/src/main/AndroidManifest.xml
+@@ -15,6 +15,8 @@
+     <uses-permission android:name="android.permission.VIBRATE" />
+     <uses-permission android:name="android.permission.INTERNET" />
+     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
++    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
++    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+     <!-- The launcher's installer reads the disc image and title update by path
+          wherever the player keeps them. Android 11+: "All files access",
+          granted by the player in system settings; Android 10: legacy storage. -->
+diff --git a/os/android/app/src/main/assets/default_args_mali.txt b/os/android/app/src/main/assets/default_args_mali.txt
+new file mode 100644
+index 0000000..8547bae
+--- /dev/null
++++ b/os/android/app/src/main/assets/default_args_mali.txt
+@@ -0,0 +1,46 @@
++# GTA IV Native - Mali / MediaTek profile (Helio G85/G88/G99, Dimensity, Tensor).
++# Display settings (resolution, AA, VSync, shadows, reflections, draw distance)
++# stay at their console defaults and are changed in the in-game Display menu.
++# Only lossless renderer savings and CPU-side tuning are set here.
++--log_level=warn
++--touch_controls=on
++--gpu_plugin=gta4-native
++--gta4_dynamic_draw_distance=true
++--gta4_dynamic_draw_distance_min=0.80
++--gta4_shadow_distance_scale=1.0
++--gta4_reflection_capture_distance=near
++# Traffic/peds: same 40% as the Adreno profile (CPU bound on 2 big cores).
++--gta4_traffic_density_scale=0.4
++--gta4_parked_car_density_scale=0.4
++--gta4_ped_density_scale=0.4
++--gta4_scenario_ped_density_scale=0.4
++# Lossless renderer savings (identical image, less GPU/driver work).
++--gta4_native_merge_indexed_draws=true
++--gta4_native_skip_invisible_draws=true
++--gta4_native_dedupe_vertex_bindings=true
++--gta4_native_keep_draw_state=true
++--gta4_native_lazy_resolves=true
++--gta4_native_lossless_resolve_optimization=true
++--gta4_native_skip_repeated_clears=true
++--gta4_native_water_reflection_on_demand=true
++--gta4_native_pipeline_prewarm=true
++--gta4_native_async_command_retire=true
++--gta4_native_async_constant_release=true
++--gta4_native_pipelined_recording=true
++--gta4_native_recheck_vertex_textures=true
++# FP32 kept: relaxed precision changes the image.
++--gta4_native_fs_relaxed_precision=false
++# Frame pacing and threads.
++--gta4_native_max_queued_frames=3
++--gta4_frame_wait_sleep=true
++--android_perf_hint=true
++--android_pin_hot_threads=true
++--vulkan_native_queue_separation=false
++--gta4_fps_guard=0
++# Streaming: deadline-ordered, prefetch limited for 4-6 GB RAM.
++--gta4_streaming_modern=true
++--gta4_streaming_deadline_order=true
++--gta4_streaming_budget_scale=1.0
++--gta4_streaming_prefetch_pending_limit=256
++--gta4_native_vector_fonts=false
++--user_language=4
+diff --git a/os/android/app/src/main/java/com/libertyrecomp/CoopLan.java b/os/android/app/src/main/java/com/libertyrecomp/CoopLan.java
+new file mode 100644
+index 0000000..435b864
+--- /dev/null
++++ b/os/android/app/src/main/java/com/libertyrecomp/CoopLan.java
+@@ -0,0 +1,88 @@
++package com.libertyrecomp;
++
++import android.content.Context;
++import android.net.wifi.WifiManager;
++import android.os.Build;
++import android.util.Log;
++
++import java.net.Inet4Address;
++import java.net.InetAddress;
++import java.net.NetworkInterface;
++import java.util.Collections;
++import java.util.List;
++
++/**
++ * Serverless co-op: the game's own Xbox System Link multiplayer over the
++ * runtime's LAN backend (multicast discovery on 239.255.42.99, direct UDP
++ * between peers). Works on one Wi-Fi network or on one phone's hotspot.
++ */
++final class CoopLan {
++    private static final String TAG = "CoopLan";
++
++    private CoopLan() {}
++
++    /** Tells the runtime which IPv4 address is the LAN one (REX_LAN_IPV4). */
++    static void prepare(Context context) {
++        String address = hotspotOrWifiAddress(context);
++        if (address != null) {
++            LibertyActivity.setenv("REX_LAN_IPV4", address);
++            Log.i(TAG, "LAN address " + address);
++        }
++    }
++
++    static WifiManager.MulticastLock acquireMulticastLock(Context context) {
++        try {
++            WifiManager wifi = (WifiManager) context.getApplicationContext()
++                    .getSystemService(Context.WIFI_SERVICE);
++            if (wifi == null) return null;
++            WifiManager.MulticastLock lock = wifi.createMulticastLock("gta4-coop");
++            lock.setReferenceCounted(false);
++            lock.acquire();
++            return lock;
++        } catch (RuntimeException e) {
++            Log.w(TAG, "multicast lock unavailable", e);
++            return null;
++        }
++    }
++
++    /** LAN backend and a player name unless args.txt already chooses them. */
++    static void addArguments(List<String> arguments) {
++        boolean backend = false, name = false;
++        for (String argument : arguments) {
++            if (argument.startsWith("--gta4_multiplayer_backend")) backend = true;
++            if (argument.startsWith("--gta4_player_name")) name = true;
++        }
++        if (!backend) arguments.add("--gta4_multiplayer_backend=lan");
++        if (!name) {
++            String model = Build.MODEL == null ? "Player" : Build.MODEL.replaceAll("[^A-Za-z0-9]", "");
++            if (model.isEmpty()) model = "Player";
++            if (model.length() > 12) model = model.substring(0, 12);
++            arguments.add("--gta4_player_name=Nico" + model);
++        }
++    }
++
++    private static String hotspotOrWifiAddress(Context context) {
++        String best = null;
++        int bestRank = -1;
++        try {
++            for (NetworkInterface nif : Collections.list(NetworkInterface.getNetworkInterfaces())) {
++                if (!nif.isUp() || nif.isLoopback()) continue;
++                String n = nif.getName();
++                int rank;
++                if (n.startsWith("ap") || n.startsWith("swlan") || n.startsWith("softap")) rank = 3;
++                else if (n.startsWith("wlan") || n.startsWith("eth")) rank = 2;
++                else if (n.startsWith("p2p")) rank = 1;
++                else continue;
++                for (InetAddress a : Collections.list(nif.getInetAddresses())) {
++                    if (a instanceof Inet4Address && a.isSiteLocalAddress() && rank > bestRank) {
++                        best = a.getHostAddress();
++                        bestRank = rank;
++                    }
++                }
++            }
++        } catch (Exception e) {
++            Log.w(TAG, "interface scan failed", e);
++        }
++        return best;
++    }
++}
+diff --git a/os/android/app/src/main/java/com/libertyrecomp/DeviceProfile.java b/os/android/app/src/main/java/com/libertyrecomp/DeviceProfile.java
+new file mode 100644
+index 0000000..c0a7e19
+--- /dev/null
++++ b/os/android/app/src/main/java/com/libertyrecomp/DeviceProfile.java
+@@ -0,0 +1,25 @@
++package com.libertyrecomp;
++
++import android.os.Build;
++
++import java.util.Locale;
++
++/** Picks the first-launch settings profile from the SoC. */
++final class DeviceProfile {
++    private DeviceProfile() {}
++
++    static boolean isMaliClass() {
++        String soc = "";
++        if (Build.VERSION.SDK_INT >= 31) {
++            soc = (Build.SOC_MANUFACTURER + " " + Build.SOC_MODEL).toLowerCase(Locale.ROOT);
++        }
++        String hw = (Build.HARDWARE + " " + Build.BOARD).toLowerCase(Locale.ROOT);
++        return soc.contains("mediatek") || hw.startsWith("mt") || hw.contains(" mt")
++                || soc.contains("google") || soc.contains("tensor")
++                || hw.contains("exynos") || soc.contains("unisoc") || hw.contains("ums");
++    }
++
++    static String argsAsset() {
++        return isMaliClass() ? "default_args_mali.txt" : "default_args.txt";
++    }
++}
+diff --git a/os/android/app/src/main/java/com/libertyrecomp/LibertyActivity.java b/os/android/app/src/main/java/com/libertyrecomp/LibertyActivity.java
+index a05ae52..edfb1e0 100644
+--- a/os/android/app/src/main/java/com/libertyrecomp/LibertyActivity.java
++++ b/os/android/app/src/main/java/com/libertyrecomp/LibertyActivity.java
+@@ -4,6 +4,7 @@ import android.content.Context;
+ import android.content.Intent;
+ import android.content.pm.PackageInfo;
+ import android.content.res.AssetManager;
++import android.net.wifi.WifiManager;
+ import android.os.Build;
+ import android.os.Bundle;
+ import android.system.ErrnoException;
+@@ -65,6 +66,7 @@ public class LibertyActivity extends SDLActivity {
+     /** driver.txt as found, for the launch report. */
+     private String mDriverText;
+     private File mDataRoot;
++    private WifiManager.MulticastLock mMulticastLock;
+     private static final String LAUNCH_REPORT = "last_launch.txt";
+     /** Intent extra from the launcher's "Play (Debug Log)". */
+     static final String EXTRA_DEBUG_LOG = "debug_log";
+@@ -262,12 +264,20 @@ public class LibertyActivity extends SDLActivity {
+         // Adreno 650. env.txt may override it.
+         setenv("TU_DEBUG", "sysmem");
+         applyEnvironmentFile(new File(dataRoot, "env.txt"));
++        CoopLan.prepare(this);
++        mMulticastLock = CoopLan.acquireMulticastLock(this);
++        try {
++            copyTouchIcons(this, new File(dataRoot, "LibertyRecomp"));
++        } catch (IOException e) {
++            Log.e(TAG, "copying touch icons failed", e);
++        }
+         File argsFile = new File(dataRoot, "args.txt");
+         if (!argsFile.isFile()) {
+-            // First launch: start from the tuned handheld profile bundled in
+-            // the APK; the copy stays editable next to LibertyRecomp/.
++            // First launch: start from the tuned profile bundled in the APK
++            // (Mali / MediaTek phones get the mobile profile); the copy stays
++            // editable next to LibertyRecomp/.
+             try {
+-                copyAssetTree(getAssets(), DEFAULT_ARGS, argsFile);
++                copyAssetTree(getAssets(), DeviceProfile.argsAsset(), argsFile);
+             } catch (IOException e) {
+                 Log.e(TAG, "writing default args failed", e);
+             }
+@@ -298,6 +308,7 @@ public class LibertyActivity extends SDLActivity {
+             arguments.add("--diagnostics_categories=logging");
+         }
+         addInstallSources(new File(dataRoot, "install"), arguments);
++        CoopLan.addArguments(arguments);
+         for (int i = arguments.size() - 1; i >= 0; --i) {
+             String argument = arguments.get(i);
+             if (!argument.startsWith(SURFACE_ARGUMENT)) continue;
+@@ -396,7 +407,20 @@ public class LibertyActivity extends SDLActivity {
+         }
+     }
+ 
+-    private static void setenv(String name, String value) {
++    /** Touch overlay icons: the native overlay reads them from LibertyRecomp/touch-icons. */
++    private static void copyTouchIcons(Context context, File libertyRoot) throws IOException {
++        String[] icons = context.getAssets().list(RESOURCES + "/touch-icons");
++        if (icons == null || icons.length == 0) return;
++        File target = new File(libertyRoot, "touch-icons");
++        if (!target.isDirectory() && !target.mkdirs()) throw new IOException("cannot create " + target);
++        for (String icon : icons) {
++            File out = new File(target, icon);
++            if (out.isFile() && out.length() > 0) continue;
++            copyAssetTree(context.getAssets(), RESOURCES + "/touch-icons/" + icon, out);
++        }
++    }
++
++    static void setenv(String name, String value) {
+         try {
+             Os.setenv(name, value, true);
+         } catch (ErrnoException e) {
+@@ -625,4 +649,10 @@ public class LibertyActivity extends SDLActivity {
+                         | View.SYSTEM_UI_FLAG_FULLSCREEN
+                         | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+     }
++
++    @Override
++    protected void onDestroy() {
++        if (mMulticastLock != null && mMulticastLock.isHeld()) mMulticastLock.release();
++        super.onDestroy();
++    }
+ }
+diff --git a/os/android/app/src/main/res/values/strings.xml b/os/android/app/src/main/res/values/strings.xml
+index a4ab427..7eda193 100644
+--- a/os/android/app/src/main/res/values/strings.xml
++++ b/os/android/app/src/main/res/values/strings.xml
+@@ -1,4 +1,4 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+-    <string name="app_name">Liberty Recompiled</string>
++    <string name="app_name">GTA IV Native</string>
+ </resources>
+diff --git a/os/android/scripts/build_native.sh b/os/android/scripts/build_native.sh
+index b54fc3d..4d12f53 100644
+--- a/os/android/scripts/build_native.sh
++++ b/os/android/scripts/build_native.sh
+@@ -11,8 +11,8 @@ JOBS="${1:-$(( $(nproc) > 3 ? $(nproc) - 2 : 1 ))}"
+ 
+ [ -d "$ANDROID_NDK" ] || { echo "no NDK at $ANDROID_NDK"; exit 1; }
+ 
+-python "$APP_DIR/scripts/materialize_symlinks.py"
+-"$APP_DIR/scripts/setup_host_tools.sh"
++case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) python "$APP_DIR/scripts/materialize_symlinks.py" ;; esac
++case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) "$APP_DIR/scripts/setup_host_tools.sh" ;; esac
+ 
+ # Snapdragon 865 and every Android 10+ arm64 device we target are ARMv8.2:
+ # inline LSE atomics instead of outline-atomic calls, and native ELF TLS
+@@ -33,9 +33,9 @@ if [ ! -f "$BUILD_DIR/build.ninja" ] || ! grep -q -- "-fno-emulated-tls" "$BUILD
+     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+     -DREXGLUE_ENABLE_TRACY=OFF \
+-    -DGTA4_NATIVE_SPIRV_VAL="$(cygpath -m "$ANDROID_NDK/shader-tools/windows-x86_64/spirv-val.exe")" \
+-    -DGTA4_NATIVE_GLSLANG_VALIDATOR="$(cygpath -m "$REPO/out/host-tools/glslang/bin/glslangValidator.exe")" \
+-    -DGTA4_NATIVE_DXC_LIBRARY_PATH="$(cygpath -m "$REPO/out/host-tools/dxc/bin/x64")"
++    -DGTA4_NATIVE_SPIRV_VAL="$(cygpath -m "$ANDROID_NDK/shader-tools/$_host/spirv-val$EXE")" \
++    -DGTA4_NATIVE_GLSLANG_VALIDATOR="$(cygpath -m "$REPO/out/host-tools/glslang/bin/glslangValidator$EXE")" \
++    -DGTA4_NATIVE_DXC_LIBRARY_PATH="$(cygpath -m "$REPO/out/host-tools/dxc/$DXC_SUB")"
+ fi
+ 
+ # Calls between unhooked recompiled functions bypass the weak sub_X aliases so
+@@ -52,7 +52,7 @@ else
+ fi
+ echo "== building with $JOBS jobs"
+ # Every behaviour-changing cvar must be in the hack registry (safe mode).
+-python "$REPO/glue/rexglue-sdk-main/gta4-recomp/tools/check_hack_registry.py" || { echo "!! hack registry check failed"; exit 1; }
++[ -f "$REPO/glue/rexglue-sdk-main/gta4-recomp/tools/check_hack_registry.py" ] && { python "$REPO/glue/rexglue-sdk-main/gta4-recomp/tools/check_hack_registry.py" || exit 1; }
+ cmake --build "$BUILD_DIR" --target LibertyRecomp -- -j"$JOBS" || { echo "!! native build failed"; exit 1; }
+ 
+ echo "== staging libraries"
+@@ -100,5 +100,6 @@ mkdir -p "$RES/button_prompts"
+ cp -r "$REPO/LibertyRecompLib/font_atlases" "$RES/"
+ cp -r "$REPO/LibertyRecompLib/private/button_prompts/." "$RES/button_prompts/"
+ [ -f "$REPO/LibertyRecompLib/aes_key.bin" ] && cp "$REPO/LibertyRecompLib/aes_key.bin" "$RES/"
++mkdir -p "$RES/touch-icons" && cp -r "$APP_DIR/touch-icons/." "$RES/touch-icons/"
+ du -sh "$RES"
+ echo "== done"
+diff --git a/os/android/scripts/env.sh b/os/android/scripts/env.sh
+index f0ca876..7461a67 100644
+--- a/os/android/scripts/env.sh
++++ b/os/android/scripts/env.sh
+@@ -20,6 +20,10 @@ export NDK_VER="${NDK_VER:-29.0.14206865}"
+ export ANDROID_NDK="${ANDROID_NDK:-$ANDROID_HOME/ndk/$NDK_VER}"
+ export JAVA_HOME="${JAVA_HOME:-/c/Program Files/Android/Android Studio/jbr}"
+ 
++if ! command -v cygpath >/dev/null 2>&1; then
++  cygpath() { local a; for a; do :; done; printf '%s\n' "$a"; }
++fi
++if ! command -v python >/dev/null 2>&1; then python() { python3 "$@"; }; fi
+ case "$(uname -s)" in
+   MINGW*|MSYS*|CYGWIN*) _host=windows-x86_64 ;;
+   Darwin)               _host=darwin-x86_64 ;;
+@@ -72,3 +76,7 @@ adbs() {
+ }
+ # Local file arguments for adbs (push/install) in a form adb.exe understands.
+ winpath() { cygpath -m "$1" 2>/dev/null || printf '%s\n' "$1"; }
++case "$_host" in
++  windows-x86_64) export EXE=.exe DXC_SUB=bin/x64 ;;
++  *) export EXE= DXC_SUB=lib ;;
++esac

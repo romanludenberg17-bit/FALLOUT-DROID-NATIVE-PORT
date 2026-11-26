@@ -1,0 +1,33 @@
+Mobile touch pictograms from Game-icons.net
+https://github.com/game-icons/icons
+CC BY 3.0: https://creativecommons.org/licenses/by/3.0/
+
+attack: skoll/fist.svg | https://game-icons.net/ | Skoll
+run_sprint: lorc/run.svg | https://game-icons.net/ | Lorc
+jump_climb: delapouite/jump-across.svg | https://game-icons.net/ | Delapouite
+context: delapouite/car-door.svg | https://game-icons.net/ | Delapouite
+fire: john-colburn/pistol-gun.svg | https://game-icons.net/ | John Colburn
+vehicle_fire: john-colburn/pistol-gun.svg | https://game-icons.net/ | John Colburn
+
+Modifications: removed black square background; rendered white silhouettes to transparent 256px PNG.
+
+Contextual interaction and activity additions:
+interact_use: skoll/open-palm.svg | Skoll | https://github.com/game-icons/icons/blob/master/skoll/open-palm.svg
+interact_food: delapouite/hamburger.svg | Delapouite | https://github.com/game-icons/icons/blob/master/delapouite/hamburger.svg
+interact_drink: delapouite/drinking.svg | Delapouite | https://github.com/game-icons/icons/blob/master/delapouite/drinking.svg
+interact_buy: delapouite/shopping-cart.svg | Delapouite | https://github.com/game-icons/icons/blob/master/delapouite/shopping-cart.svg
+interact_talk: skoll/talk.svg | Skoll | https://github.com/game-icons/icons/blob/master/skoll/talk.svg
+interact_phone: delapouite/phone.svg | Delapouite | https://github.com/game-icons/icons/blob/master/delapouite/phone.svg
+interact_open: delapouite/door.svg | Delapouite | https://github.com/game-icons/icons/blob/master/delapouite/door.svg
+interact_leave: delapouite/door.svg | Delapouite | https://github.com/game-icons/icons/blob/master/delapouite/door.svg
+interact_take: delapouite/hand-grip.svg | Delapouite | https://github.com/game-icons/icons/blob/master/delapouite/hand-grip.svg
+interact_sleep: delapouite/bed.svg | Delapouite | https://github.com/game-icons/icons/blob/master/delapouite/bed.svg
+interact_save: delapouite/save.svg | Delapouite | https://github.com/game-icons/icons/blob/master/delapouite/save.svg
+activity_bowling: delapouite/bowling-strike.svg | Delapouite | https://github.com/game-icons/icons/blob/master/delapouite/bowling-strike.svg
+activity_pool: delapouite/eight-ball.svg | Delapouite | https://github.com/game-icons/icons/blob/master/delapouite/eight-ball.svg
+activity_darts: skoll/bullseye.svg | Skoll | https://github.com/game-icons/icons/blob/master/skoll/bullseye.svg
+handbrake: delapouite/car-wheel.svg | Delapouite | https://github.com/game-icons/icons/blob/master/delapouite/car-wheel.svg
+crouch: delapouite/kneeling.svg | Delapouite | https://github.com/game-icons/icons/blob/master/delapouite/kneeling.svg
+cover: delapouite/kneeling.svg | Delapouite | https://github.com/game-icons/icons/blob/master/delapouite/kneeling.svg
+reload: delapouite/reload-gun-barrel.svg | Delapouite | https://github.com/game-icons/icons/blob/master/delapouite/reload-gun-barrel.svg
+Cover pictogram adaptation: kneeling silhouette with a cover wall. All additions CC BY 3.0.

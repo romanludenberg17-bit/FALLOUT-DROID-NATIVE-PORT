@@ -1,0 +1,25 @@
+name: GTA IV Native APK
+on:
+  workflow_dispatch:
+  push:
+    paths: ['GTAIV-Native/**']
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - name: Free disk
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android/sdk/ndk || true
+      - name: Android SDK / NDK
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;29.0.14206865" "platforms;android-35" "build-tools;35.0.0" > /dev/null
+          pip install 'cmake>=3.31,<4' ninja
+      - name: Build
+        run: ANDROID_HOME=$ANDROID_HOME ./GTAIV-Native/build_linux.sh $RUNNER_TEMP/work
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GTAIV-Native-apk
+          path: ${{ runner.temp }}/work/LibertyRecompAndroid/os/android/app/build/outputs/apk/release/*.apk

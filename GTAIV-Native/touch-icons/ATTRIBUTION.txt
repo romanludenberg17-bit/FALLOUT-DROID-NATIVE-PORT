@@ -1,0 +1,29 @@
+Touch pictograms, v235
+
+Reference-shaped set: editable SVG geometry in tools/build_mobile_touch_icons.py, recreated from the button sheet supplied by the user on 2026-10-24. No source-image background, metallic button or generated raster was included. One transparent white glyph per file; rings and feedback drawn in engine.
+
+Retained Game-icons.net pictograms (CC BY 3.0):
+https://github.com/game-icons/icons
+https://creativecommons.org/licenses/by/3.0/
+interact_buy: delapouite/shopping-cart.svg | Delapouite | https://github.com/game-icons/icons/blob/master/delapouite/shopping-cart.svg
+interact_sleep: delapouite/bed.svg | Delapouite | https://github.com/game-icons/icons/blob/master/delapouite/bed.svg
+interact_save: delapouite/save.svg | Delapouite | https://github.com/game-icons/icons/blob/master/delapouite/save.svg
+activity_bowling: delapouite/bowling-strike.svg | Delapouite | https://github.com/game-icons/icons/blob/master/delapouite/bowling-strike.svg
+activity_pool: delapouite/eight-ball.svg | Delapouite | https://github.com/game-icons/icons/blob/master/delapouite/eight-ball.svg
+activity_darts: skoll/bullseye.svg | Skoll | https://github.com/game-icons/icons/blob/master/skoll/bullseye.svg
+
+The previous v234 attribution is retained in ATTRIBUTION-V234.txt for provenance.
+
+V237 corrections:
+attack: Font Awesome Free 6.7.2 hand-fist; run_sprint: person-running. Fonticons, Inc. CC BY 4.0. https://github.com/FortAwesome/Font-Awesome/tree/6.x/svgs/solid
+See FONT-AWESOME-LICENSE.txt. Modified to white, transparent, padded square viewports.
+jump_climb: Delapouite jump-across, CC BY 3.0, https://game-icons.net/1x1/delapouite/jump-across.html ; black background removed.
+context/interact_leave: car with inward/outward arrow; editable local SVG. Other generated glyphs retain the reference-shaped local geometry.
+
+V237 corrections:
+attack: Font Awesome Free 6.7.2 hand-fist; run_sprint: person-running. Fonticons, Inc. CC BY 4.0. https://github.com/FortAwesome/Font-Awesome/tree/6.x/svgs/solid
+See FONT-AWESOME-LICENSE.txt. Modified to white, transparent, padded square viewports.
+jump_climb: Delapouite jump-across, CC BY 3.0, https://game-icons.net/1x1/delapouite/jump-across.html ; black background removed.
+context/interact_leave: car with inward/outward arrow; editable local SVG. Other generated glyphs retain the reference-shaped local geometry.
+
+V238 jump_climb adaptation: removed ravine platforms and centered the jumping silhouette. Weapon selector uses the dedicated cycle glyph instead of the procedural unarmed fallback.
