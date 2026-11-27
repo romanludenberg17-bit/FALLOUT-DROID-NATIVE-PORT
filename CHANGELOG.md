@@ -1,5 +1,14 @@
 # Fallout Droid Native — CHANGELOG
 
+## 2.0.0-alpha54 (353)
+- Huawei Maleoon (Kirin 9000S, Maleoon 910): meshes prepared on the CPU, as on Adreno 8xx.
+  A tester's report (alpha49, HUAWEI ADY-LX9) shows Fallout 3 ending with SIGSEGV about a
+  second after the main menu's first frame, six runs in a row, with Bevy's GPU preparation and
+  culling on: the place and way the Adreno 8xx lost the device before alpha47. Not yet seen
+  running on that phone; `fdgpu` still chooses per phone.
+- GPU family `maleoon` (Huawei's PCI vendor 0x19E5) in the run log and `gpu_family.txt`; it
+  was "other".
+
 ## 2.0.0-alpha53 (352)
 - Textures blinking to other textures or to white, and the white "square" at a shot (both
   games): found in Bevy's CPU mesh-building path, which phones without GPU preprocessing use

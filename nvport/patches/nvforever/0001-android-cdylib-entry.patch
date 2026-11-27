@@ -3465,10 +3465,10 @@ index 9493eaa..cbbeece 100644
              // mask meters the complete screen.
 diff --git a/engine/nvforever/src/gpu_report.rs b/engine/nvforever/src/gpu_report.rs
 new file mode 100644
-index 0000000..9568649
+index 0000000..e601c19
 --- /dev/null
 +++ b/engine/nvforever/src/gpu_report.rs
-@@ -0,0 +1,224 @@
+@@ -0,0 +1,230 @@
 +//! [nvport] What GPU the game runs on, read from the Vulkan device itself (not from the
 +//! phone's maker or chip name), logged once at the start:
 +//!
@@ -3492,6 +3492,7 @@ index 0000000..9568649
 +    Mali,
 +    Xclipse,
 +    PowerVr,
++    Maleoon,
 +    Software,
 +    #[default]
 +    Other,
@@ -3504,6 +3505,7 @@ index 0000000..9568649
 +            Family::Mali => "mali",
 +            Family::Xclipse => "xclipse",
 +            Family::PowerVr => "powervr",
++            Family::Maleoon => "maleoon",
 +            Family::Software => "software",
 +            Family::Other => "other",
 +        }
@@ -3521,11 +3523,14 @@ index 0000000..9568649
 +        0x13B5 => Family::Mali,
 +        0x144D => Family::Xclipse,
 +        0x1010 => Family::PowerVr,
++        // Huawei (Kirin 9000S and later: Maleoon).
++        0x19E5 => Family::Maleoon,
 +        0x1AE0 => Family::Software,
 +        // Some drivers report no PCI vendor: then only an unambiguous name decides.
 +        _ if n.contains("adreno") => Family::Adreno,
 +        _ if n.starts_with("mali") || n.contains("immortalis") => Family::Mali,
 +        _ if n.contains("xclipse") => Family::Xclipse,
++        _ if n.contains("maleoon") => Family::Maleoon,
 +        _ if n.contains("powervr") || n.starts_with("img ") => Family::PowerVr,
 +        _ if n.contains("swiftshader") || n.contains("llvmpipe") => Family::Software,
 +        _ => Family::Other,
@@ -3691,6 +3696,7 @@ index 0000000..9568649
 +        assert_eq!(family_of(0x10DE, "NVIDIA GeForce"), Family::Other);
 +        assert_eq!(family_of(0, "Maleficent GPU"), Family::Other);
 +        assert_eq!(family_of(0, "Immortalis-G720"), Family::Mali);
++        assert_eq!(family_of(0x19E5, "Maleoon 910"), Family::Maleoon);
 +    }
 +}
 diff --git a/engine/nvforever/src/graphics.rs b/engine/nvforever/src/graphics.rs
@@ -5403,7 +5409,7 @@ index 7566f48..c5c142e 100644
      let source = view_target.main_texture_view();
  
 diff --git a/engine/vendor/bevy_render/src/batching/gpu_preprocessing.rs b/engine/vendor/bevy_render/src/batching/gpu_preprocessing.rs
-index fba76a2..c0b96ba 100644
+index fba76a2..7e2368e 100644
 --- a/engine/vendor/bevy_render/src/batching/gpu_preprocessing.rs
 +++ b/engine/vendor/bevy_render/src/batching/gpu_preprocessing.rs
 @@ -1542,6 +1542,14 @@ where
@@ -5421,7 +5427,7 @@ index fba76a2..c0b96ba 100644
  impl FromWorld for GpuPreprocessingSupport {
      fn from_world(world: &mut World) -> Self {
          let adapter = world.resource::<RenderAdapter>();
-@@ -1580,6 +1588,27 @@ impl FromWorld for GpuPreprocessingSupport {
+@@ -1580,6 +1588,33 @@ impl FromWorld for GpuPreprocessingSupport {
  
          let adapter_info = RenderAdapterInfo::new(adapter.get_info());
  
@@ -5435,6 +5441,7 @@ index fba76a2..c0b96ba 100644
 +        // goes with it, the GPU path on that driver is the cause.
 +        let asked = std::env::var("NVPORT_GPU_PREPROCESS").unwrap_or_default();
 +        let adreno8 = crate::get_adreno_model(&adapter_info).is_some_and(|m| (800..900).contains(&m));
++        let maleoon = adapter_info.vendor == 0x19E5 || adapter_info.name.to_ascii_lowercase().contains("maleoon");
 +        let forced = match asked.trim() {
 +            "none" => Some(GpuPreprocessingMode::None),
 +            "preprocess" => Some(GpuPreprocessingMode::PreprocessingOnly),
@@ -5443,13 +5450,18 @@ index fba76a2..c0b96ba 100644
 +            // menu (alpha8-46 lost it every time on Snapdragon 8 Gen 5); alpha50's GPU
 +            // preparation without culling is not proven there: the CPU path again.
 +            _ if adreno8 && cfg!(target_os = "android") => Some(GpuPreprocessingMode::None),
++            // Huawei Maleoon (Kirin 9000S's Maleoon 910, Vulkan 1.2, 4 device extensions): a
++            // tester's report (alpha49) shows Fallout 3 ending with SIGSEGV about a second after
++            // the main menu's first frame, six runs in a row, with Bevy's GPU preparation and
++            // culling on, the same place and way the Adreno 8xx lost the device before alpha47.
++            _ if maleoon && cfg!(target_os = "android") => Some(GpuPreprocessingMode::None),
 +            _ => None,
 +        };
 +
          let max_supported_mode = if device.limits().max_compute_workgroup_size_x == 0
              || is_non_supported_android_device(&adapter_info)
              || adapter_info.backend == wgpu::Backend::Gl
-@@ -1598,6 +1627,24 @@ impl FromWorld for GpuPreprocessingSupport {
+@@ -1598,6 +1633,24 @@ impl FromWorld for GpuPreprocessingSupport {
              info_once!("GPU preprocessing is fully supported on this device.");
              GpuPreprocessingMode::Culling
          };
