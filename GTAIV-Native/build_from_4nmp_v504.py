@@ -11,8 +11,8 @@ import hashlib, os, struct, sys, zipfile, zlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_from_4nmp as base
 
-base.VERSION_CODE = 624
-base.VERSION_NAME = "1.2.4-v504"
+base.VERSION_CODE = 625
+base.VERSION_NAME = "1.2.5-v504"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 def patch_dex(dex):
@@ -76,7 +76,7 @@ def main():
             zout.writestr(zipfile.ZipInfo(n, item.date_time), data,
                           zipfile.ZIP_STORED if store else zipfile.ZIP_DEFLATED)
         zout.write(libq, "lib/arm64-v8a/libq.so")
-        zout.write(os.path.join(HERE, "saves", "SGTA412"), "assets/Resources/saves/SGTA412")
+        zout.write(os.path.join(HERE, "saves", "SGTA400"), "assets/Resources/saves/SGTA400")
     print("wrote", out)
 
 if __name__ == "__main__":

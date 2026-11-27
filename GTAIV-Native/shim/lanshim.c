@@ -247,7 +247,7 @@ static void undo_installed_save(const char* dir, const char* name) {
   } else if (access(path, F_OK) == 0) {
     // No backup: remove it only if it is exactly the bundled 100% save.
     struct stat st;
-    if (stat(path, &st) == 0 && st.st_size == 707822) {
+    if (stat(path, &st) == 0 && (st.st_size == 707822 || st.st_size == 790528)) {
       unlink(path);
       __android_log_print(ANDROID_LOG_INFO, TAG, "removed installed save %s", path);
     }
@@ -283,16 +283,20 @@ static void install_complete_save(void) {
     if (f) { if (kept) fwrite(kept, 1, kept_len, f); fclose(f); }
   }
   free(kept);
-  const char* name = "SGTA412";
+  // 1.2.2-1.2.4 shipped a raw SGTA412 (no STFS container): undo it everywhere.
+  const char* old_name = "SGTA412";
+  const char* name = "SGTA400";  // Xbox 360 STFS package; the engine rebinds it on import
   // Profile store: 1.2.2 also copied the save here, outside portable-save
   // adoption (the header stays bound to another profile -> endless black
   // screen). Always undo that copy.
   char store[400];
   snprintf(store, sizeof(store), "/storage/emulated/0/Android/data/%s/files/LibertyRecomp/saves", pkg);
-  undo_installed_save(store, name);
+  undo_installed_save(store, old_name);
+  char portable_dir[400];
+  const int have_portable = portable_save_dir(pkg, portable_dir, sizeof(portable_dir));
+  if (have_portable) undo_installed_save(portable_dir, old_name);
   if (restore) {
-    char portable[400];
-    if (portable_save_dir(pkg, portable, sizeof(portable))) undo_installed_save(portable, name);
+    if (have_portable) undo_installed_save(portable_dir, name);
     __android_log_print(ANDROID_LOG_INFO, TAG, "own save restored");
     return;
   }
@@ -315,10 +319,16 @@ static void install_complete_save(void) {
   if (!count) { __android_log_print(ANDROID_LOG_WARN, TAG, "no portable save folder; 100%% save not installed"); return; }
   for (int i = 0; i < count; ++i) {
     mkdirs(targets[i]);
-    char to[500];
+    char to[500], marker[500];
     snprintf(to, sizeof(to), "%s/%s", targets[i], name);
     __android_log_print(ANDROID_LOG_INFO, TAG, "100%% save -> %s: %s", to, copy_file(source, to) ? "ok" : "failed");
+    // Run the engine's portable-save import again so the new package is adopted.
+    snprintf(marker, sizeof(marker), "%s/.portable-imported", targets[i]);
+    unlink(marker);
   }
+  char marker[500];
+  snprintf(marker, sizeof(marker), "%s/.portable-imported", store);
+  unlink(marker);
 }
 
 // Keep LibertyRecomp/touch-icons in step with the icons bundled in this APK
