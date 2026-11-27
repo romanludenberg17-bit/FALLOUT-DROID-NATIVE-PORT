@@ -802,8 +802,19 @@ static void* logcat_thread(void* unused) {
   return NULL;
 }
 
+// The log daemon keeps the previous run's lines (this app's UID may read its
+// own entries, crash buffer included): dump them before this run adds more.
+static void dump_previous_logcat(void) {
+  char path[300], cmd[400];
+  snprintf(path, sizeof(path), "%s/logcat-lastrun.txt", kDiagRoot);
+  snprintf(cmd, sizeof(cmd), "logcat -d -b main,system,crash -v threadtime > '%s' 2>&1", path);
+  int rc = system(cmd);
+  __android_log_print(ANDROID_LOG_INFO, TAG, "logcat dump rc=%d", rc);
+}
+
 static void start_crash_capture(void) {
   mkdirs(kDiagRoot);
+  dump_previous_logcat();
   char a[300], b[300];
   snprintf(a, sizeof(a), "%s/logcat.txt", kDiagRoot);
   snprintf(b, sizeof(b), "%s/logcat-previous.txt", kDiagRoot);
