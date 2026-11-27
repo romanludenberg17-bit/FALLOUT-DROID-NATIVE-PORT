@@ -24,6 +24,10 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <sys/mman.h>
+#include <ucontext.h>
 #include <ctype.h>
 #include <dirent.h>
 #include <android/log.h>
@@ -731,11 +735,101 @@ static void write_diagnostics(const char* pkg) {
   fclose(out);
 }
 
+// ---- Crash capture into Download/GTAIV-Native: logcat of this process
+// (apps may read their own log) and a native fault report.
+static const char kDiagRoot[] = "/storage/emulated/0/Download/GTAIV-Native";
+static int g_crash_fd = -1;
+static struct sigaction g_prev[32];
+
+static void put(int fd, const char* s) { if (fd >= 0) (void)!write(fd, s, strlen(s)); }
+static void put_hex(int fd, uintptr_t v) {
+  char b[19]; b[0] = '0'; b[1] = 'x';
+  for (int i = 0; i < 16; ++i) b[2 + i] = "0123456789abcdef"[(v >> (60 - 4 * i)) & 15];
+  b[18] = 0; put(fd, b);
+}
+static void put_frame(int fd, uintptr_t pc) {
+  Dl_info info;
+  put(fd, "  "); put_hex(fd, pc);
+  if (dladdr((void*)pc, &info) && info.dli_fname) {
+    put(fd, " "); put(fd, info.dli_fname); put(fd, "+"); put_hex(fd, pc - (uintptr_t)info.dli_fbase);
+    if (info.dli_sname) { put(fd, " "); put(fd, info.dli_sname); }
+  }
+  put(fd, "\n");
+}
+
+static void on_fault(int sig, siginfo_t* si, void* uc_) {
+  int fd = g_crash_fd;
+  if (fd >= 0) {
+    ucontext_t* uc = (ucontext_t*)uc_;
+    put(fd, "\n=== native crash: signal ");
+    char n[8]; snprintf(n, sizeof(n), "%d", sig); put(fd, n);
+    put(fd, " fault addr "); put_hex(fd, (uintptr_t)si->si_addr);
+    put(fd, "\npc:\n"); put_frame(fd, uc->uc_mcontext.pc);
+    put(fd, "lr:\n"); put_frame(fd, uc->uc_mcontext.regs[30]);
+    put(fd, "frames:\n");
+    uintptr_t fp = uc->uc_mcontext.regs[29];
+    for (int i = 0; i < 24 && fp && !(fp & 7); ++i) {
+      uintptr_t* f = (uintptr_t*)fp;
+      if (msync((void*)(fp & ~(uintptr_t)4095), 4096, MS_ASYNC) != 0) break;
+      put_frame(fd, f[1]);
+      if (f[0] <= fp) break;
+      fp = f[0];
+    }
+    fsync(fd);
+  }
+  sigaction(sig, &g_prev[sig], NULL);  // chain to the previous handler / default
+  raise(sig);
+}
+
+static void* logcat_thread(void* unused) {
+  (void)unused;
+  char cmd[200];
+  snprintf(cmd, sizeof(cmd), "logcat -v threadtime --pid=%d", getpid());
+  char path[300];
+  snprintf(path, sizeof(path), "%s/logcat.txt", kDiagRoot);
+  FILE* out = fopen(path, "w");
+  FILE* in = popen(cmd, "r");
+  if (!out || !in) { if (out) fclose(out); if (in) pclose(in); return NULL; }
+  char line[1024];
+  long total = 0;
+  while (fgets(line, sizeof(line), in)) {
+    fputs(line, out);
+    fflush(out);
+    if ((total += (long)strlen(line)) > 32L * 1024 * 1024) break;
+  }
+  pclose(in);
+  fclose(out);
+  return NULL;
+}
+
+static void start_crash_capture(void) {
+  mkdirs(kDiagRoot);
+  char a[300], b[300];
+  snprintf(a, sizeof(a), "%s/logcat.txt", kDiagRoot);
+  snprintf(b, sizeof(b), "%s/logcat-previous.txt", kDiagRoot);
+  rename(a, b);
+  snprintf(a, sizeof(a), "%s/crash.txt", kDiagRoot);
+  snprintf(b, sizeof(b), "%s/crash-previous.txt", kDiagRoot);
+  rename(a, b);
+  g_crash_fd = open(a, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  put(g_crash_fd, "GTA IV Native run log (lanshim). Empty below = no native crash caught.\n");
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+  sa.sa_sigaction = on_fault;
+  sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+  sigemptyset(&sa.sa_mask);
+  const int sigs[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGTRAP};
+  for (unsigned i = 0; i < sizeof(sigs) / sizeof(sigs[0]); ++i) sigaction(sigs[i], &sa, &g_prev[sigs[i]]);
+  pthread_t t;
+  if (pthread_create(&t, NULL, logcat_thread, NULL) == 0) pthread_detach(t);
+}
+
 __attribute__((constructor)) static void lanshim_init(void) {
   {
     char pkg[128];
     if (package_name(pkg, sizeof(pkg))) {
       write_diagnostics(pkg);  // first: shows the state left by the previous run
+      start_crash_capture();
       ensure_render_fixes(pkg);
       reset_texture_cache_once(pkg);
     }

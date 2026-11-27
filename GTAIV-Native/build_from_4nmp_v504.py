@@ -12,8 +12,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_from_4nmp as base
 from tools import stfs_extract
 
-base.VERSION_CODE = 628
-base.VERSION_NAME = "1.2.8-v504"
+base.VERSION_CODE = 629
+base.VERSION_NAME = "1.2.9-v504"
+FPS_OVERLAY = False
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 def patch_dex(dex):
@@ -48,7 +49,8 @@ def patch_libmain(so):
     FPS_AT = 0x13496dc
     assert bytes(d[FPS_AT:FPS_AT + 16]) == bytes.fromhex("081740f9a9835ff81f0109eb41060054"), "unexpected SetupOverlays tail"
     assert bytes(d[0x2341154:0x2341158]) == bytes.fromhex("160440f9"), "unexpected debug overlay toggle"
-    d[FPS_AT:FPS_AT + 16] = bytes.fromhex("68f641f9" "680000b5" "602200d1" "92de3f94")
+    if FPS_OVERLAY:  # 1.2.7/1.2.8: crashed at start (frame-stats provider used before the guest runs)
+        d[FPS_AT:FPS_AT + 16] = bytes.fromhex("68f641f9" "680000b5" "602200d1" "92de3f94")
     old = b"\0libz.so\0"
     assert d.count(old) == 1, "libz.so NEEDED string not unique"
     j = d.find(old); d[j:j + len(old)] = b"\0libq.so\0"
