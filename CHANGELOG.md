@@ -1,5 +1,22 @@
 # Fallout Droid Native — CHANGELOG
 
+## 2.0.0-alpha53 (352)
+- Textures blinking to other textures or to white, and the white "square" at a shot (both
+  games): found in Bevy's CPU mesh-building path, which phones without GPU preprocessing use
+  (Adreno 8xx since alpha47, old Adreno, Mali). That path took each mesh's material binding
+  (bind group and slot) at extraction, before the frame's materials were prepared. A material
+  made that frame (a shot's flash, light and impact; every cell streamed in) had no binding
+  yet and got group 0 / slot 0, another material's; a material re-made with new textures had
+  moved to a new slot while its meshes kept the old one, freed or given to another material.
+  For that frame those meshes drew another material's textures or an empty bindless slot's
+  white fallback. The tester's video shows it frame by frame: the white areas at a shot
+  follow the ground, a lamp post and the inside of a wrecked car exactly, and change shape
+  every frame; building fronts switch between two looks frame to frame. The bindings are now
+  read again once the materials are prepared, before the draws are batched, as the GPU path
+  does (`materials: … corrected before drawing` once in the run log when it happens).
+- `fdbindless` removed: it changed only the material allocator, not the bind group layout,
+  so it was no real test (and did not help, the tester's report).
+
 ## 2.0.0-alpha52 (351)
 - No impact decal within 48 units of the camera: a forward decal there lies round the
   camera and covers the whole screen (players' reports: a huge square at a shot).

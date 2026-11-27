@@ -1014,7 +1014,7 @@ index 2ea26c6..bb9eb07 100644
  }
  
 diff --git a/engine/nvf-play/src/console.rs b/engine/nvf-play/src/console.rs
-index 4e8f628..3495b2c 100644
+index 4e8f628..a8817f5 100644
 --- a/engine/nvf-play/src/console.rs
 +++ b/engine/nvf-play/src/console.rs
 @@ -720,6 +720,7 @@ fn typing(
@@ -1025,7 +1025,7 @@ index 4e8f628..3495b2c 100644
                      c.print("Quests and info: sq, sqt, movetoqt [n], sqs <quest>, sqv <quest>, sv, caqs, inv, getavinfo <av>, setgs <setting> <value>, cam, qqq, advlevel (level up), poker [casino] (a poker table)");
                      c.print("Toggles: tcl (collision), tai (actors' AI), tdetect, tgm, tscr (scripts), tg (grass), ts (sky), tws (water), tt (trees), tlv (leaves), ToggleLODLand, ToggleNavmesh, tlik (head tracking), temo (emotions), tcg [radius] (collision shapes)");
                      c.print("bat <file> (console lines from a text file), rbat [file] (record lines for bat), scof [file] (write the console to a file), slpm [1-5] (a practice lock), [ref.]mfg expression|phoneme|modifier <id> <0-100>, mfg reset");
-@@ -777,6 +778,112 @@ fn typing(
+@@ -777,6 +778,97 @@ fn typing(
                  return;
              }
              // `bat <file>`: the file's lines run next, in order, as if typed.
@@ -1108,21 +1108,6 @@ index 4e8f628..3495b2c 100644
 +                    )),
 +                }
 +            }
-+            // [nvport] `fdbindless on|off`: bindless material slabs or one bind group per
-+            // material from the next start (bevy_render material_bind_groups.rs).
-+            "fdbindless" => {
-+                let file = std::env::var_os("NVFOREVER_HOME").map(|h| std::path::PathBuf::from(h).join("bindless.txt"));
-+                match (rest.trim(), file) {
-+                    (m @ ("on" | "off"), Some(f)) => {
-+                        let _ = std::fs::write(&f, m);
-+                        c.print(format!("fdbindless: {m} from the next start"));
-+                    }
-+                    _ => c.print(format!(
-+                        "fdbindless on|off (this run: {})",
-+                        if std::env::var("NVPORT_BINDLESS").is_ok_and(|v| v == "0") { "off" } else { "on" }
-+                    )),
-+                }
-+            }
 +            "fxtest" => {
 +                FX_TEST.store(true, std::sync::atomic::Ordering::Relaxed);
 +                c.print("fxtest: three cards before the camera for 20 s: red opaque (left), green blended (middle), blue added (right)");
@@ -1138,7 +1123,7 @@ index 4e8f628..3495b2c 100644
              "bat" => {
                  batches += 1;
                  let found = if batches > MAX_BATCHES { Err(format!("bat: more than {MAX_BATCHES} batch files on one line")) } else { batch_lines(rest, &batch_roots(data.as_deref())) };
-@@ -1067,6 +1174,12 @@ pub fn place_name(d: &PlayData, cell: u32) -> String {
+@@ -1067,6 +1159,12 @@ pub fn place_name(d: &PlayData, cell: u32) -> String {
  
  /// The player's Extra Console Details tweak: a selected reference's details add its
  /// base's model [design: docs/design/tweaks.md].
@@ -1151,7 +1136,7 @@ index 4e8f628..3495b2c 100644
  static MODEL_DETAILS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
  
  /// Set by the Tweaks tab.
-@@ -1141,6 +1254,57 @@ pub fn describe(id: u32, d: &PlayData, sim: &SimState, rt: Option<&mut Runtime>)
+@@ -1141,6 +1239,57 @@ pub fn describe(id: u32, d: &PlayData, sim: &SimState, rt: Option<&mut Runtime>)
  }
  
  /// Where `coc <cell>` goes: the cell's COC spot (interiors and exterior cells alike).
@@ -5294,6 +5279,86 @@ index b970315..7cb7525 100644
  
  /// Entities given a mesh while the upload limit was on, with the frame they got it.
  #[derive(Resource, Default)]
+diff --git a/engine/vendor/bevy_pbr/src/render/mesh.rs b/engine/vendor/bevy_pbr/src/render/mesh.rs
+index 3589236..299ebbe 100644
+--- a/engine/vendor/bevy_pbr/src/render/mesh.rs
++++ b/engine/vendor/bevy_pbr/src/render/mesh.rs
+@@ -83,7 +83,7 @@ use static_assertions::const_assert_eq;
+ use std::sync::mpsc;
+ #[cfg(feature = "trace")]
+ use tracing::info_span;
+-use tracing::{error, warn};
++use tracing::{error, info, warn};
+ 
+ use self::irradiance_volume::IRRADIANCE_VOLUMES_ARE_USABLE;
+ use crate::{
+@@ -304,8 +304,13 @@ impl Plugin for MeshRenderPlugin {
+                     )
+                     .add_systems(
+                         Render,
+-                        no_gpu_preprocessing::write_batched_instance_buffer::<MeshPipeline>
+-                            .in_set(RenderSystems::PrepareResourcesFlush),
++                        (
++                            no_gpu_preprocessing::write_batched_instance_buffer::<MeshPipeline>
++                                .in_set(RenderSystems::PrepareResourcesFlush),
++                            // NVForever (nvport): see the function.
++                            refresh_material_bindings_for_cpu_building
++                                .in_set(RenderSystems::PrepareMeshes),
++                        ),
+                     );
+             };
+ 
+@@ -1949,6 +1954,50 @@ pub fn extract_meshes_for_cpu_building(
+     }
+ }
+ 
++/// NVForever (nvport): the CPU building path (phones whose GPU preprocessing is off: Adreno
++/// 8xx since alpha47, old Adreno and Mali) takes each mesh's material binding (bind group
++/// and slot) in [`extract_meshes_for_cpu_building`], which runs *before* this frame's
++/// materials are prepared. A material prepared for the first time this frame then had no
++/// binding yet (`unwrap_or_default`: group 0, slot 0, some other material), and a material
++/// re-prepared with new textures had moved to a new slot while its meshes kept the old one,
++/// now freed or given to another material. For that frame the mesh was drawn with another
++/// material's textures, or with an empty bindless slot's white fallback image: textures
++/// blinking to other textures or to white while cells stream in, and white patches on the
++/// ground and walls at a shot (its flash, light and impact materials are prepared that
++/// frame). The GPU building path looks the binding up after the materials are prepared
++/// (`collect_meshes_for_gpu_building`) and has none of this; here the bindings are read
++/// again, likewise, once the materials are prepared and before the batches are built.
++pub fn refresh_material_bindings_for_cpu_building(
++    render_mesh_instances: Res<RenderMeshInstances>,
++    mesh_material_ids: Res<RenderMaterialInstances>,
++    render_material_bindings: Res<RenderMaterialBindings>,
++    mut said: Local<bool>,
++) {
++    let RenderMeshInstances::CpuBuilding(ref render_mesh_instances) = *render_mesh_instances
++    else {
++        return;
++    };
++    let mut changed = 0usize;
++    for (entity, instance) in render_mesh_instances.iter() {
++        let Some(binding) = mesh_material_ids
++            .mesh_material(*entity)
++            .and_then(|material| render_material_bindings.get(&material).copied())
++        else {
++            continue;
++        };
++        if bytemuck::bytes_of(&instance.shared.material_bindings_index()) != bytemuck::bytes_of(&binding) {
++            instance.shared.set_material_bindings_index(binding);
++            changed += 1;
++        }
++    }
++    if changed > 0 && !*said {
++        *said = true;
++        info!(
++            "materials: {changed} mesh(es) had a material binding from before this frame's materials were prepared; corrected before drawing (CPU mesh building)"
++        );
++    }
++}
++
+ /// All the data that we need from a mesh in the main world.
+ type GpuMeshExtractionQuery = (
+     Entity,
 diff --git a/engine/vendor/bevy_pbr/src/render/skin.rs b/engine/vendor/bevy_pbr/src/render/skin.rs
 index c9ab356..9599981 100644
 --- a/engine/vendor/bevy_pbr/src/render/skin.rs
@@ -5409,36 +5474,6 @@ index fba76a2..c0b96ba 100644
  
          GpuPreprocessingSupport { max_supported_mode }
      }
-diff --git a/engine/vendor/bevy_render/src/material_bind_groups.rs b/engine/vendor/bevy_render/src/material_bind_groups.rs
-index d28b4d7..00bb2b7 100644
---- a/engine/vendor/bevy_render/src/material_bind_groups.rs
-+++ b/engine/vendor/bevy_render/src/material_bind_groups.rs
-@@ -2199,8 +2199,23 @@ pub fn material_uses_bindless_resources<M>(render_device: &RenderDevice) -> bool
- where
-     M: AsBindGroup,
- {
--    M::bindless_slot_count().is_some_and(|bindless_slot_count| {
--        M::bindless_supported(render_device) && bindless_slot_count.resolve() > 1
-+    nvport_bindless_allowed()
-+        && M::bindless_slot_count().is_some_and(|bindless_slot_count| {
-+            M::bindless_supported(render_device) && bindless_slot_count.resolve() > 1
-+        })
-+}
-+
-+/// NVForever (nvport): `NVPORT_BINDLESS=0` gives every material its own bind group (Bevy's
-+/// path on devices without binding arrays) instead of the bindless slabs, whose empty slots
-+/// hold the white fallback image: the test for textures drawn white for a moment (far
-+/// buildings, a muzzle flash as a white square) on a phone's driver. The launcher passes it
-+/// from `bindless.txt` (console `fdbindless on|off`); logged once as `materials: …`.
-+fn nvport_bindless_allowed() -> bool {
-+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-+    *ON.get_or_init(|| {
-+        let on = !std::env::var("NVPORT_BINDLESS").is_ok_and(|v| v.trim() == "0");
-+        bevy_log::warn!("materials: {}", if on { "bindless where the device allows it" } else { "one bind group each (NVPORT_BINDLESS=0)" });
-+        on
-     })
- }
- 
 diff --git a/engine/vendor/bevy_render/src/render_asset.rs b/engine/vendor/bevy_render/src/render_asset.rs
 index 17628cb..4f44875 100644
 --- a/engine/vendor/bevy_render/src/render_asset.rs
