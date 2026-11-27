@@ -28,6 +28,7 @@
 #include <signal.h>
 #include <sys/mman.h>
 #include <ucontext.h>
+#include <time.h>
 #include <ctype.h>
 #include <dirent.h>
 #include <android/log.h>
@@ -496,13 +497,36 @@ static void remove_complete_save(const char* portable_dir, const char* name) {
   closedir(d);
 }
 
+static int g_args_fresh;
+
 static void install_complete_save(void) {
   char pkg[128];
   if (!package_name(pkg, sizeof(pkg))) return;
   char args[300];
   snprintf(args, sizeof(args), "/storage/emulated/0/Android/data/%s/files/args.txt", pkg);
+  // Co-op starts append "--gta4_multiplayer_backend=lan" + player name to
+  // args.txt and never remove them: every later start then booted in network
+  // mode and hung on a black screen. Keep them only for the start that has
+  // just written them (args.txt modified seconds ago).
+  const int fresh = g_args_fresh;  // measured before this shim touched args.txt
   FILE* f = fopen(args, "r");
   if (!f) return;
+  char* lines_buf = NULL;
+  size_t lines_len = 0;
+  {
+    char tmp[512];
+    size_t cap2 = 0;
+    while (fgets(tmp, sizeof(tmp), f)) {
+      size_t l = strlen(tmp);
+      if (lines_len + l + 1 > cap2) { cap2 = (cap2 + l + 1) * 2; lines_buf = realloc(lines_buf, cap2); if (!lines_buf) { fclose(f); return; } }
+      memcpy(lines_buf + lines_len, tmp, l); lines_len += l; lines_buf[lines_len] = 0;
+    }
+  }
+  fclose(f);
+  const int wants_save = lines_buf && (strstr(lines_buf, "--gta4_complete_save=1") || strstr(lines_buf, "--gta4_restore_save=1"));
+  const int keep_network = fresh && !wants_save;
+  f = fmemopen(lines_buf ? lines_buf : (char*)"", lines_len, "r");
+  if (!f) { free(lines_buf); return; }
   char* kept = NULL;
   size_t kept_len = 0, cap = 0;
   int requested = 0, stripped = 0, restore = 0;
@@ -515,11 +539,16 @@ static void install_complete_save(void) {
         !strncmp(line, "--gta4_native_mobile_opaque_depth=false", 39) ||
         !strncmp(line, "# Vehicle badges / decals drew a black box", 42) ||
         !strncmp(line, "--gta4_skip_intro=true", 22)) { stripped = 1; continue; }
+    if (!keep_network && (!strncmp(line, "--gta4_multiplayer_backend=", 27) || !strncmp(line, "--gta4_player_name=", 19) ||
+                          !strncmp(line, "--gta4_lan_ipv4=", 16) || !strncmp(line, "#-gta4_skip_intro=true", 22) ||
+                          !strncmp(line, "# LAN co-op (serverless)", 24))) { stripped = 1; continue; }
     size_t l = strlen(line);
     if (kept_len + l + 1 > cap) { cap = (cap + l + 1) * 2; kept = realloc(kept, cap); if (!kept) { fclose(f); return; } }
     memcpy(kept + kept_len, line, l); kept_len += l; kept[kept_len] = 0;
   }
   fclose(f);
+  free(lines_buf);
+  __android_log_print(ANDROID_LOG_INFO, TAG, "args: network mode %s", keep_network ? "kept (co-op start)" : "off");
   if (requested || stripped || restore) {
     f = fopen(args, "w");  // one shot: drop the request line (and stale lines)
     if (f) { if (kept) fwrite(kept, 1, kept_len, f); fclose(f); }
@@ -839,6 +868,10 @@ __attribute__((constructor)) static void lanshim_init(void) {
   {
     char pkg[128];
     if (package_name(pkg, sizeof(pkg))) {
+      char args[300];
+      snprintf(args, sizeof(args), "/storage/emulated/0/Android/data/%s/files/args.txt", pkg);
+      struct stat ast;
+      g_args_fresh = stat(args, &ast) == 0 && time(NULL) - ast.st_mtime < 90;
       write_diagnostics(pkg);  // first: shows the state left by the previous run
       start_crash_capture();
       ensure_render_fixes(pkg);
