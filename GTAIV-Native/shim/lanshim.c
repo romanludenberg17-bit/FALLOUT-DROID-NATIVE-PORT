@@ -466,6 +466,51 @@ static void write_diagnostics(const char* pkg) {
   fclose(out);
 }
 
+// ---- Play time: <files>/playtime.txt holds the total seconds played. Every
+// 30 s the tick counts if this process used real CPU time (a running game
+// uses seconds of CPU per tick; paused in the background it uses almost none).
+static char g_playtime_path[300];
+
+static double process_cpu_seconds(void) {
+  FILE* f = fopen("/proc/self/stat", "r");
+  if (!f) return -1;
+  char buf[1024];
+  size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+  fclose(f);
+  buf[n] = 0;
+  char* p = strrchr(buf, ')');  // comm may contain spaces
+  if (!p) return -1;
+  unsigned long utime = 0, stime = 0;
+  // fields after ")": state(3) ... utime(14) stime(15)
+  if (sscanf(p + 2, "%*c %*d %*d %*d %*d %*d %*u %*u %*u %*u %*u %lu %lu", &utime, &stime) != 2) return -1;
+  long hz = sysconf(_SC_CLK_TCK);
+  return (double)(utime + stime) / (double)(hz > 0 ? hz : 100);
+}
+
+static void* playtime_thread(void* unused) {
+  (void)unused;
+  const int tick = 30;
+  double last = process_cpu_seconds();
+  for (;;) {
+    sleep(tick);
+    double now = process_cpu_seconds();
+    int active = now >= 0 && last >= 0 && now - last > 3.0;
+    last = now;
+    if (!active) continue;
+    long long total = 0;
+    FILE* f = fopen(g_playtime_path, "r");
+    if (f) { if (fscanf(f, "%lld", &total) != 1) total = 0; fclose(f); }
+    total += tick;
+    char tmp[320];
+    snprintf(tmp, sizeof(tmp), "%s.tmp", g_playtime_path);
+    f = fopen(tmp, "w");
+    if (!f) continue;
+    fprintf(f, "%lld\n", total);
+    if (fclose(f) == 0) rename(tmp, g_playtime_path);
+  }
+  return NULL;
+}
+
 __attribute__((constructor)) static void lanshim_init(void) {
   char pkg[128];
   if (package_name(pkg, sizeof(pkg))) {
@@ -478,6 +523,9 @@ __attribute__((constructor)) static void lanshim_init(void) {
     repair_args(pkg);
     char save[400];
     if (portable_save_dir(pkg, save, sizeof(save))) remove_complete_save_once(save);
+    snprintf(g_playtime_path, sizeof(g_playtime_path), "/storage/emulated/0/Android/data/%s/files/playtime.txt", pkg);
+    pthread_t pt;
+    if (pthread_create(&pt, NULL, playtime_thread, NULL) == 0) pthread_detach(pt);
   }
   sync_touch_icons();
   reset_foreign_touch_layout();

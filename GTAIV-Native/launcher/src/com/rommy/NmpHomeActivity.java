@@ -241,6 +241,13 @@ public class NmpHomeActivity extends NmpLauncherActivity {
     } catch (Throwable ignored) { }
     j.append("\"thermal\":").append(thermal).append(',');
     j.append("\"mode\":").append(q(currentMode())).append(',');
+    long played = 0;
+    try {
+      File pt = getExternalFilesDir(null) == null ? null : new File(getExternalFilesDir(null), "playtime.txt");
+      if (pt != null && pt.isFile())
+        played = Long.parseLong(new String(readAll(new FileInputStream(pt)), StandardCharsets.UTF_8).trim());
+    } catch (Throwable ignored) { }
+    j.append("\"playtime\":").append(played).append(',');
     String game = null;
     try { game = getSharedPreferences("cache_location", MODE_PRIVATE).getString("game", null); } catch (Throwable ignored) { }
     j.append("\"ready\":").append(game != null).append(',');

@@ -12,8 +12,8 @@ import glob, hashlib, os, shutil, struct, subprocess, sys, tempfile, zipfile, zl
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_from_4nmp as base
 
-base.VERSION_CODE = 634
-base.VERSION_NAME = "1.3.4"
+base.VERSION_CODE = 635
+base.VERSION_NAME = "1.3.5"
 base.LABEL = "4NMP"  # the project's name
 HERE = os.path.dirname(os.path.abspath(__file__))
 
