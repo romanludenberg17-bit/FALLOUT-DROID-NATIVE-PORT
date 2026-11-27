@@ -22,8 +22,8 @@ import zipfile
 import zlib
 
 PACKAGE = "com.rommy.gtaiv"
-VERSION_CODE = 611          # above the 4NMP shell's 502 so updates always replace it
-VERSION_NAME = "1.1.1-native"
+VERSION_CODE = 612          # above the 4NMP shell's 502 so updates always replace it
+VERSION_NAME = "1.1.2-native"
 LABEL = "GTA IV Native"
 EXTRA_PERMISSIONS = ["android.permission.ACCESS_WIFI_STATE",
                      "android.permission.CHANGE_WIFI_MULTICAST_STATE"]

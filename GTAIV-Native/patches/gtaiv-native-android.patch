@@ -432,6 +432,40 @@ index 68d694b..669b513 100644
    text_chat_dialog_ = std::make_unique<gta4::input::TextChatDialog>(
        drawer, [this](bool captured) {
          SetTitleInputCaptured(captured);
+diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/gta4_aspect_hooks.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/gta4_aspect_hooks.cpp
+index 2e8c1f8..719c07a 100644
+--- a/glue/rexglue-sdk-main/gta4-recomp/src/gta4_aspect_hooks.cpp
++++ b/glue/rexglue-sdk-main/gta4-recomp/src/gta4_aspect_hooks.cpp
+@@ -11,6 +11,7 @@
+ #include <unordered_map>
+ 
+ #include <rex/cvar.h>
++#include <rex/input/input.h>
+ #include <rex/diagnostics/policy.h>
+ #include <rex/input/absolute_pointer.h>
+ #include <rex/runtime.h>
+@@ -560,6 +561,9 @@ extern "C" void sub_828BDAD8(PPCContext& ctx, uint8_t* base) {
+     Write(base, viewport + 696, authored);
+   phone_projection_build = previous_phone;
+ }
++REXCVAR_DEFINE_DOUBLE(gta4_touch_phone_shift, 0.20, "GTA IV/Input/Touch",
++                      "Moves the in-game phone left by this share of the screen while touch controls are on")
++    .range(0.0, 0.6);
+ extern "C" void sub_828BD1D8(PPCContext& ctx, uint8_t* base) {
+   using namespace gta4::aspect;
+   const uint32_t viewport = ctx.r3.u32;
+@@ -567,7 +571,10 @@ extern "C" void sub_828BD1D8(PPCContext& ctx, uint8_t* base) {
+     std::array<float, 16> matrix;
+     for (size_t i = 0; i < matrix.size(); ++i)
+       matrix[i] = Float(base, viewport + 448 + uint32_t(i) * 4);
+-    TransformProjection(matrix, Layout(Output().output, {1, 1}));
++    auto layout = Layout(Output().output, {1, 1});
++    // Touch controls own the bottom-right corner: move the phone left of them.
++    if (rex::input::TouchControlsActive()) layout.ox -= REXCVAR_GET(gta4_touch_phone_shift);
++    TransformProjection(matrix, layout);
+     for (size_t i = 0; i < matrix.size(); ++i)
+       Float(base, viewport + 448 + uint32_t(i) * 4, matrix[i]);
+   }
 diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/gta4_frontend_hooks.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/gta4_frontend_hooks.cpp
 index b63d73e..56b9be5 100644
 --- a/glue/rexglue-sdk-main/gta4-recomp/src/gta4_frontend_hooks.cpp
@@ -673,7 +707,7 @@ index b63d73e..56b9be5 100644
      if (!rex::input::sony::SetFeaturesEnabled(choice.value == "true")) {
        REXLOG_ERROR("GTA IV controller features: rejected enabled={}", choice.value);
 diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.cpp
-index 5f3e537..5536bf6 100644
+index 5f3e537..54058b9 100644
 --- a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.cpp
 +++ b/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.cpp
 @@ -31,6 +31,12 @@
@@ -709,14 +743,41 @@ index 5f3e537..5536bf6 100644
    g_runtime.completed_zoom = 0.0;
    g_runtime.zoom = 0;
    g_runtime.weapon_wheel_open = false;
-@@ -480,6 +492,31 @@ ContextTouchViewport ReadViewport() {
+@@ -480,6 +492,58 @@ ContextTouchViewport ReadViewport() {
    };
  }
  
 +// Cutscene skip: gameplay controls are hidden during cutscenes, so a single
 +// GTA-style SKIP button sends the title's skip input (A) for a short pulse.
 +std::atomic<uint64_t> g_skip_until_ns{0};
++std::atomic<uint16_t> g_pulse_buttons{0};
 +constexpr uint64_t kSkipPulseNanoseconds = 180'000'000;
++// Modal prompts (save / overwrite questions, "press A to continue"): the
++// gameplay overlay is hidden there, so a GTA-style YES / NO pair appears once
++// such a screen has lasted a moment.
++std::atomic<uint64_t> g_modal_since_ns{0};
++constexpr uint64_t kModalDelayNanoseconds = 700'000'000;
++
++void Pulse(uint16_t buttons) {
++  g_pulse_buttons.store(buttons);
++  g_skip_until_ns.store(MonotonicNanoseconds() + kSkipPulseNanoseconds);
++}
++
++ContextTouchControl ModalButton(const ContextTouchViewport& v, bool accept) {
++  ContextTouchControl c;
++  const float edge = std::min(v.safe_width, v.safe_height);
++  c.kind = ContextTouchControlKind::kButton;
++  c.action = TouchAction::kMore;
++  c.radius = std::max(edge * 0.085f, 24.0f);
++  const float gap = edge * 0.05f;
++  c.center_x = v.safe_x + v.safe_width - gap - c.radius - (accept ? c.radius * 2.0f + gap : 0.0f);
++  c.center_y = v.safe_y + v.safe_height - gap - c.radius;
++  c.minimum_x = c.center_x - c.radius * 1.2f; c.maximum_x = c.center_x + c.radius * 1.2f;
++  c.minimum_y = c.center_y - c.radius * 1.2f; c.maximum_y = c.center_y + c.radius * 1.2f;
++  std::snprintf(c.label.data(), c.label.size(), accept ? "YES" : "NO");
++  std::snprintf(c.icon_id.data(), c.icon_id.size(), accept ? "menu_accept" : "menu_back");
++  return c;
++}
 +
 +bool CutsceneSkipAvailable(const TouchContextSnapshot& context) {
 +  return context.valid && context.cutscene && !context.loading && !context.frontend && !context.map;
@@ -741,7 +802,7 @@ index 5f3e537..5536bf6 100644
  void RecalculateAxesLocked() {
    g_runtime.movement_x = g_runtime.movement_y = 0;
    g_runtime.right_x = g_runtime.right_y = 0;
-@@ -915,6 +952,20 @@ bool OnPointerEvent(const rex::input::AbsolutePointerEvent& event, PPCContext&,
+@@ -915,6 +979,35 @@ bool OnPointerEvent(const rex::input::AbsolutePointerEvent& event, PPCContext&,
        (!rex::input::TouchControlsActive() && !ContextTouchEditorOpen())) return false;
    std::lock_guard lock(g_runtime.mutex);
    if (g_runtime.epoch != epoch || g_runtime.frozen_epoch == epoch) return false;
@@ -755,14 +816,29 @@ index 5f3e537..5536bf6 100644
 +      const auto skip = CutsceneSkipButton(viewport);
 +      if (!viewport.valid || x < skip.minimum_x || x > skip.maximum_x || y < skip.minimum_y ||
 +          y > skip.maximum_y) return false;
-+      g_skip_until_ns.store(MonotonicNanoseconds() + kSkipPulseNanoseconds);
++      Pulse(rex::input::X_INPUT_GAMEPAD_A);
 +      return true;
++    }
++    const uint64_t since = g_modal_since_ns.load();
++    if (since && MonotonicNanoseconds() - since >= kModalDelayNanoseconds) {
++      if (event.phase != rex::input::AbsolutePointerPhase::kDown) return false;
++      const auto viewport = ReadViewport();
++      const float x = viewport.host_space ? event.logical_x : event.x;
++      const float y = viewport.host_space ? event.logical_y : event.y;
++      for (const bool accept : {true, false}) {
++        const auto b = ModalButton(viewport, accept);
++        if (viewport.valid && x >= b.minimum_x && x <= b.maximum_x && y >= b.minimum_y && y <= b.maximum_y) {
++          Pulse(accept ? rex::input::X_INPUT_GAMEPAD_A : rex::input::X_INPUT_GAMEPAD_B);
++          return true;
++        }
++      }
++      return false;
 +    }
 +  }
    if (!g_runtime.editing && !GameplayPresentationAdmittedLocked(GetTouchContextSnapshot())) {
      if (!g_runtime.editor_session) HideGameplayLocked();
      return false;
-@@ -1154,6 +1205,21 @@ void FreezeLocked(uint64_t epoch) {
+@@ -1154,6 +1247,21 @@ void FreezeLocked(uint64_t epoch) {
      dx += std::exchange(owner.look_dx, 0.0);
      dy += std::exchange(owner.look_dy, 0.0);
    }
@@ -784,7 +860,7 @@ index 5f3e537..5536bf6 100644
    const double sensitivity = CameraSensitivityLocked();
    if (g_runtime.preferences.invert_camera_y) dy = -dy;
    g_runtime.look_x = g_runtime.look_quantizer_x.Quantize(dx, sensitivity, kLookUnitsPerPixel,
-@@ -1278,6 +1344,13 @@ void OnControlReplay(PPCContext&, uint8_t* base, uint32_t control, uint32_t, uin
+@@ -1278,6 +1386,13 @@ void OnControlReplay(PPCContext&, uint8_t* base, uint32_t control, uint32_t, uin
      changed |= MergeAxis(base, control, Action::kVehicleGunUp, Action::kVehicleGunDown, g_runtime.look_y);
      changed |= MergeAxis(base, control, Action::kVehicleLookLeft, Action::kVehicleLookRight, g_runtime.look_x);
    }
@@ -798,21 +874,44 @@ index 5f3e537..5536bf6 100644
    if (changed) StoreU32(base, control + kLastInputTimeOffset, LoadU32(base, kGameInputTimeAddress));
  }
  
-@@ -1291,6 +1364,10 @@ bool NativePadProvider(uint32_t user, rex::input::X_INPUT_GAMEPAD* output) noexc
+@@ -1291,6 +1406,10 @@ bool NativePadProvider(uint32_t user, rex::input::X_INPUT_GAMEPAD* output) noexc
    if (!g_runtime.initialized || !g_runtime.context.valid || !g_runtime.context.input_user_known ||
        user != g_runtime.context.input_user) return false;
    *output = {};
 +  if (!owned && active && MonotonicNanoseconds() < g_skip_until_ns.load()) {
-+    output->buttons = rex::input::X_INPUT_GAMEPAD_A;
++    output->buttons = g_pulse_buttons.load();
 +    return true;
 +  }
    if (owned || !active || !pad.active || pad.epoch != g_runtime.epoch ||
        !GameplayPresentationAdmittedLocked(GetTouchContextSnapshot())) return true;
    output->buttons = pad.buttons;
-@@ -1565,6 +1642,19 @@ ContextTouchOverlaySnapshot GetContextTouchDrawableOverlaySnapshot(uint64_t mono
+@@ -1565,6 +1684,42 @@ ContextTouchOverlaySnapshot GetContextTouchDrawableOverlaySnapshot(uint64_t mono
                           g_runtime.context.frontend || g_runtime.context.map;
    const bool editor_drawable = g_runtime.editor_session &&
        (g_runtime.editing || (g_runtime.editor_closing && g_runtime.last_drawable.editor));
++  {
++    const bool modal = !g_runtime.editor_session && context.valid && !context.cutscene &&
++                       !context.frontend && !context.map && !GameplayPresentationAdmittedLocked(context);
++    if (!modal) g_modal_since_ns.store(0);
++    else if (!g_modal_since_ns.load()) g_modal_since_ns.store(monotonic_ns);
++    const uint64_t since = g_modal_since_ns.load();
++    if (modal && since && monotonic_ns - since >= kModalDelayNanoseconds && pointer_allowed &&
++        viewport.valid && viewport.focused) {
++      ContextTouchOverlaySnapshot pad;
++      pad.layout.mode = ContextTouchMode::kMinigame;
++      pad.layout.viewport = viewport;
++      pad.layout.opacity = std::clamp(g_runtime.preferences.opacity + 0.15f, 0.4f, 1.0f);
++      pad.layout.controls[0] = ModalButton(viewport, true);
++      pad.layout.controls[1] = ModalButton(viewport, false);
++      pad.layout.control_count = 2;
++      const bool pressed = monotonic_ns < g_skip_until_ns.load();
++      pad.active[0] = pressed && g_pulse_buttons.load() == rex::input::X_INPUT_GAMEPAD_A;
++      pad.active[1] = pressed && g_pulse_buttons.load() == rex::input::X_INPUT_GAMEPAD_B;
++      pad.visible = true;
++      pad.fade_alpha = 1.0f;
++      return pad;
++    }
++  }
 +  if (!editor_drawable && !g_runtime.editor_session && pointer_allowed && viewport.valid &&
 +      viewport.focused && CutsceneSkipAvailable(context)) {
 +    ContextTouchOverlaySnapshot skip;
