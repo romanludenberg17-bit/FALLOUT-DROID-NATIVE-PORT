@@ -221,19 +221,25 @@ static void install_complete_save(void) {
   if (!f) return;
   char* kept = NULL;
   size_t kept_len = 0, cap = 0;
-  int requested = 0;
+  int requested = 0, stripped = 0;
   char line[512];
   while (fgets(line, sizeof(line), f)) {
     if (!strncmp(line, "--gta4_complete_save=", 21)) { requested = line[21] == '1'; continue; }
+    // 1.2.2 tried these for the vehicle badge boxes; they did not help and cost speed.
+    if (!strncmp(line, "--gta4_native_mobile_coverage_free=false", 40) ||
+        !strncmp(line, "--gta4_native_mobile_opaque_depth=false", 39) ||
+        !strncmp(line, "# Vehicle badges / decals drew a black box", 42)) { stripped = 1; continue; }
     size_t l = strlen(line);
     if (kept_len + l + 1 > cap) { cap = (cap + l + 1) * 2; kept = realloc(kept, cap); if (!kept) { fclose(f); return; } }
     memcpy(kept + kept_len, line, l); kept_len += l; kept[kept_len] = 0;
   }
   fclose(f);
-  if (!requested) { free(kept); return; }
-  f = fopen(args, "w");  // one shot: drop the request line
-  if (f) { if (kept) fwrite(kept, 1, kept_len, f); fclose(f); }
+  if (requested || stripped) {
+    f = fopen(args, "w");  // one shot: drop the request line (and stale lines)
+    if (f) { if (kept) fwrite(kept, 1, kept_len, f); fclose(f); }
+  }
   free(kept);
+  if (!requested) return;
 
   const char* name = "SGTA412";
   char source[300] = {0};

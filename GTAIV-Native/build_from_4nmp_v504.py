@@ -11,8 +11,8 @@ import hashlib, os, struct, sys, zipfile, zlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_from_4nmp as base
 
-base.VERSION_CODE = 622
-base.VERSION_NAME = "1.2.2-v504"
+base.VERSION_CODE = 623
+base.VERSION_NAME = "1.2.3-v504"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 def patch_dex(dex):
@@ -25,8 +25,19 @@ def patch_dex(dex):
     struct.pack_into("<I", d, 8, zlib.adler32(bytes(d[12:])) & 0xFFFFFFFF)
     return bytes(d)
 
+# BuildContextTouchLayout's compact(action, label, buttons, trigger, visible=w5, ...)
+# calls: force visible=false for buttons the mobile layout does not need.
+HIDDEN_BUTTONS = {
+    0x1654b60: ("TURBO (qte_turbo)", bytes.fromhex("05010012")),       # and  w5, w8, #0x1
+    0x1654d98: ("ENGINE OFF (engine_off)", bytes.fromhex("e5079f1a")), # cset w5, ne
+}
+MOV_W5_WZR = bytes.fromhex("e5031f2a")
+
 def patch_libmain(so):
     d = bytearray(so)
+    for addr, (what, expected) in HIDDEN_BUTTONS.items():  # .text: file offset == vaddr
+        assert bytes(d[addr:addr + 4]) == expected, f"unexpected code for {what}"
+        d[addr:addr + 4] = MOV_W5_WZR
     old = b"\0libz.so\0"
     assert d.count(old) == 1, "libz.so NEEDED string not unique"
     j = d.find(old); d[j:j + len(old)] = b"\0libq.so\0"
@@ -36,8 +47,7 @@ def patch_args(text):
     # Frame limit belongs to the in-game menu (a line here overrides it on every launch).
     lines = [l for l in text.splitlines() if not l.startswith("--gta4_frame_limit=")]
     extra = ["", "# LAN co-op (serverless)", "--gta4_multiplayer_backend=lan", "--gta4_lan_discovery_port=3076",
-             "# Vehicle badges / decals drew a black box: keep alpha-tested materials on the full shaders",
-             "--gta4_native_mobile_coverage_free=false", "--gta4_native_mobile_opaque_depth=false", ""]
+             ""]
     return "\n".join(lines + extra).encode()
 
 def main():
