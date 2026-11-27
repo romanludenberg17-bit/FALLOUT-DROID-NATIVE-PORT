@@ -143,7 +143,32 @@ static void* take_multicast_lock(void* unused) {
   return NULL;
 }
 
+// One-time: GTA IV Native 1.1.x wrote LibertyRecomp/touch-controls.ini with
+// its own control numbering; the 4NMP engine would misplace its buttons with
+// it. Move it aside once so the 4NMP layout (and the user's later edits) apply.
+static void reset_foreign_touch_layout(void) {
+  char cmd[128] = {0};
+  FILE* f = fopen("/proc/self/cmdline", "r");
+  if (!f) return;
+  size_t n = fread(cmd, 1, sizeof(cmd) - 1, f);
+  fclose(f);
+  cmd[n] = 0;
+  char* colon = strchr(cmd, ':');
+  if (colon) *colon = 0;
+  char dir[256], marker[320], ini[320], backup[352];
+  snprintf(dir, sizeof(dir), "/storage/emulated/0/Android/data/%s/files/LibertyRecomp", cmd);
+  snprintf(marker, sizeof(marker), "%s/.v504-controls", dir);
+  if (access(marker, F_OK) == 0) return;
+  snprintf(ini, sizeof(ini), "%s/touch-controls.ini", dir);
+  snprintf(backup, sizeof(backup), "%s/touch-controls.ini.gta3-layout", dir);
+  if (access(ini, F_OK) == 0 && rename(ini, backup) == 0)
+    __android_log_print(ANDROID_LOG_INFO, TAG, "old touch layout moved to %s", backup);
+  FILE* m = fopen(marker, "w");
+  if (m) fclose(m);
+}
+
 __attribute__((constructor)) static void lanshim_init(void) {
+  reset_foreign_touch_layout();
   pthread_t t;
   if (pthread_create(&t, NULL, take_multicast_lock, NULL) == 0) pthread_detach(t);
 }

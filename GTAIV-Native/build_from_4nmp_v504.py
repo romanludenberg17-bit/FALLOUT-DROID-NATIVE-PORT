@@ -11,8 +11,8 @@ import hashlib, os, struct, sys, zipfile, zlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_from_4nmp as base
 
-base.VERSION_CODE = 620
-base.VERSION_NAME = "1.2.0-v504"
+base.VERSION_CODE = 621
+base.VERSION_NAME = "1.2.1-v504"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 def patch_dex(dex):
