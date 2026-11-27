@@ -4,23 +4,21 @@
     libmain.so's DT_NEEDED "libz.so" is renamed "libq.so" (libq depends on libz)
   - working MP / co-op hub (shell/nmp_mp_hub.html), bridge -> UDP 3076
   - package com.rommy.gtaiv, label, Wi-Fi multicast permissions, version
-  - LAN backend + discovery port 3076 added to the launcher's profiles
+  - LAN discovery port 3076 + a thermal / FPS mini patch in the launcher's profiles
 usage: build_from_4nmp_v504.py <4NMP-v504.apk> <libq.so> <out unsigned.apk>
 """
-import hashlib, os, struct, sys, tempfile, zipfile, zlib
+import hashlib, os, struct, sys, zipfile, zlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_from_4nmp as base
-from tools import stfs_extract
 
-base.VERSION_CODE = 632
-base.VERSION_NAME = "1.3.2-v504"
-FPS_OVERLAY = False
+base.VERSION_CODE = 633
+base.VERSION_NAME = "1.3.3-v504"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 def patch_dex(dex):
     d = bytearray(dex)
     for old, new in ((bytes.fromhex("1306020c"), bytes.fromhex("1306040c")),   # bridge -> 3076
-                     (b"nmp_v504_clean", b"nmp_v624_clean"),                  # args.txt reset once
+                     (b"nmp_v504_clean", b"nmp_v633_clean"),                  # args.txt reset once (rollback)
                      # writeCoopArgs: skipping the intro left the game on a black screen
                      # (and the line stayed in args.txt for every later start)
                      (b"\n--gta4_skip_intro=true\n", b"\n#-gta4_skip_intro=true\n")):
@@ -43,36 +41,40 @@ def patch_libmain(so):
     for addr, (what, expected) in HIDDEN_BUTTONS.items():  # .text: file offset == vaddr
         assert bytes(d[addr:addr + 4]) == expected, f"unexpected code for {what}"
         d[addr:addr + 4] = MOV_W5_WZR
-    # FPS overlay: at the end of ReXApp::SetupOverlays (stack-protector check
-    # replaced) show the engine's compact debug overlay ("Guest: N FPS (ms)")
-    # by calling the bind_debug_overlay toggle lambda once, only if not shown yet.
-    FPS_AT = 0x13496dc
-    assert bytes(d[FPS_AT:FPS_AT + 16]) == bytes.fromhex("081740f9a9835ff81f0109eb41060054"), "unexpected SetupOverlays tail"
-    assert bytes(d[0x2341154:0x2341158]) == bytes.fromhex("160440f9"), "unexpected debug overlay toggle"
-    if FPS_OVERLAY:  # 1.2.7/1.2.8: crashed at start (frame-stats provider used before the guest runs)
-        d[FPS_AT:FPS_AT + 16] = bytes.fromhex("68f641f9" "680000b5" "602200d1" "92de3f94")
     old = b"\0libz.so\0"
     assert d.count(old) == 1, "libz.so NEEDED string not unique"
     j = d.find(old); d[j:j + len(old)] = b"\0libq.so\0"
     return bytes(d)
 
-def patch_rexruntime(so):
-    # DebugOverlayDialog::OnDraw: skip the build-string watermark window, keep the FPS line.
-    d = bytearray(so)
-    assert bytes(d[0x45841c:0x458420]) == bytes.fromhex("80edfff0"), "unexpected DebugOverlayDialog::OnDraw"
-    d[0x45841c:0x458420] = bytes.fromhex("34000014")  # b 0x4584ec
-    return bytes(d)
+# Thermal / FPS mini patch for the high-end (Adreno) profile. Only switches the
+# engine already has; the redundancy-elimination ones are those the 4NMP author
+# ships in the Mali / Helio G99 profiles. Rendering quality is unchanged.
+MINI_PATCH = [
+    "# --- GTA IV Native thermal / FPS mini patch ---",
+    "# 60 FPS cap (half of a 120 Hz panel, even pacing): no GPU time burnt above 60.",
+    "--gta4_frame_limit=60",
+    "# Under Android thermal pressure lower the draw distance instead of letting the SoC throttle.",
+    "--android_thermal_guard=true",
+    "# Skip work that does not change the picture.",
+    "--gta4_native_skip_invisible_draws=true",
+    "--gta4_native_dedupe_vertex_bindings=true",
+    "--gta4_native_keep_draw_state=true",
+    "--gta4_native_skip_repeated_clears=true",
+    "--gta4_native_lazy_resolves=true",
+    "--gta4_native_lossless_resolve_optimization=true",
+    "--gta4_native_water_reflection_on_demand=true",
+    "# Environment cube map every 2nd frame (the 4NMP profiles use 3-4).",
+    "--gta4_native_environment_reflection_interval=2",
+]
 
-def patch_args(text):
-    # Frame limit belongs to the in-game menu (a line here overrides it on every launch).
-    lines = [l for l in text.splitlines() if not l.startswith("--gta4_frame_limit=")]
-    # No multiplayer backend here: it put every start in network mode (black
-    # screen). The co-op hub adds it for co-op starts only.
-    extra = ["", "--gta4_lan_discovery_port=3076",
-             "# Transparent decals / mission markers (render fixes)",
-             "--gta4_native_ubo_shared_constants=false", "--gta4_native_gpu_detile=false",
-             "--gta4_native_drop_inert_blending=false", ""]
-    return "\n".join(lines + extra).encode()
+def patch_args(text, name):
+    lines = text.splitlines()
+    extra = ["", "--gta4_lan_discovery_port=3076"]
+    if name == "assets/default_args.txt":  # Adreno; the Mali / G99 profiles are tuned already
+        keys = {l.split("=")[0] for l in MINI_PATCH if l.startswith("--")}
+        lines = [l for l in lines if l.split("=")[0] not in keys]
+        extra += [""] + MINI_PATCH
+    return "\n".join(lines + extra + [""]).encode()
 
 def main():
     src, libq, out = sys.argv[1:4]
@@ -86,25 +88,17 @@ def main():
             elif n == "resources.arsc": data = base.patch_arsc(data)
             elif n == "classes2.dex": data = patch_dex(data)
             elif n == "lib/arm64-v8a/libmain.so": data = patch_libmain(data)
-            elif n == "lib/arm64-v8a/librexruntime.so": data = patch_rexruntime(data)
             elif n.startswith("assets/Resources/touch-icons/") and os.path.isfile(
                     os.path.join(HERE, "touch-icons-v504", os.path.basename(n))):
                 data = open(os.path.join(HERE, "touch-icons-v504", os.path.basename(n)), "rb").read()
             elif n == "assets/nmp_mp_hub.html":
                 data = open(os.path.join(HERE, "shell", "nmp_mp_hub.html"), "rb").read()
             elif n.startswith("assets/default_args") and n.endswith(".txt"):
-                data = patch_args(data.decode())
+                data = patch_args(data.decode(), n)
             store = n == "resources.arsc" or n.endswith((".png", ".jpg", ".mp3", ".zip"))
             zout.writestr(zipfile.ZipInfo(n, item.date_time), data,
                           zipfile.ZIP_STORED if store else zipfile.ZIP_DEFLATED)
         zout.write(libq, "lib/arm64-v8a/libq.so")
-        # The engine's portable saves hold the raw SAVEBLOCK data, not the Xbox
-        # STFS package: bundle the file extracted from the package.
-        with tempfile.TemporaryDirectory() as tmp:
-            stfs_extract.extract(os.path.join(HERE, "saves", "SGTA400"), tmp)
-            raw = open(os.path.join(tmp, "SGTA400"), "rb").read()
-        assert len(raw) == 707822 and raw[12:21] == b"SAVEBLOCK", "unexpected 100% save content"
-        zout.writestr("assets/Resources/saves/SGTA400", raw)
     print("wrote", out)
 
 if __name__ == "__main__":
