@@ -428,10 +428,102 @@ static void reset_texture_cache_once(const char* pkg) {
   if (m) fclose(m);
 }
 
+// ---- Diagnostics in shared storage (Android/data is hidden from file
+// managers on Android 11+): Download/GTAIV-Native/ gets the previous run's
+// logs and crash reports, args.txt, the selected game folder and a listing of
+// the save folder, so they can be sent without adb.
+static void list_tree(FILE* out, const char* dir, int depth) {
+  DIR* d = opendir(dir);
+  if (!d) { fprintf(out, "  [cannot open %s: %s]\n", dir, strerror(errno)); return; }
+  struct dirent* e;
+  while ((e = readdir(d))) {
+    if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+    char path[700];
+    snprintf(path, sizeof(path), "%s/%s", dir, e->d_name);
+    struct stat st;
+    if (stat(path, &st) != 0) continue;
+    fprintf(out, "%*s%s%s %lld\n", 2 + depth * 2, "", e->d_name, S_ISDIR(st.st_mode) ? "/" : "",
+            (long long)st.st_size);
+    if (S_ISDIR(st.st_mode) && depth < 5) list_tree(out, path, depth + 1);
+  }
+  closedir(d);
+}
+
+static void copy_tree(const char* from, const char* to, int depth) {
+  DIR* d = opendir(from);
+  if (!d) return;
+  mkdirs(to);
+  struct dirent* e;
+  while ((e = readdir(d))) {
+    if (e->d_name[0] == '.') continue;
+    char a[700], b[700];
+    snprintf(a, sizeof(a), "%s/%s", from, e->d_name);
+    snprintf(b, sizeof(b), "%s/%s", to, e->d_name);
+    struct stat st;
+    if (stat(a, &st) != 0) continue;
+    if (S_ISDIR(st.st_mode)) { if (depth < 3) copy_tree(a, b, depth + 1); }
+    else if (st.st_size < 64 * 1024 * 1024) copy_file(a, b);
+  }
+  closedir(d);
+}
+
+static void cat_file(FILE* out, const char* title, const char* path) {
+  fprintf(out, "\n== %s (%s)\n", title, path);
+  FILE* f = fopen(path, "r");
+  if (!f) { fprintf(out, "[missing: %s]\n", strerror(errno)); return; }
+  char buf[4096];
+  size_t n;
+  while ((n = fread(buf, 1, sizeof(buf), f)) > 0) fwrite(buf, 1, n, out);
+  fclose(f);
+}
+
+static void write_diagnostics(const char* pkg) {
+  const char* root = "/storage/emulated/0/Download/GTAIV-Native";
+  mkdirs(root);
+  char ext[300], path[700];
+  snprintf(ext, sizeof(ext), "/storage/emulated/0/Android/data/%s/files", pkg);
+  // previous run's logs and crash reports
+  snprintf(path, sizeof(path), "%s/Liberty Recompiled", ext);
+  char dest[400];
+  snprintf(dest, sizeof(dest), "%s/previous-run", root);
+  copy_tree(path, dest, 0);
+  snprintf(path, sizeof(path), "%s/crash_reports", ext);
+  snprintf(dest, sizeof(dest), "%s/previous-run/crash_reports", root);
+  copy_tree(path, dest, 0);
+  char diag[400];
+  snprintf(diag, sizeof(diag), "%s/diag.txt", root);
+  FILE* out = fopen(diag, "w");
+  if (!out) return;
+  fprintf(out, "GTA IV Native diagnostics (lanshim)\npackage=%s\n", pkg);
+  char ip[64];
+  fprintf(out, "lan_address=%s\n", pick_address(ip, sizeof(ip)) ? ip : "(none)");
+  snprintf(path, sizeof(path), "/data/data/%s/shared_prefs/cache_location.xml", pkg);
+  cat_file(out, "launcher game folder", path);
+  char save[400];
+  if (portable_save_dir(pkg, save, sizeof(save))) {
+    fprintf(out, "\n== portable save folder %s\n", save);
+    list_tree(out, save, 0);
+    char* slash = strrchr(save, '/');
+    if (slash) {
+      *slash = 0;
+      fprintf(out, "\n== game parent %s\n", save);
+      list_tree(out, save, 0);
+    }
+  } else {
+    fprintf(out, "\n[portable save folder unknown]\n");
+  }
+  fprintf(out, "\n== files dir %s\n", ext);
+  list_tree(out, ext, 0);
+  snprintf(path, sizeof(path), "%s/args.txt", ext);
+  cat_file(out, "args.txt", path);
+  fclose(out);
+}
+
 __attribute__((constructor)) static void lanshim_init(void) {
   {
     char pkg[128];
     if (package_name(pkg, sizeof(pkg))) {
+      write_diagnostics(pkg);  // first: shows the state left by the previous run
       ensure_render_fixes(pkg);
       reset_texture_cache_once(pkg);
     }

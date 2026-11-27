@@ -11,8 +11,8 @@ import hashlib, os, struct, sys, zipfile, zlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_from_4nmp as base
 
-base.VERSION_CODE = 626
-base.VERSION_NAME = "1.2.6-v504"
+base.VERSION_CODE = 627
+base.VERSION_NAME = "1.2.7-v504"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 def patch_dex(dex):
@@ -41,9 +41,23 @@ def patch_libmain(so):
     for addr, (what, expected) in HIDDEN_BUTTONS.items():  # .text: file offset == vaddr
         assert bytes(d[addr:addr + 4]) == expected, f"unexpected code for {what}"
         d[addr:addr + 4] = MOV_W5_WZR
+    # FPS overlay: at the end of ReXApp::SetupOverlays (stack-protector check
+    # replaced) show the engine's compact debug overlay ("Guest: N FPS (ms)")
+    # by calling the bind_debug_overlay toggle lambda once, only if not shown yet.
+    FPS_AT = 0x13496dc
+    assert bytes(d[FPS_AT:FPS_AT + 16]) == bytes.fromhex("081740f9a9835ff81f0109eb41060054"), "unexpected SetupOverlays tail"
+    assert bytes(d[0x2341154:0x2341158]) == bytes.fromhex("160440f9"), "unexpected debug overlay toggle"
+    d[FPS_AT:FPS_AT + 16] = bytes.fromhex("68f641f9" "680000b5" "602200d1" "92de3f94")
     old = b"\0libz.so\0"
     assert d.count(old) == 1, "libz.so NEEDED string not unique"
     j = d.find(old); d[j:j + len(old)] = b"\0libq.so\0"
+    return bytes(d)
+
+def patch_rexruntime(so):
+    # DebugOverlayDialog::OnDraw: skip the build-string watermark window, keep the FPS line.
+    d = bytearray(so)
+    assert bytes(d[0x45841c:0x458420]) == bytes.fromhex("80edfff0"), "unexpected DebugOverlayDialog::OnDraw"
+    d[0x45841c:0x458420] = bytes.fromhex("34000014")  # b 0x4584ec
     return bytes(d)
 
 def patch_args(text):
@@ -67,6 +81,7 @@ def main():
             elif n == "resources.arsc": data = base.patch_arsc(data)
             elif n == "classes2.dex": data = patch_dex(data)
             elif n == "lib/arm64-v8a/libmain.so": data = patch_libmain(data)
+            elif n == "lib/arm64-v8a/librexruntime.so": data = patch_rexruntime(data)
             elif n.startswith("assets/Resources/touch-icons/") and os.path.isfile(
                     os.path.join(HERE, "touch-icons-v504", os.path.basename(n))):
                 data = open(os.path.join(HERE, "touch-icons-v504", os.path.basename(n)), "rb").read()
