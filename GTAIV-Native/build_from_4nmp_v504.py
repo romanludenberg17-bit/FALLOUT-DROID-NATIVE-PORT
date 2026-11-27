@@ -7,12 +7,13 @@
   - LAN backend + discovery port 3076 added to the launcher's profiles
 usage: build_from_4nmp_v504.py <4NMP-v504.apk> <libq.so> <out unsigned.apk>
 """
-import hashlib, os, struct, sys, zipfile, zlib
+import hashlib, os, struct, sys, tempfile, zipfile, zlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_from_4nmp as base
+from tools import stfs_extract
 
-base.VERSION_CODE = 627
-base.VERSION_NAME = "1.2.7-v504"
+base.VERSION_CODE = 628
+base.VERSION_NAME = "1.2.8-v504"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 def patch_dex(dex):
@@ -93,7 +94,13 @@ def main():
             zout.writestr(zipfile.ZipInfo(n, item.date_time), data,
                           zipfile.ZIP_STORED if store else zipfile.ZIP_DEFLATED)
         zout.write(libq, "lib/arm64-v8a/libq.so")
-        zout.write(os.path.join(HERE, "saves", "SGTA400"), "assets/Resources/saves/SGTA400")
+        # The engine's portable saves hold the raw SAVEBLOCK data, not the Xbox
+        # STFS package: bundle the file extracted from the package.
+        with tempfile.TemporaryDirectory() as tmp:
+            stfs_extract.extract(os.path.join(HERE, "saves", "SGTA400"), tmp)
+            raw = open(os.path.join(tmp, "SGTA400"), "rb").read()
+        assert len(raw) == 707822 and raw[12:21] == b"SAVEBLOCK", "unexpected 100% save content"
+        zout.writestr("assets/Resources/saves/SGTA400", raw)
     print("wrote", out)
 
 if __name__ == "__main__":

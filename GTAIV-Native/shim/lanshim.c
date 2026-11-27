@@ -24,6 +24,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <ctype.h>
 #include <dirent.h>
 #include <android/log.h>
 
@@ -185,6 +186,21 @@ static int package_name(char* out, size_t len) {
   return out[0] != 0;
 }
 
+static int same_content(const char* a, const char* b) {
+  FILE* x = fopen(a, "rb");
+  FILE* y = fopen(b, "rb");
+  int same = x && y;
+  char p[16384], q[16384];
+  while (same) {
+    size_t n = fread(p, 1, sizeof(p), x), m = fread(q, 1, sizeof(q), y);
+    if (n != m || memcmp(p, q, n)) same = 0;
+    if (!n) break;
+  }
+  if (x) fclose(x);
+  if (y) fclose(y);
+  return same;
+}
+
 static int copy_file(const char* from, const char* to) {
   FILE* in = fopen(from, "rb");
   if (!in) return 0;
@@ -201,7 +217,11 @@ static int copy_file(const char* from, const char* to) {
   if (!ok) { unlink(tmp); return 0; }
   char bak[620];
   snprintf(bak, sizeof(bak), "%s.bak", to);
-  if (access(to, F_OK) == 0) rename(to, bak);
+  // Back up the user's own file once; never back up a file this shim wrote.
+  if (access(to, F_OK) == 0) {
+    if (access(bak, F_OK) != 0 && !same_content(tmp, to)) rename(to, bak);
+    else unlink(to);
+  }
   return rename(tmp, to) == 0;
 }
 
@@ -254,6 +274,224 @@ static void undo_installed_save(const char* dir, const char* name) {
   }
 }
 
+// ---- Portable save layout used by the engine (one folder per save):
+//   <save>/<XUID>/545407F2/00000001/<NAME>/<NAME>           raw SAVEBLOCK data
+//   <save>/<XUID>/545407F2/00000001/<NAME>/__thumbnail.png
+//   <save>/<XUID>/545407F2/Headers/00000001/<NAME>.header   XCONTENT_AGGREGATE_DATA (0x148)
+static int is_hex_id(const char* n) {
+  if (strlen(n) != 16) return 0;
+  for (const char* c = n; *c; ++c) if (!isxdigit((unsigned char)*c)) return 0;
+  return 1;
+}
+
+static int is_stfs(const char* path) {
+  FILE* f = fopen(path, "rb");
+  if (!f) return 0;
+  char m[4] = {0};
+  size_t n = fread(m, 1, 4, f);
+  fclose(f);
+  return n == 4 && (!memcmp(m, "CON ", 4) || !memcmp(m, "LIVE", 4) || !memcmp(m, "PIRS", 4));
+}
+
+// Moves a file into <save>/../save-quarantine instead of deleting it.
+static void quarantine(const char* portable_dir, const char* path, const char* tag) {
+  char q[460], to[700];
+  snprintf(q, sizeof(q), "%s-quarantine", portable_dir);
+  mkdirs(q);
+  const char* base = strrchr(path, '/');
+  snprintf(to, sizeof(to), "%s/%s-%s", q, tag, base ? base + 1 : path);
+  if (rename(path, to) != 0) unlink(path);
+  __android_log_print(ANDROID_LOG_INFO, TAG, "quarantined %s", path);
+}
+
+static void repair_portable_saves(const char* portable_dir) {
+  DIR* d = opendir(portable_dir);
+  if (!d) return;
+  struct dirent* e;
+  while ((e = readdir(d))) {
+    if (!is_hex_id(e->d_name)) continue;
+    char data[600], hdr[600];
+    snprintf(data, sizeof(data), "%s/%s/545407F2/00000001", portable_dir, e->d_name);
+    snprintf(hdr, sizeof(hdr), "%s/%s/545407F2/Headers/00000001", portable_dir, e->d_name);
+    // flat STFS packages directly in the data folder (1.2.6 import source)
+    DIR* s = opendir(data);
+    if (s) {
+      struct dirent* f;
+      while ((f = readdir(s))) {
+        if (f->d_name[0] == '.') continue;
+        char p[800];
+        snprintf(p, sizeof(p), "%s/%s", data, f->d_name);
+        struct stat st;
+        if (stat(p, &st) != 0) continue;
+        if (S_ISREG(st.st_mode) && is_stfs(p)) { quarantine(portable_dir, p, e->d_name); continue; }
+        if (!S_ISDIR(st.st_mode)) continue;
+        // STFS packages inside a save folder where raw data belongs
+        DIR* sl = opendir(p);
+        if (!sl) continue;
+        struct dirent* g;
+        while ((g = readdir(sl))) {
+          if (g->d_name[0] == '.') continue;
+          char q[1000];
+          snprintf(q, sizeof(q), "%s/%s", p, g->d_name);
+          if (is_stfs(q)) quarantine(portable_dir, q, e->d_name);
+        }
+        closedir(sl);
+      }
+      closedir(s);
+    }
+    DIR* h = opendir(hdr);
+    if (h) {
+      struct dirent* f;
+      while ((f = readdir(h))) {
+        if (f->d_name[0] == '.') continue;
+        char p[800];
+        snprintf(p, sizeof(p), "%s/%s", hdr, f->d_name);
+        if (is_stfs(p)) quarantine(portable_dir, p, e->d_name);
+      }
+      closedir(h);
+    }
+    // a header without its save folder (e.g. the package above was its data)
+    snprintf(data, sizeof(data), "%s/%s/545407F2/00000001/SGTA400/SGTA400", portable_dir, e->d_name);
+    snprintf(hdr, sizeof(hdr), "%s/%s/545407F2/Headers/00000001/SGTA400.header", portable_dir, e->d_name);
+    if (access(hdr, F_OK) == 0 && access(data, F_OK) != 0) quarantine(portable_dir, hdr, e->d_name);
+  }
+  closedir(d);
+}
+
+static int read_all(const char* path, unsigned char* buf, size_t cap) {
+  FILE* f = fopen(path, "rb");
+  if (!f) return -1;
+  int n = (int)fread(buf, 1, cap, f);
+  fclose(f);
+  return n;
+}
+
+static int write_all(const char* path, const unsigned char* buf, size_t n) {
+  FILE* f = fopen(path, "wb");
+  if (!f) return 0;
+  int ok = fwrite(buf, 1, n, f) == n;
+  return fclose(f) == 0 && ok;
+}
+
+// Header for <name>: clone another save's header of the same profile (same
+// device, XUID and title) and swap the file name; otherwise build one.
+static int make_header(const char* hdr_dir, const char* xuid, const char* name, unsigned char out[0x148]) {
+  DIR* h = opendir(hdr_dir);
+  if (h) {
+    struct dirent* f;
+    while ((f = readdir(h))) {
+      size_t l = strlen(f->d_name);
+      if (l != 7 + 7 || strcmp(f->d_name + 7, ".header") || !strncmp(f->d_name, name, 7)) continue;
+      char p[800];
+      snprintf(p, sizeof(p), "%s/%s", hdr_dir, f->d_name);
+      if (read_all(p, out, 0x148) != 0x148) continue;
+      for (int i = 0; i + 7 <= 0x148; ++i) {
+        if (!memcmp(out + i, f->d_name, 7)) { memcpy(out + i, name, 7); closedir(h); return 1; }
+      }
+    }
+    closedir(h);
+  }
+  memset(out, 0, 0x148);
+  out[3] = 1;  // device_id (BE)
+  out[7] = 1;  // content_type: saved game (BE)
+  static const char display[] = "GTA IV 100%";
+  for (int i = 0; display[i]; ++i) out[8 + 2 * i + 1] = (unsigned char)display[i];  // UTF-16BE
+  memcpy(out + 0x108, name, strlen(name));
+  unsigned long long id = strtoull(xuid, NULL, 16);
+  for (int i = 0; i < 8; ++i) out[0x138 + i] = (unsigned char)(id >> (56 - 8 * i));
+  static const unsigned char title[4] = {0x54, 0x54, 0x07, 0xF2};
+  memcpy(out + 0x140, title, 4);
+  return 1;
+}
+
+static void install_one(const char* portable_dir, const char* xuid, const char* source, const char* name) {
+  char base[600], dir[700], data[800], thumb[800], hdr_dir[700], hdr[800];
+  snprintf(base, sizeof(base), "%s/%s/545407F2", portable_dir, xuid);
+  snprintf(dir, sizeof(dir), "%s/00000001/%s", base, name);
+  snprintf(data, sizeof(data), "%s/%s", dir, name);
+  snprintf(hdr_dir, sizeof(hdr_dir), "%s/Headers/00000001", base);
+  snprintf(hdr, sizeof(hdr), "%s/%s.header", hdr_dir, name);
+  mkdirs(dir);
+  mkdirs(hdr_dir);
+  int ok = copy_file(source, data);
+  // thumbnail: borrow one from another save of this profile
+  snprintf(thumb, sizeof(thumb), "%s/__thumbnail.png", dir);
+  if (access(thumb, F_OK) != 0) {
+    char other[700];
+    snprintf(other, sizeof(other), "%s/00000001", base);
+    DIR* d = opendir(other);
+    if (d) {
+      struct dirent* e;
+      while ((e = readdir(d))) {
+        if (e->d_name[0] == '.' || !strcmp(e->d_name, name)) continue;
+        char t[900];
+        snprintf(t, sizeof(t), "%s/%s/__thumbnail.png", other, e->d_name);
+        if (access(t, R_OK) == 0 && copy_file(t, thumb)) break;
+      }
+      closedir(d);
+    }
+  }
+  unsigned char h[0x148];
+  if (make_header(hdr_dir, xuid, name, h)) ok = write_all(hdr, h, sizeof(h)) && ok;
+  __android_log_print(ANDROID_LOG_INFO, TAG, "100%% save -> %s: %s", dir, ok ? "ok" : "failed");
+}
+
+static void install_into_profiles(const char* portable_dir, const char* store, const char* source, const char* name) {
+  int count = 0;
+  // every profile the engine already keeps saves for
+  DIR* d = opendir(portable_dir);
+  if (d) {
+    struct dirent* e;
+    while ((e = readdir(d))) {
+      if (!is_hex_id(e->d_name) || !strcmp(e->d_name, "E0001BBC781D8027")) continue;
+      char hdr[600];
+      snprintf(hdr, sizeof(hdr), "%s/%s/545407F2/Headers/00000001", portable_dir, e->d_name);
+      if (access(hdr, F_OK) != 0) continue;
+      install_one(portable_dir, e->d_name, source, name);
+      ++count;
+    }
+    closedir(d);
+  }
+  // profiles signed in on this device (LibertyRecomp/saves/545407F2/profile/<XUID>)
+  char prof[500];
+  snprintf(prof, sizeof(prof), "%s/545407F2/profile", store);
+  d = opendir(prof);
+  if (d) {
+    struct dirent* e;
+    while ((e = readdir(d))) {
+      if (!is_hex_id(e->d_name)) continue;
+      char hdr[700];
+      snprintf(hdr, sizeof(hdr), "%s/%s/545407F2/Headers/00000001/%s.header", portable_dir, e->d_name, name);
+      if (access(hdr, F_OK) == 0) continue;  // done above
+      install_one(portable_dir, e->d_name, source, name);
+      ++count;
+    }
+    closedir(d);
+  }
+  if (!count) __android_log_print(ANDROID_LOG_WARN, TAG, "no save profile found; 100%% save not installed");
+}
+
+static void remove_complete_save(const char* portable_dir, const char* name) {
+  DIR* d = opendir(portable_dir);
+  if (!d) return;
+  struct dirent* e;
+  while ((e = readdir(d))) {
+    if (!is_hex_id(e->d_name)) continue;
+    char dir[700], hdr[700];
+    snprintf(dir, sizeof(dir), "%s/%s/545407F2/00000001/%s", portable_dir, e->d_name, name);
+    snprintf(hdr, sizeof(hdr), "%s/%s/545407F2/Headers/00000001/%s.header", portable_dir, e->d_name, name);
+    char bak[760];
+    snprintf(bak, sizeof(bak), "%s/%s.bak", dir, name);
+    if (access(bak, F_OK) == 0) { undo_installed_save(dir, name); continue; }  // their own SGTA400
+    undo_installed_save(dir, name);
+    char t[760];
+    snprintf(t, sizeof(t), "%s/__thumbnail.png", dir);
+    unlink(t);
+    if (rmdir(dir) == 0) unlink(hdr);
+  }
+  closedir(d);
+}
+
 static void install_complete_save(void) {
   char pkg[128];
   if (!package_name(pkg, sizeof(pkg))) return;
@@ -283,28 +521,22 @@ static void install_complete_save(void) {
     if (f) { if (kept) fwrite(kept, 1, kept_len, f); fclose(f); }
   }
   free(kept);
-  // 1.2.2-1.2.4 shipped a raw SGTA412 (no STFS container): undo it everywhere.
-  const char* old_name = "SGTA412";
-  const char* name = "SGTA400";  // Xbox 360 STFS package; the engine rebinds it on import
-  // Profile store: 1.2.2 also copied the save here, outside portable-save
-  // adoption (the header stays bound to another profile -> endless black
-  // screen). Always undo that copy.
+  const char* name = "SGTA400";
   char store[400];
   snprintf(store, sizeof(store), "/storage/emulated/0/Android/data/%s/files/LibertyRecomp/saves", pkg);
-  undo_installed_save(store, old_name);
+  undo_installed_save(store, "SGTA412");  // 1.2.2 copied a save here
   char portable_dir[400];
-  const int have_portable = portable_save_dir(pkg, portable_dir, sizeof(portable_dir));
-  if (have_portable) {
-    undo_installed_save(portable_dir, old_name);
-    undo_installed_save(portable_dir, name);  // 1.2.5 put the package at the folder root
+  if (!portable_save_dir(pkg, portable_dir, sizeof(portable_dir))) {
+    __android_log_print(ANDROID_LOG_WARN, TAG, "no portable save folder");
+    return;
   }
-  // Xbox 360 USB layout the launcher imports from: <profile>/<title>/00000001/<file>.
-  // The package's own profile id; the engine rebinds it to this profile.
-  static const char layout[] = "E0001BBC781D8027/545407F2/00000001";
-  char content_dir[460];
-  if (have_portable) snprintf(content_dir, sizeof(content_dir), "%s/%s", portable_dir, layout);
+  undo_installed_save(portable_dir, "SGTA412");
+  undo_installed_save(portable_dir, name);
+  // 1.2.6 put the Xbox package into an import folder; the importer copied the
+  // whole STFS package into slots that must hold the raw save -> crash on load.
+  repair_portable_saves(portable_dir);
   if (restore) {
-    if (have_portable) undo_installed_save(content_dir, name);
+    remove_complete_save(portable_dir, name);
     __android_log_print(ANDROID_LOG_INFO, TAG, "own save restored");
     return;
   }
@@ -315,31 +547,11 @@ static void install_complete_save(void) {
   for (int i = 0; i < 3 && !source[0]; ++i) {
     char c[300];
     snprintf(c, sizeof(c), roots[i], pkg, name);
-    if (access(c, R_OK) == 0) snprintf(source, sizeof(source), "%s", c);
+    // a stale 1.2.6 copy is the STFS package, not the raw save: never install it
+    if (access(c, R_OK) == 0 && !is_stfs(c)) snprintf(source, sizeof(source), "%s", c);
   }
   if (!source[0]) { __android_log_print(ANDROID_LOG_WARN, TAG, "bundled 100%% save not found"); return; }
-
-  // Only the portable save folder beside the game: the engine adopts saves
-  // from there and rebinds their header to this profile.
-  char targets[1][460];
-  int count = 0;
-  if (have_portable) { snprintf(targets[0], sizeof(targets[0]), "%s", content_dir); count = 1; }
-  if (!count) { __android_log_print(ANDROID_LOG_WARN, TAG, "no portable save folder; 100%% save not installed"); return; }
-  for (int i = 0; i < count; ++i) {
-    mkdirs(targets[i]);
-    char to[500], marker[500];
-    snprintf(to, sizeof(to), "%s/%s", targets[i], name);
-    __android_log_print(ANDROID_LOG_INFO, TAG, "100%% save -> %s: %s", to, copy_file(source, to) ? "ok" : "failed");
-    // Run the portable-save import again so the new package is adopted.
-    static const char* levels[] = {"", "/E0001BBC781D8027", "/E0001BBC781D8027/545407F2", "/E0001BBC781D8027/545407F2/00000001"};
-    for (int k = 0; k < 4; ++k) {
-      snprintf(marker, sizeof(marker), "%s%s/.portable-imported", portable_dir, levels[k]);
-      unlink(marker);
-    }
-  }
-  char marker[500];
-  snprintf(marker, sizeof(marker), "%s/.portable-imported", store);
-  unlink(marker);
+  install_into_profiles(portable_dir, store, source, name);
 }
 
 // Keep LibertyRecomp/touch-icons in step with the icons bundled in this APK
@@ -462,7 +674,7 @@ static void copy_tree(const char* from, const char* to, int depth) {
     struct stat st;
     if (stat(a, &st) != 0) continue;
     if (S_ISDIR(st.st_mode)) { if (depth < 3) copy_tree(a, b, depth + 1); }
-    else if (st.st_size < 64 * 1024 * 1024) copy_file(a, b);
+    else if (st.st_size < 64 * 1024 * 1024) { unlink(b); copy_file(a, b); }
   }
   closedir(d);
 }
