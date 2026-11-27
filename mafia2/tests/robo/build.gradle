@@ -1,0 +1,26 @@
+// Host-side tests of the Mafia II Droid Java layer (Robolectric, native graphics):
+// screenshots of every screen + checks of what the touch controls send to the game.
+plugins { id 'com.android.application' version '8.7.3' }
+
+android {
+    namespace 'com.mafia2re.droid'
+    compileSdk 35
+    defaultConfig { minSdk 26; targetSdk 35 }
+    sourceSets {
+        main {
+            manifest.srcFile '../../AndroidManifest.xml'
+            java.srcDirs = ['../../java', 'teststubs']
+            res.srcDirs = ['../../res']
+            assets.srcDirs = ['../../assets']
+        }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_11; targetCompatibility JavaVersion.VERSION_11 }
+    testOptions { unitTests { includeAndroidResources = true; all { systemProperty 'm2.shots', file('../../build/shots').absolutePath; systemProperty 'robolectric.dependency.repo.url', 'https://maven-central.storage-download.googleapis.com/maven2'; systemProperty 'robolectric.dependency.repo.id', 'gcs' } } }
+    lint { abortOnError false; checkReleaseBuilds false }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.14.1'
+    testImplementation 'androidx.test:core:1.6.1'
+}

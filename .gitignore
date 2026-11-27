@@ -10,3 +10,10 @@ nvport/android/build/
 nvport/android/app/src/main/jniLibs/
 nvport/output/
 nvport/android/app/src/main/assets/report_upload.json
+mafia2/orig/
+mafia2/build/
+mafia2/output/
+mafia2/.signing_keys/
+mafia2/tests/robo/.gradle/
+mafia2/tests/robo/build/
+mafia2/tests/robo/local.properties
