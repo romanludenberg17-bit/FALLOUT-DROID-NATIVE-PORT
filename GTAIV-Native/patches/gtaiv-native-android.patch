@@ -706,11 +706,52 @@ index b63d73e..56b9be5 100644
    } else if (setting.binding == SettingBinding::kSonyFeatures) {
      if (!rex::input::sony::SetFeaturesEnabled(choice.value == "true")) {
        REXLOG_ERROR("GTA IV controller features: rejected enabled={}", choice.value);
+diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/gta4_input_hooks.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/gta4_input_hooks.cpp
+index f8dc1ee..5941fdb 100644
+--- a/glue/rexglue-sdk-main/gta4-recomp/src/gta4_input_hooks.cpp
++++ b/glue/rexglue-sdk-main/gta4-recomp/src/gta4_input_hooks.cpp
+@@ -1496,6 +1496,14 @@ InputEpoch CaptureEpoch(const PPCContext& entry_context, uint8_t* base,
+   }
+ 
+   g_epoch.state = state;
++  {
++    double touch_dx = 0.0, touch_dy = 0.0;
++    if (gta4::input::TakeTouchMouseLook(&touch_dx, &touch_dy)) {
++      g_epoch.state.mouse_dx += touch_dx;
++      g_epoch.state.mouse_dy += touch_dy;
++      g_epoch.state.mouse_has_motion = true;
++    }
++  }
+   for (size_t index = 0; index < state.keys.size(); ++index) {
+     g_epoch.pressed_keys[index] =
+         state.pressed_keys[index] != 0 ||
+@@ -2836,3 +2844,7 @@ extern "C" void sub_825D1980(PPCContext& ctx, uint8_t* base) {
+ }
+ 
+ #include "gta4_mouse_camera_hooks.inc"
++
++bool GTA4MouseCameraAdmitted() noexcept {
++  return gta4::input::g_epoch.mouse_camera_allowed;
++}
+diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/gta4_touch_coordinator.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/gta4_touch_coordinator.cpp
+index 6180c0c..70df4cc 100644
+--- a/glue/rexglue-sdk-main/gta4-recomp/src/gta4_touch_coordinator.cpp
++++ b/glue/rexglue-sdk-main/gta4-recomp/src/gta4_touch_coordinator.cpp
+@@ -628,6 +628,9 @@ void GTA4_TouchConsumePoll(PPCContext& context, uint8_t* base, uint64_t epoch) {
+       if (extension.on_pointer_event) extension.on_pointer_event(event, context, base, epoch);
+       continue;
+     }
++    if ((map_active || frontend_navigation_active) && gta4::input::ContextTouchMenuPadEvent(event)) {
++      continue;
++    }
+     if (map_active) {
+       ProcessMapEvent(event, epoch);
+       continue;
 diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.cpp
-index 5f3e537..411d6cc 100644
+index 5f3e537..28791b3 100644
 --- a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.cpp
 +++ b/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.cpp
-@@ -31,6 +31,18 @@
+@@ -31,6 +31,23 @@
  #include "input/gamepad_touch_overlay.h"
  
  REXCVAR_DECLARE(bool, gta4_touch_trace);
@@ -723,13 +764,18 @@ index 5f3e537..411d6cc 100644
 +REXCVAR_DEFINE_DOUBLE(gta4_touch_look_deadzone, 28.0, "GTA IV/Input/Touch",
 +                      "Stick units added to any touch camera movement to clear the title's dead zone")
 +    .range(0.0, 120.0);
++REXCVAR_DEFINE_BOOL(gta4_touch_look_mouse, true, "GTA IV/Input/Touch",
++                    "Touch camera drives the direct (mouse) camera path where the title allows it");
++REXCVAR_DEFINE_DOUBLE(gta4_touch_look_mouse_gain, 2.5, "GTA IV/Input/Touch",
++                      "Touch camera turn per pixel on the direct camera path (x camera sensitivity)")
++    .range(0.2, 10.0);
 +REXCVAR_DEFINE_DOUBLE(gta4_touch_camera_recenter_delay, 4.0, "GTA IV/Input/Touch",
 +                      "Seconds after the last touch camera movement before the game may recenter it")
 +    .range(0.0, 30.0);
  
  namespace gta4::input {
  bool ContextTouchHudLayoutActive() noexcept {
-@@ -185,6 +197,11 @@ struct RuntimeState {
+@@ -185,6 +202,11 @@ struct RuntimeState {
    int32_t right_y = 0;
    double completed_look_x = 0.0;
    double completed_look_y = 0.0;
@@ -741,7 +787,7 @@ index 5f3e537..411d6cc 100644
    int32_t look_x = 0;
    int32_t look_y = 0;
    double frame_seconds = kReferenceFrameSeconds;
-@@ -328,6 +345,7 @@ void CancelAllLocked() {
+@@ -328,6 +350,7 @@ void CancelAllLocked() {
    g_runtime.right_x = g_runtime.right_y = 0;
    g_runtime.look_x = g_runtime.look_y = 0;
    g_runtime.completed_look_x = g_runtime.completed_look_y = 0.0;
@@ -749,13 +795,15 @@ index 5f3e537..411d6cc 100644
    g_runtime.completed_zoom = 0.0;
    g_runtime.zoom = 0;
    g_runtime.weapon_wheel_open = false;
-@@ -480,6 +498,58 @@ ContextTouchViewport ReadViewport() {
+@@ -480,6 +503,98 @@ ContextTouchViewport ReadViewport() {
    };
  }
  
 +// Cutscene skip: gameplay controls are hidden during cutscenes, so a single
 +// GTA-style SKIP button sends the title's skip input (A) for a short pulse.
 +std::atomic<uint64_t> g_skip_until_ns{0};
++std::mutex g_touch_mouse_mutex;
++double g_touch_mouse_dx = 0.0, g_touch_mouse_dy = 0.0;
 +std::atomic<uint16_t> g_pulse_buttons{0};
 +constexpr uint64_t kSkipPulseNanoseconds = 180'000'000;
 +// Modal prompts (save / overwrite questions, "press A to continue"): the
@@ -767,6 +815,44 @@ index 5f3e537..411d6cc 100644
 +void Pulse(uint16_t buttons) {
 +  g_pulse_buttons.store(buttons);
 +  g_skip_until_ns.store(MonotonicNanoseconds() + kSkipPulseNanoseconds);
++}
++
++// Menus and the map: a GTA mobile-style pad that always works, next to the
++// title's own row tapping (which needs the title to publish its row layout).
++std::vector<ContextTouchControl> MenuPadButtons(const ContextTouchViewport& v, bool map) {
++  struct Spec { uint16_t pad; const char* icon; const char* label; float x, y, r; };
++  const float e = std::min(v.safe_width, v.safe_height);
++  const float L = v.safe_x, R = v.safe_x + v.safe_width, T = v.safe_y, B = v.safe_y + v.safe_height;
++  const float r = std::max(e * 0.072f, 22.0f), big = std::max(e * 0.09f, 26.0f), d = r * 2.1f;
++  const float cx = L + e * 0.07f + r + d, cy = B - e * 0.07f - r - d;
++  std::vector<Spec> specs = {
++      {rex::input::X_INPUT_GAMEPAD_A, "menu_accept", "OK", R - e * 0.06f - big, B - e * 0.06f - big, big},
++      {rex::input::X_INPUT_GAMEPAD_B, "menu_back", "BACK", R - e * 0.06f - big * 3.2f, B - e * 0.05f - r, r},
++  };
++  if (!map) {
++    specs.push_back({rex::input::X_INPUT_GAMEPAD_DPAD_UP, "phone_up", "UP", cx, cy - d, r});
++    specs.push_back({rex::input::X_INPUT_GAMEPAD_DPAD_DOWN, "phone_down", "DOWN", cx, cy + d, r});
++    specs.push_back({rex::input::X_INPUT_GAMEPAD_DPAD_LEFT, "phone_left", "LEFT", cx - d, cy, r});
++    specs.push_back({rex::input::X_INPUT_GAMEPAD_DPAD_RIGHT, "phone_right", "RIGHT", cx + d, cy, r});
++    specs.push_back({rex::input::X_INPUT_GAMEPAD_LEFT_SHOULDER, "radio_previous", "LB",
++                     L + e * 0.05f + r, T + e * 0.05f + r, r});
++    specs.push_back({rex::input::X_INPUT_GAMEPAD_RIGHT_SHOULDER, "radio_next", "RB",
++                     R - e * 0.05f - r, T + e * 0.05f + r, r});
++  }
++  std::vector<ContextTouchControl> out;
++  for (const auto& sp : specs) {
++    ContextTouchControl c;
++    c.kind = ContextTouchControlKind::kButton;
++    c.action = TouchAction::kMore;
++    c.pad_buttons = sp.pad;
++    c.center_x = sp.x; c.center_y = sp.y; c.radius = sp.r;
++    c.minimum_x = sp.x - sp.r * 1.1f; c.maximum_x = sp.x + sp.r * 1.1f;
++    c.minimum_y = sp.y - sp.r * 1.1f; c.maximum_y = sp.y + sp.r * 1.1f;
++    std::snprintf(c.label.data(), c.label.size(), "%s", sp.label);
++    std::snprintf(c.icon_id.data(), c.icon_id.size(), "%s", sp.icon);
++    out.push_back(c);
++  }
++  return out;
 +}
 +
 +ContextTouchControl ModalButton(const ContextTouchViewport& v, bool accept) {
@@ -808,7 +894,7 @@ index 5f3e537..411d6cc 100644
  void RecalculateAxesLocked() {
    g_runtime.movement_x = g_runtime.movement_y = 0;
    g_runtime.right_x = g_runtime.right_y = 0;
-@@ -915,6 +985,35 @@ bool OnPointerEvent(const rex::input::AbsolutePointerEvent& event, PPCContext&,
+@@ -915,6 +1030,35 @@ bool OnPointerEvent(const rex::input::AbsolutePointerEvent& event, PPCContext&,
        (!rex::input::TouchControlsActive() && !ContextTouchEditorOpen())) return false;
    std::lock_guard lock(g_runtime.mutex);
    if (g_runtime.epoch != epoch || g_runtime.frozen_epoch == epoch) return false;
@@ -844,7 +930,15 @@ index 5f3e537..411d6cc 100644
    if (!g_runtime.editing && !GameplayPresentationAdmittedLocked(GetTouchContextSnapshot())) {
      if (!g_runtime.editor_session) HideGameplayLocked();
      return false;
-@@ -1154,12 +1253,53 @@ void FreezeLocked(uint64_t epoch) {
+@@ -1070,6 +1214,7 @@ uint8_t NativeTriggerValue(const ContextTouchControl& control) {
+ void MergeNativeControl(TouchNativePadState& pad, const ContextTouchControl& control) {
+   if (control.kind == ContextTouchControlKind::kNativeButton) pad.buttons |= control.pad_buttons;
+   if (control.kind == ContextTouchControlKind::kNativeTrigger) {
++    pad.buttons |= control.pad_buttons;  // e.g. unarmed attack: RT plus the melee B
+     const uint8_t value = NativeTriggerValue(control);
+     if (control.trigger_side == 1) pad.left_trigger = std::max(pad.left_trigger, value);
+     else if (control.trigger_side == 2) pad.right_trigger = std::max(pad.right_trigger, value);
+@@ -1154,12 +1299,62 @@ void FreezeLocked(uint64_t epoch) {
      dx += std::exchange(owner.look_dx, 0.0);
      dy += std::exchange(owner.look_dy, 0.0);
    }
@@ -864,6 +958,15 @@ index 5f3e537..411d6cc 100644
 +    if (std::abs(dx) > 0.01 || std::abs(dy) > 0.01) g_runtime.last_look_ns = MonotonicNanoseconds();
 +  }
    const double sensitivity = CameraSensitivityLocked();
++  if (REXCVAR_GET(gta4_touch_look_mouse) && GTA4MouseCameraAdmitted() && (dx != 0.0 || dy != 0.0)) {
++    // Direct camera (the PC mouse path): rotation follows the finger 1:1 and
++    // is not capped at the stick's maximum turn rate.
++    const double gain = REXCVAR_GET(gta4_touch_look_mouse_gain) * sensitivity;
++    std::lock_guard mouse_lock(g_touch_mouse_mutex);
++    g_touch_mouse_dx += dx * gain;
++    g_touch_mouse_dy += (g_runtime.preferences.invert_camera_y ? -dy : dy) * gain;
++    dx = dy = 0.0;
++  }
 +  {
 +    // The title reads touch look as a stick: anything past full deflection in
 +    // one frame would be lost, so it is carried into the following frames.
@@ -898,7 +1001,7 @@ index 5f3e537..411d6cc 100644
    if (IsParachute(g_runtime.layout.mode) &&
        std::none_of(g_runtime.pointers.begin(), g_runtime.pointers.end(), [](const auto& item) {
          return item.second.control.kind == ContextTouchControlKind::kRightStick;
-@@ -1278,6 +1418,13 @@ void OnControlReplay(PPCContext&, uint8_t* base, uint32_t control, uint32_t, uin
+@@ -1278,6 +1473,13 @@ void OnControlReplay(PPCContext&, uint8_t* base, uint32_t control, uint32_t, uin
      changed |= MergeAxis(base, control, Action::kVehicleGunUp, Action::kVehicleGunDown, g_runtime.look_y);
      changed |= MergeAxis(base, control, Action::kVehicleLookLeft, Action::kVehicleLookRight, g_runtime.look_x);
    }
@@ -912,7 +1015,7 @@ index 5f3e537..411d6cc 100644
    if (changed) StoreU32(base, control + kLastInputTimeOffset, LoadU32(base, kGameInputTimeAddress));
  }
  
-@@ -1291,6 +1438,10 @@ bool NativePadProvider(uint32_t user, rex::input::X_INPUT_GAMEPAD* output) noexc
+@@ -1291,6 +1493,10 @@ bool NativePadProvider(uint32_t user, rex::input::X_INPUT_GAMEPAD* output) noexc
    if (!g_runtime.initialized || !g_runtime.context.valid || !g_runtime.context.input_user_known ||
        user != g_runtime.context.input_user) return false;
    *output = {};
@@ -923,10 +1026,63 @@ index 5f3e537..411d6cc 100644
    if (owned || !active || !pad.active || pad.epoch != g_runtime.epoch ||
        !GameplayPresentationAdmittedLocked(GetTouchContextSnapshot())) return true;
    output->buttons = pad.buttons;
-@@ -1565,6 +1716,42 @@ ContextTouchOverlaySnapshot GetContextTouchDrawableOverlaySnapshot(uint64_t mono
+@@ -1538,6 +1744,34 @@ bool ViewportGeometryMatches(ContextTouchViewport left, ContextTouchViewport rig
+ 
+ }  // namespace
+ 
++bool TakeTouchMouseLook(double* dx, double* dy) noexcept {
++  std::lock_guard lock(g_touch_mouse_mutex);
++  if (g_touch_mouse_dx == 0.0 && g_touch_mouse_dy == 0.0) return false;
++  *dx = std::exchange(g_touch_mouse_dx, 0.0);
++  *dy = std::exchange(g_touch_mouse_dy, 0.0);
++  return true;
++}
++
++bool ContextTouchMenuPadEvent(const rex::input::AbsolutePointerEvent& event) noexcept {
++  if (event.phase != rex::input::AbsolutePointerPhase::kDown || GTA4_TouchTitleInputOwned() ||
++      !rex::input::TouchPointerInputActive()) return false;
++  const auto context = GetTouchContextSnapshot();
++  if (!context.frontend && !context.map) return false;
++  std::lock_guard lock(g_runtime.mutex);
++  if (g_runtime.editor_session) return false;
++  const auto viewport = ReadViewport();
++  if (!viewport.valid) return false;
++  const float x = viewport.host_space ? event.logical_x : event.x;
++  const float y = viewport.host_space ? event.logical_y : event.y;
++  for (const auto& b : MenuPadButtons(viewport, context.map)) {
++    if (x >= b.minimum_x && x <= b.maximum_x && y >= b.minimum_y && y <= b.maximum_y) {
++      Pulse(b.pad_buttons);
++      return true;
++    }
++  }
++  return false;
++}
++
+ ContextTouchOverlaySnapshot GetContextTouchOverlaySnapshot() noexcept {
+   if (GTA4_TouchTitleInputOwned() || !rex::input::TouchPointerInputActive()) return {};
+   const auto context = GetTouchContextSnapshot();
+@@ -1565,6 +1799,60 @@ ContextTouchOverlaySnapshot GetContextTouchDrawableOverlaySnapshot(uint64_t mono
                           g_runtime.context.frontend || g_runtime.context.map;
    const bool editor_drawable = g_runtime.editor_session &&
        (g_runtime.editing || (g_runtime.editor_closing && g_runtime.last_drawable.editor));
++  if ((context.frontend || context.map) && !g_runtime.editor_session && pointer_allowed &&
++      viewport.valid && viewport.focused) {
++    ContextTouchOverlaySnapshot pad;
++    pad.layout.mode = ContextTouchMode::kMinigame;
++    pad.layout.viewport = viewport;
++    pad.layout.opacity = std::clamp(g_runtime.preferences.opacity + 0.1f, 0.4f, 1.0f);
++    const auto buttons = MenuPadButtons(viewport, context.map);
++    const bool pressed = monotonic_ns < g_skip_until_ns.load();
++    for (size_t i = 0; i < buttons.size() && i < pad.layout.controls.size(); ++i) {
++      pad.layout.controls[i] = buttons[i];
++      pad.active[i] = pressed && g_pulse_buttons.load() == buttons[i].pad_buttons;
++    }
++    pad.layout.control_count = std::min(buttons.size(), pad.layout.controls.size());
++    pad.visible = true;
++    pad.fade_alpha = 1.0f;
++    g_modal_since_ns.store(0);
++    return pad;
++  }
 +  {
 +    const bool modal = !g_runtime.editor_session && context.valid && !context.cutscene &&
 +                       !context.frontend && !context.map && !GameplayPresentationAdmittedLocked(context);
@@ -966,6 +1122,35 @@ index 5f3e537..411d6cc 100644
    if (!editor_drawable && !GameplayPresentationAdmittedLocked(context)) {
      HideGameplayLocked();
      return {};
+diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.h b/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.h
+index d621434..c97cd31 100644
+--- a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.h
++++ b/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_controls.h
+@@ -4,8 +4,13 @@
+ #include <cstdint>
+ #include <memory>
+ 
++#include <rex/input/absolute_pointer.h>
++
+ #include "input/context_touch_layout.h"
+ 
++// True while the title's direct (mouse) camera consumed the previous poll.
++bool GTA4MouseCameraAdmitted() noexcept;
++
+ namespace gta4::input {
+ 
+ struct ContextTouchOverlaySnapshot {
+@@ -67,6 +72,10 @@ bool IsContextTouchEditorActive() noexcept;
+ // editor gesture cannot also activate the native menu beneath it.
+ bool ContextTouchEditorCapturesInput(uint64_t monotonic_ns = 0) noexcept;
+ ContextTouchOverlaySnapshot GetContextTouchOverlaySnapshot() noexcept;
++// GTA mobile-style menu / map pad (A, B, D-pad, LB/RB). True when consumed.
++bool ContextTouchMenuPadEvent(const rex::input::AbsolutePointerEvent& event) noexcept;
++// Touch camera displacement for the direct (mouse) camera path, in mouse counts.
++bool TakeTouchMouseLook(double* dx, double* dy) noexcept;
+ // Visual state may fade after input has stopped. A zero timestamp uses the
+ // host monotonic clock; an explicit timestamp supports deterministic testing.
+ ContextTouchOverlaySnapshot GetContextTouchDrawableOverlaySnapshot(
 diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_draw.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_draw.cpp
 index f9bbbde..3991c16 100644
 --- a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_draw.cpp
@@ -1027,7 +1212,7 @@ index f9bbbde..3991c16 100644
        const float bound = radius * 0.62f;
        const float half_width = icon.aspect >= 1.0f ? bound : bound * icon.aspect;
 diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_layout.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_layout.cpp
-index f1445d1..a60786b 100644
+index f1445d1..94f1bad 100644
 --- a/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_layout.cpp
 +++ b/glue/rexglue-sdk-main/gta4-recomp/src/input/context_touch_layout.cpp
 @@ -386,18 +386,25 @@ ContextTouchLayout BuildSemanticLayout(ContextTouchMode mode, const ContextTouch
@@ -1067,7 +1252,7 @@ index f1445d1..a60786b 100644
    };
  
    {
-@@ -414,59 +421,83 @@ ContextTouchLayout BuildSemanticLayout(ContextTouchMode mode, const ContextTouch
+@@ -414,59 +421,88 @@ ContextTouchLayout BuildSemanticLayout(ContextTouchMode mode, const ContextTouch
        right_stick.script = move.script;
      }
      if (mode == ContextTouchMode::kOnFoot || mode == ContextTouchMode::kPhone) {
@@ -1097,12 +1282,17 @@ index f1445d1..a60786b 100644
 -        primary(A::kAim, "AIM", 0, 1, 3, V::kRButton);
 +        auto& fire = slot(A::kFire, armed ? "FIRE" : "ATTACK", 0, 2, 0.16f, 0.18f, big, true, K::kNativeButton,
 +                          V::kLButton);
-+        if (!options.armed) std::snprintf(fire.icon_id.data(), fire.icon_id.size(), "attack");
++        if (!options.armed) {
++          std::snprintf(fire.icon_id.data(), fire.icon_id.size(), "attack");
++          fire.pad_buttons = X_INPUT_GAMEPAD_B;  // fists: RT and the melee B together
++        }
 +        slot(A::kJumpClimb, "JUMP", X_INPUT_GAMEPAD_X, 0, 0.40f, 0.12f, norm, !phone, K::kNativeButton, V::kSpace);
 +        slot(A::kRunSprint, "RUN", X_INPUT_GAMEPAD_A, 0, 0.38f, 0.33f, norm, !phone, K::kNativeButton, V::kShift);
 +        slot(A::kAim, "TARGET", 0, 1, 0.17f, 0.43f, norm, !phone, K::kNativeButton, V::kRButton);
-+        slot(A::kContext, "ENTER", X_INPUT_GAMEPAD_Y, 0, 0.15f, 0.65f, norm,
-+             options.can_enter_vehicle && !phone, K::kNativeButton, V::kF);
++        // Always available on foot, like GTA III's enter/exit button: the
++        // title ignores it when no vehicle is in reach.
++        slot(A::kContext, "ENTER", X_INPUT_GAMEPAD_Y, 0, 0.15f, 0.65f, norm, !phone,
++             K::kNativeButton, V::kF);
 +        slot(A::kReload, "RELOAD", X_INPUT_GAMEPAD_B, 0, 0.37f, 0.53f, small, options.armed && !phone,
 +             K::kNativeButton, V::kR);
 +        slot(A::kCover, options.in_cover ? "EXIT COVER" : "COVER", X_INPUT_GAMEPAD_RIGHT_SHOULDER, 0,
@@ -1190,7 +1380,7 @@ index f1445d1..a60786b 100644
      if (mode != ContextTouchMode::kMinigame) {
        AddLookSurface(layout, viewport);
        auto& camera = layout.controls[layout.control_count - 1];
-@@ -475,8 +506,6 @@ ContextTouchLayout BuildSemanticLayout(ContextTouchMode mode, const ContextTouch
+@@ -475,8 +511,6 @@ ContextTouchLayout BuildSemanticLayout(ContextTouchMode mode, const ContextTouch
      }
    }
  
@@ -1199,7 +1389,7 @@ index f1445d1..a60786b 100644
    // Accepted native help tokens use available space in the active layout.
    size_t script_index = 0;
    const float script_radius = utility_radius;
-@@ -637,59 +666,18 @@ ContextTouchLayout BuildSemanticLayout(ContextTouchMode mode, const ContextTouch
+@@ -637,59 +671,18 @@ ContextTouchLayout BuildSemanticLayout(ContextTouchMode mode, const ContextTouch
      }
    }
  
@@ -1269,7 +1459,7 @@ index f1445d1..a60786b 100644
  
    if (options.weapon_wheel_open) {
      for (size_t i = 0; i < layout.control_count; ++i) {
-@@ -872,7 +860,12 @@ bool ApplyContextTouchHudReservation(
+@@ -872,7 +865,12 @@ bool ApplyContextTouchHudReservation(
          }
        }
      }
