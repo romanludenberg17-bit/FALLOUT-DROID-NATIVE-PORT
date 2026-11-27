@@ -14,6 +14,20 @@
 - Seen in the same report: the automatic setup took the High profile on its first start (8
   rows changed); New Vegas ran 50-59 FPS where alpha54's Custom rows (native resolution,
   TAA) ran 30-40.
+- Heat: a hot phone also gets a lower frame-rate ceiling (Hot 50, Critical 45 FPS; the
+  player's own lower cap stands) besides the lower resolution it already got; the same
+  phone went from Hot to Critical in two minutes at 60 FPS. Logged as `android: frame-rate
+  cap …`.
+- Memory, as Android asks of apps: the activity passes Android's memory warnings
+  (`onTrimMemory`, `onLowMemory`) to the engine. Running low or the game left for another app
+  presses the asset caches (unused entries go after 10 s, at most 48 per cache); running
+  critical or the process in the background lets go of every unused model, texture and
+  actor part at once; for 30 s, then the RAM check decides again (`memory budget:
+  Android's memory warning …`). A process that gives memory back is killed later by the
+  low-memory killer (the reports end many runs with signal 9).
+- Frame log, every 10 s in play: the GPU's time in its costliest passes (timestamp
+  queries), the physics steps' load and the lights drawn, so a report from a gunfight shows
+  whether the frame goes to the GPU, the physics or the lights.
 
 ## 2.0.0-alpha55 (354)
 - Automatic graphics setup and a ceiling per phone, both games (each game's home keeps its

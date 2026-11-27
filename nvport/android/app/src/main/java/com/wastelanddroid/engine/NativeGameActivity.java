@@ -378,6 +378,29 @@ public class NativeGameActivity extends GameActivity implements QuickPanel.Host 
         if (overlay != null) overlay.reload();
     }
 
+    /**
+     * Android's memory warnings go to the engine, which lets go of the asset caches' unused
+     * entries (memory_budget.rs): a process that gives memory back when asked is killed
+     * later by the low-memory killer, in play and in the background.
+     */
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        try {
+            NativeInput.trimMemory(level);
+        } catch (UnsatisfiedLinkError ignored) {
+        }
+    }
+
+    @Override
+    public void onLowMemory() {
+        super.onLowMemory();
+        try {
+            NativeInput.trimMemory(80);
+        } catch (UnsatisfiedLinkError ignored) {
+        }
+    }
+
     @Override
     protected void onPause() {
         if (overlay != null) overlay.releaseAll();

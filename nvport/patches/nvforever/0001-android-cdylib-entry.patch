@@ -2040,10 +2040,10 @@ index bbdb0c0..0c6c5d1 100644
  libloading = "0.8.9"
 diff --git a/engine/nvforever/src/android_input.rs b/engine/nvforever/src/android_input.rs
 new file mode 100644
-index 0000000..9049246
+index 0000000..27a1301
 --- /dev/null
 +++ b/engine/nvforever/src/android_input.rs
-@@ -0,0 +1,897 @@
+@@ -0,0 +1,960 @@
 +//! [nvport] Input from the Android launcher (Fallout Droid): on-screen keys, touch look,
 +//! gamepads mapped to PC keys and physical keyboards/mice arrive through JNI
 +//! (`com.wastelanddroid.engine.NativeInput`) and are written as Bevy's own input messages,
@@ -2200,16 +2200,35 @@ index 0000000..9049246
 +    FRAME_CAP.store(fps.max(0), Ordering::Relaxed);
 +}
 +
-+fn apply_frame_cap(pace: Option<ResMut<crate::frame_pace::FramePace>>) {
++fn apply_frame_cap(pace: Option<ResMut<crate::frame_pace::FramePace>>, mut player: Local<Option<u32>>, mut thermal_seen: Local<i32>) {
 +    let want = FRAME_CAP.swap(-1, Ordering::Relaxed);
-+    if want < 0 {
++    let thermal = THERMAL.load(Ordering::Relaxed);
++    if want < 0 && thermal == *thermal_seen {
 +        return;
 +    }
-+    if let Some(mut pace) = pace {
-+        pace.cap = want as u32;
-+        crate::phone_cpu::TARGET_NS.store(if want > 0 { 1_000_000_000 / want as u64 } else { 0 }, Ordering::Relaxed);
-+        info!("android: frame-rate cap {} (in-game panel)", want);
++    if want >= 0 {
++        *player = Some(want as u32);
 +    }
++    *thermal_seen = thermal;
++    let Some(mut pace) = pace else { return };
++    // [nvport] A hot phone gets a lower frame-rate ceiling as well as the lower resolution
++    // the activity gives it: a Snapdragon 8 Gen 5 went from Hot to Critical in two minutes of
++    // play at 60 FPS (a tester's report), and the SoC then throttles itself into uneven
++    // frames. The player's own cap stands when it is lower.
++    let heat_cap = match thermal {
++        3 => 45,
++        2 => 50,
++        _ => 0,
++    };
++    let own = player.unwrap_or(pace.cap);
++    let cap = match (own, heat_cap) {
++        (0, h) => h,
++        (o, 0) => o,
++        (o, h) => o.min(h),
++    };
++    pace.cap = cap;
++    crate::phone_cpu::TARGET_NS.store(if cap > 0 { 1_000_000_000 / cap as u64 } else { 0 }, Ordering::Relaxed);
++    info!("android: frame-rate cap {cap} (the player's {own}, thermal {})", thermal_name());
 +}
 +
 +/// What the player may do now, for the keys (`NativeInput.playFlags`): bit 0 a weapon is
@@ -2328,6 +2347,9 @@ index 0000000..9049246
 +            );
 +        }
 +        app.add_systems(PreUpdate, drain.before(InputSystems)).add_systems(Last, (publish_ui_state, publish_play_flags)).add_systems(PostUpdate, creator_hides_actors).add_systems(PreUpdate, perf_overlay_out_of_menus).add_systems(Last, perf_overlay_out_of_menus).add_systems(PreUpdate, apply_frame_cap).add_systems(Last, frame_log).add_systems(Update, fx_test_cards);
++        // [nvport] The GPU's pass times and the physics load for the frame log.
++        crate::graphics::ensure_render_diagnostics(app);
++        app.init_resource::<nvf_play::phys_load::PhysLoad>();
 +    }
 +
 +    /// Every plugin has registered its settings rows by now.
@@ -2838,7 +2860,21 @@ index 0000000..9049246
 +    );
 +}
 +
-+fn frame_log(time: Res<Time<Real>>, mut log: Local<FrameLog>) {
++/// `NativeInput.trimMemory(level)`: Android's memory warning, for the caches
++/// (memory_budget.rs `TRIM_LEVEL`); the highest since the last check is kept.
++#[unsafe(no_mangle)]
++pub extern "C" fn Java_com_wastelanddroid_engine_NativeInput_trimMemory(_e: JEnv, _c: JClass, level: i32) {
++    crate::memory_budget::TRIM_LEVEL.fetch_max(level, Ordering::Relaxed);
++}
++
++#[allow(clippy::type_complexity)]
++fn frame_log(
++    time: Res<Time<Real>>,
++    mut log: Local<FrameLog>,
++    store: Option<Res<bevy::diagnostic::DiagnosticsStore>>,
++    phys: Option<ResMut<nvf_play::phys_load::PhysLoad>>,
++    lights: Query<(&ViewVisibility, Has<PointLight>), Or<(With<PointLight>, With<SpotLight>)>>,
++) {
 +    let ms = time.delta_secs() * 1000.0;
 +    if ms > 0.0 && ms < 1000.0 {
 +        let old = f32::from_bits(FRAME_MS.load(Ordering::Relaxed));
@@ -2880,6 +2916,33 @@ index 0000000..9049246
 +            sorted[0],
 +            thermal_name()
 +        );
++        // [nvport] Where the frame goes (what gunfights cost on a phone): the GPU's time in
++        // its costliest passes (timestamp queries, about the last second's average), the
++        // player's fixed physics steps over the period, and the lights drawn now.
++        if let Some(store) = store {
++            let mut passes: Vec<(String, f64)> = store
++                .iter()
++                .filter(|d| d.path().as_str().starts_with("render/") && d.path().as_str().ends_with("/elapsed_gpu"))
++                .filter_map(|d| Some((d.path().as_str().trim_start_matches("render/").trim_end_matches("/elapsed_gpu").to_string(), d.average()?)))
++                .filter(|(n, _)| !n.contains('/'))
++                .collect();
++            if !passes.is_empty() {
++                passes.sort_by(|a, b| b.1.total_cmp(&a.1));
++                let total: f64 = passes.iter().map(|(_, t)| t).sum();
++                let list: Vec<String> = passes.iter().take(8).map(|(n, t)| format!("{n} {t:.2}")).collect();
++                info!("frame log: gpu {total:.1} ms in its passes; {}", list.join(", "));
++            }
++        }
++        if let Some(line) = phys.and_then(|mut p| p.take_line()) {
++            info!("frame log: {line}");
++        }
++        let (mut points, mut spots) = (0, 0);
++        for (seen, point) in &lights {
++            if seen.get() {
++                if point { points += 1 } else { spots += 1 }
++            }
++        }
++        info!("frame log: lights drawn now: {points} point, {spots} spot");
 +        log.since = now;
 +        log.ms = sorted;
 +        log.ms.clear();
@@ -3892,7 +3955,7 @@ index a6cf138..87857c7 100644
      // The app and its renderer are gone; Streamline shut down before the device and instance it
      // used (dlss/, "Shutdown"). Nothing when Streamline was not loaded.
 diff --git a/engine/nvforever/src/memory_budget.rs b/engine/nvforever/src/memory_budget.rs
-index 0d206a3..e792255 100644
+index 0d206a3..47497a5 100644
 --- a/engine/nvforever/src/memory_budget.rs
 +++ b/engine/nvforever/src/memory_budget.rs
 @@ -82,7 +82,12 @@ pub const GPU_PRESSURE: (f64, f64) = (0.85, 0.75);
@@ -3943,6 +4006,83 @@ index 0d206a3..e792255 100644
      let full = KeepLimits::default();
      KeepLimits { secs: (full.secs * s).round().max(MIN_LIMITS.secs), max: ((full.max as f64 * s).round() as usize).max(MIN_LIMITS.max) }
  }
+@@ -534,6 +559,25 @@ fn read_budgets(mut commands: Commands, device: Option<Res<RenderDevice>>, adapt
+     commands.insert_resource(base);
+ }
+ 
++/// [nvport] Android's latest memory warning (`ComponentCallbacks2` level, set from the
++/// activity's `onTrimMemory` / `onLowMemory`; 0 none since the last check).
++pub static TRIM_LEVEL: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
++
++/// [nvport] How long a memory warning keeps the caches pressed, seconds [design].
++const TRIM_HOLD_SECS: f64 = 30.0;
++
++/// [nvport] What a warning asks: `RUNNING_LOW` (10) and `UI_HIDDEN` (20, the game left for
++/// another app) press the caches; `RUNNING_CRITICAL` (15) and the background levels (40
++/// and up, the process is on the killer's list) let go of every unused entry at once.
++/// `RUNNING_MODERATE` (5) is left to the RAM check.
++pub fn trim_limits(level: i32) -> Option<KeepLimits> {
++    match level {
++        15 | 40.. => Some(KeepLimits { secs: 0.0, max: 0 }),
++        10.. => Some(PRESSED),
++        _ => None,
++    }
++}
++
+ /// Every 2 s: this process's use of the GPU budget (both read again: other programs change
+ /// the budget) and the machine's free RAM; press the caches near either.
+ fn watch_use(
+@@ -544,12 +588,31 @@ fn watch_use(
+     mut limits: ResMut<KeepLimits>,
+     mut corner: Option<ResMut<nvf_play::corner_messages::CornerMessages>>,
+     mut last: Local<f64>,
++    mut trimmed: Local<(f64, Option<KeepLimits>)>,
+ ) {
+     let now = real.elapsed_secs_f64();
+     if now - *last < f64::from(nvf_assets::release::SWEEP_SECS) {
+         return;
+     }
+     *last = now;
++    // [nvport] Android's warning since the last check: its limits for TRIM_HOLD_SECS.
++    let level = TRIM_LEVEL.swap(0, std::sync::atomic::Ordering::Relaxed);
++    if let Some(l) = trim_limits(level) {
++        *trimmed = (now + TRIM_HOLD_SECS, Some(l));
++        budget.pressed = true;
++        *limits = l;
++        info!("memory budget: Android's memory warning (level {level}); caches keep unused {:.0} s, at most {} per cache, for {TRIM_HOLD_SECS:.0} s", l.secs, l.max);
++        return;
++    }
++    if trimmed.1.is_some() {
++        if now < trimmed.0 {
++            return;
++        }
++        // The hold is over: pressed as usual, the RAM check below lets go when it can.
++        trimmed.1 = None;
++        budget.pressed = true;
++        *limits = PRESSED;
++    }
+     let gpu = budget.vram_mb.and_then(|_| {
+         let pci = adapter.as_deref().map(|a| a.device_pci_bus_id.as_str());
+         read_vram(device.as_deref(), integrated(adapter.as_deref()), pci).ok()
+@@ -601,6 +664,18 @@ fn say_peak(mut exit: MessageReader<AppExit>, budget: Res<MemoryBudget>) {
+ 
+ #[cfg(test)]
+ mod tests {
++    #[test]
++    fn androids_memory_warnings_press_or_empty_the_caches() {
++        use super::{trim_limits, KeepLimits, PRESSED};
++        assert_eq!(trim_limits(0), None);
++        assert_eq!(trim_limits(5), None, "moderate: the RAM check decides");
++        assert_eq!(trim_limits(10), Some(PRESSED));
++        assert_eq!(trim_limits(20), Some(PRESSED), "the game left for another app");
++        assert_eq!(trim_limits(15), Some(KeepLimits { secs: 0.0, max: 0 }));
++        assert_eq!(trim_limits(40), Some(KeepLimits { secs: 0.0, max: 0 }));
++        assert_eq!(trim_limits(80), Some(KeepLimits { secs: 0.0, max: 0 }));
++    }
++
+     /// #2754: small blocks under 6 GB of budget and on a first run; the variable wins.
+     #[test]
+     fn the_allocators_blocks_follow_the_remembered_budget() {
 diff --git a/engine/nvforever/src/perf_overlay/draw.rs b/engine/nvforever/src/perf_overlay/draw.rs
 index 2d777b9..e6227d1 100644
 --- a/engine/nvforever/src/perf_overlay/draw.rs

@@ -100,4 +100,7 @@ public final class NativeInput {
 
     /** Thermal Adaptive Mode (0 Normal .. 3 Critical), the system's status and headroom (-1 unknown). */
     public static native void thermal(int mode, int status, float headroom);
+
+    /** Android's memory warnings (ComponentCallbacks2 TRIM_MEMORY_* level; 80 for onLowMemory). */
+    public static native void trimMemory(int level);
 }
