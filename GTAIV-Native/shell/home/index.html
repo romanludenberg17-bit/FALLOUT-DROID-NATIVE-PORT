@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>4NMP</title>
+<style>
+@font-face { font-family: "Oswald"; font-weight: 600; src: url(fonts/oswald-cyrillic-600-normal.woff2) format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: "Oswald"; font-weight: 600; src: url(fonts/oswald-latin-600-normal.woff2) format("woff2"); }
+@font-face { font-family: "Oswald"; font-weight: 700; src: url(fonts/oswald-cyrillic-700-normal.woff2) format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: "Oswald"; font-weight: 700; src: url(fonts/oswald-latin-700-normal.woff2) format("woff2"); }
+@font-face { font-family: "Rubik"; font-weight: 400; src: url(fonts/rubik-cyrillic-400-normal.woff2) format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: "Rubik"; font-weight: 400; src: url(fonts/rubik-latin-400-normal.woff2) format("woff2"); }
+@font-face { font-family: "Rubik"; font-weight: 500; src: url(fonts/rubik-cyrillic-500-normal.woff2) format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: "Rubik"; font-weight: 500; src: url(fonts/rubik-latin-500-normal.woff2) format("woff2"); }
+
+:root {
+  --accent: #F5A623; --accent-hi: #FFC04D; --ink: #F2F2F2; --dim: #A9A9A9; --mute: #7A7A7A;
+  --panel: rgba(12, 13, 15, .78); --line: rgba(255,255,255,.10); --bar: rgba(8, 9, 11, .94);
+  --ok: #4ADE80; --warn: #FACC15; --hot: #F87171;
+  --u: min(1vh, .55vw);               /* layout unit: fits 16:9 .. 22:9 landscape */
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; user-select: none; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0c0e; color: var(--ink);
+  font-family: "Rubik", system-ui, sans-serif; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+
+/* ---------- background ---------- */
+.bg { position: fixed; inset: 0; overflow: hidden; background: #d9d9d9; }
+.bg .shot { position: absolute; inset: -4%; background-size: cover; background-position: center;
+  opacity: 0; transition: opacity 2.4s ease; animation: drift 26s ease-in-out infinite alternate; }
+.bg .shot.on { opacity: 1; }
+@keyframes drift { from { transform: scale(1.02) translate3d(0,0,0); } to { transform: scale(1.09) translate3d(-2.2%, -1%, 0); } }
+.bg::after { content: ""; position: absolute; inset: 0;
+  background: linear-gradient(90deg, rgba(8,9,11,.86) 0%, rgba(8,9,11,.55) 34%, rgba(8,9,11,0) 58%),
+              linear-gradient(0deg, rgba(8,9,11,.85) 0%, rgba(8,9,11,0) 30%); }
+.hero { position: fixed; right: 7vw; bottom: calc(var(--u) * 13); height: calc(var(--u) * 86); z-index: 1;
+  -webkit-mask-image: linear-gradient(180deg, #000 78%, transparent 100%);
+          mask-image: linear-gradient(180deg, #000 78%, transparent 100%);
+  animation: rise .9s cubic-bezier(.2,.7,.2,1) both, float 7s ease-in-out 1s infinite alternate; }
+@keyframes rise { from { opacity: 0; transform: translateY(4%); } to { opacity: 1; transform: none; } }
+@keyframes float { to { transform: translateY(-1.2%); } }
+
+/* ---------- top ---------- */
+.top { position: fixed; top: calc(var(--u)*4); left: 4.2vw; right: 3.2vw; z-index: 3;
+  display: flex; align-items: flex-start; justify-content: space-between; }
+.brand { display: flex; align-items: center; gap: calc(var(--u)*2.2); }
+.brand img { height: calc(var(--u)*13); filter: drop-shadow(0 2px 6px rgba(0,0,0,.6)); }
+.brand .tag { font-family: "Oswald"; font-weight: 600; letter-spacing: .14em; font-size: calc(var(--u)*2.4);
+  color: var(--dim); line-height: 1.35; text-transform: uppercase; }
+.brand .tag b { color: var(--ink); font-weight: 700; display: block; font-size: calc(var(--u)*3); letter-spacing: .1em; }
+.chips { display: flex; gap: calc(var(--u)*1.4); align-items: center; }
+.chip { display: flex; align-items: center; gap: calc(var(--u)*1.2); height: calc(var(--u)*6.4);
+  padding: 0 calc(var(--u)*2.2); border-radius: 999px; background: var(--panel); border: 1px solid var(--line);
+  font-size: calc(var(--u)*2.4); color: var(--dim); backdrop-filter: blur(6px); }
+.chip b { color: var(--ink); font-weight: 500; }
+.dot { width: calc(var(--u)*1.5); height: calc(var(--u)*1.5); border-radius: 50%; background: var(--ok);
+  box-shadow: 0 0 calc(var(--u)*1.2) currentColor; color: var(--ok); }
+.dot.warn { background: var(--warn); color: var(--warn); } .dot.hot { background: var(--hot); color: var(--hot); }
+.chip.icon { width: calc(var(--u)*6.4); padding: 0; justify-content: center; color: #8fd3ff; }
+.chip.icon svg { width: 52%; height: 52%; }
+.chip.icon .badge { position: absolute; }
+
+/* ---------- continue card ---------- */
+.card { position: fixed; left: 4.2vw; top: calc(var(--u)*22); width: calc(var(--u)*64); z-index: 3;
+  background: var(--panel); border: 1px solid var(--line); border-radius: calc(var(--u)*1.6);
+  padding: calc(var(--u)*2.8); backdrop-filter: blur(10px);
+  animation: slide .7s cubic-bezier(.2,.7,.2,1) .15s both; }
+@keyframes slide { from { opacity: 0; transform: translateX(-6%); } to { opacity: 1; transform: none; } }
+.eyebrow { font-family: "Oswald"; font-weight: 600; letter-spacing: .18em; font-size: calc(var(--u)*2.2);
+  color: var(--accent); text-transform: uppercase; }
+.save { display: flex; gap: calc(var(--u)*2.2); margin: calc(var(--u)*1.8) 0 calc(var(--u)*2.4); align-items: center; }
+.thumb { width: calc(var(--u)*13); height: calc(var(--u)*13); border-radius: calc(var(--u)*1); flex: none;
+  background: #222 center/cover; border: 1px solid var(--line); }
+.save h2 { font-family: "Oswald"; font-weight: 700; font-size: calc(var(--u)*4.2); line-height: 1.1;
+  text-transform: uppercase; letter-spacing: .02em; }
+.save p { color: var(--dim); font-size: calc(var(--u)*2.5); margin-top: calc(var(--u)*.8); line-height: 1.35; }
+.play { display: flex; align-items: center; justify-content: center; gap: calc(var(--u)*1.6); width: 100%;
+  height: calc(var(--u)*10); border-radius: calc(var(--u)*1.2); background: var(--accent); color: #111;
+  font-family: "Oswald"; font-weight: 700; font-size: calc(var(--u)*4.6); letter-spacing: .12em;
+  box-shadow: 0 calc(var(--u)*1) calc(var(--u)*3) rgba(245,166,35,.35); transition: transform .12s, background .2s; }
+.play:active { transform: scale(.97); background: var(--accent-hi); }
+.play svg { width: calc(var(--u)*3.6); height: calc(var(--u)*3.6); }
+.modes { margin-top: calc(var(--u)*2.4); }
+.modes .lbl { display: flex; justify-content: space-between; font-size: calc(var(--u)*2.2); color: var(--mute);
+  margin-bottom: calc(var(--u)*1); }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); background: rgba(255,255,255,.06);
+  border-radius: calc(var(--u)*1); padding: calc(var(--u)*.5); gap: calc(var(--u)*.5); }
+.seg button { height: calc(var(--u)*7.4); border-radius: calc(var(--u)*.8); color: var(--dim);
+  font-size: calc(var(--u)*2.4); line-height: 1.15; transition: background .2s, color .2s; }
+.seg button small { display: block; font-size: calc(var(--u)*1.9); color: var(--mute); }
+.seg button.on { background: rgba(245,166,35,.16); color: var(--ink); box-shadow: inset 0 0 0 1px rgba(245,166,35,.55); }
+.seg button.on small { color: var(--accent); }
+
+/* ---------- tips + bottom bar ---------- */
+.tip { position: fixed; left: 4.2vw; right: 40vw; bottom: calc(var(--u)*13.2); z-index: 3;
+  font-size: calc(var(--u)*2.5); color: var(--dim); display: flex; gap: calc(var(--u)*1.4); align-items: baseline; }
+.tip b { font-family: "Oswald"; font-weight: 600; letter-spacing: .14em; color: var(--accent); font-size: calc(var(--u)*2.2); }
+.tip span { transition: opacity .5s; }
+.bar { position: fixed; left: 0; right: 0; bottom: 0; height: calc(var(--u)*11); z-index: 4; background: var(--bar);
+  border-top: 1px solid var(--line); display: flex; align-items: center; padding: 0 4.2vw; gap: 3.4vw; }
+.bar button { position: relative; height: 100%; font-family: "Oswald"; font-weight: 600; letter-spacing: .08em;
+  font-size: calc(var(--u)*3.6); color: #D0D0D0; text-transform: uppercase; }
+.bar button.main { color: var(--accent); }
+.bar button::after { content: ""; position: absolute; left: 0; right: 0; bottom: calc(var(--u)*2.2); height: 3px;
+  background: var(--accent); transform: scaleX(0); transition: transform .2s; }
+.bar button.main::after, .bar button:active::after { transform: scaleX(1); }
+.bar .sp { flex: 1; }
+.bar .ver { font-family: "Oswald"; font-weight: 600; letter-spacing: .1em; color: var(--mute); font-size: calc(var(--u)*2.6); }
+.bar .new { position: absolute; top: calc(var(--u)*2.6); right: calc(var(--u)*-1.6); width: calc(var(--u)*1.3);
+  height: calc(var(--u)*1.3); border-radius: 50%; background: var(--accent); }
+
+/* ---------- what's new ---------- */
+.sheet { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.6); display: none; align-items: center; justify-content: center; }
+.sheet.open { display: flex; }
+.sheet .box { width: min(78vw, calc(var(--u)*96)); background: #121316; border: 1px solid var(--line);
+  border-radius: calc(var(--u)*1.6); padding: calc(var(--u)*3.4); }
+.sheet h3 { font-family: "Oswald"; font-weight: 700; font-size: calc(var(--u)*4.4); text-transform: uppercase; letter-spacing: .04em; }
+.sheet ul { margin: calc(var(--u)*2) 0 calc(var(--u)*2.6) calc(var(--u)*2.6); color: var(--dim); font-size: calc(var(--u)*2.7); line-height: 1.55; }
+.sheet ul b { color: var(--ink); font-weight: 500; }
+.sheet .row { display: flex; gap: calc(var(--u)*1.4); justify-content: flex-end; }
+.btn2 { height: calc(var(--u)*7.4); padding: 0 calc(var(--u)*3); border-radius: calc(var(--u)*1); font-family: "Oswald";
+  font-weight: 600; letter-spacing: .1em; font-size: calc(var(--u)*2.8); background: rgba(255,255,255,.08); }
+.btn2.acc { background: var(--accent); color: #111; }
+.verbox { text-align: right; line-height: 1.25; }
+.verbox .legal { display: block; font-size: calc(var(--u)*1.8); color: rgba(255,255,255,.38); letter-spacing: .02em; }
+</style>
+</head>
+<body>
+<div class="bg"><div class="shot on" id="shotA"></div><div class="shot" id="shotB"></div></div>
+<img class="hero" src="girl.png" alt="">
+
+<div class="top">
+  <div class="brand">
+    <img src="logo_4nmp.png" alt="4NMP">
+    <div class="tag"><b>4NMP</b>GTA IV · Android · кооп</div>
+  </div>
+  <div class="chips">
+    <div class="chip" id="devChip"><span class="dot" id="heat"></span><span id="devTxt">Устройство</span></div>
+    <div class="chip"><b id="fpsTxt">60 FPS</b></div>
+    <button class="chip icon" id="tg" aria-label="Telegram">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.9 4.3 18.7 19.4c-.2 1-.9 1.3-1.7.8l-4.8-3.6-2.3 2.2c-.3.3-.5.5-1 .5l.3-4.9 8.9-8c.4-.3-.1-.5-.6-.2L6.5 13.1 1.8 11.6c-1-.3-1-1 .2-1.5L20.5 3c.9-.3 1.6.2 1.4 1.3z"/></svg>
+    </button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="eyebrow" id="eyebrow">Продолжить историю</div>
+  <div class="save">
+    <div class="thumb" id="thumb"></div>
+    <div><h2 id="saveTitle">Либерти-Сити</h2><p id="saveMeta">Последнее сохранение появится здесь</p></div>
+  </div>
+  <button class="play" id="play">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.4-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z"/></svg>
+    ИГРАТЬ
+  </button>
+  <div class="modes">
+    <div class="lbl"><span>Режим графики</span><span id="modeHint">Применяется при запуске</span></div>
+    <div class="seg" id="seg">
+      <button data-m="quality">Качество<small>30 FPS · 100%</small></button>
+      <button data-m="balance" class="on">Баланс<small>60 FPS · 75%</small></button>
+      <button data-m="performance">Скорость<small>60 FPS · 60%</small></button>
+    </div>
+  </div>
+</div>
+
+<div class="tip"><b>СОВЕТ</b><span id="tipTxt"></span></div>
+
+<div class="bar">
+  <button class="main" data-a="play">Играть</button>
+  <button data-a="mp">Мультиплеер</button>
+  <button data-a="settings">Настройки</button>
+  <button data-a="files">Файлы игры</button>
+  <button id="newBtn">Что нового<span class="new" id="newDot"></span></button>
+  <span class="sp"></span>
+  <span class="verbox"><span class="ver" id="ver">4NMP</span><span class="legal">Фанатский проект · нужна своя копия GTA IV</span></span>
+</div>
+
+<div class="sheet" id="sheet">
+  <div class="box">
+    <h3 id="newTitle">Что нового</h3>
+    <ul>
+      <li><b>Новое главное меню</b>: продолжение с последнего сохранения и выбор режима графики.</li>
+      <li><b>Режимы «Качество / Баланс / Скорость»</b>: 30 или 60 FPS и разрешение рендера.</li>
+      <li><b>Меньше нагрев</b>: лимит 60 FPS, защита от перегрева и пропуск лишней работы рендера.</li>
+      <li><b>Кооп по Wi‑Fi и VPN</b>: вкладка «Мультиплеер» — хост, подключение по IP, друзья.</li>
+    </ul>
+    <div class="row">
+      <button class="btn2" data-a="telegram">Канал в Telegram</button>
+      <button class="btn2 acc" id="sheetOk">Понятно</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+var $ = function (id) { return document.getElementById(id); };
+var BUILD = "1.3.4";
+function go(action, q) { location.href = "nmp://home/" + action + (q ? "?" + q : ""); }
+
+// background slideshow
+var shots = ["bg_bridge.jpg", "bg_street.jpg"], shotIx = 0;
+$("shotA").style.backgroundImage = "url(" + shots[0] + ")";
+$("shotB").style.backgroundImage = "url(" + shots[1] + ")";
+setInterval(function () {
+  shotIx ^= 1;
+  $("shotA").classList.toggle("on", shotIx === 0);
+  $("shotB").classList.toggle("on", shotIx === 1);
+}, 14000);
+
+// tips
+var tips = [
+  "Зажмите кнопку двери у машины, чтобы выбросить водителя.",
+  "«Скорость» снижает разрешение рендера: больше FPS и меньше нагрев.",
+  "Кооп работает по Wi‑Fi, точке доступа и VPN (ZeroTier, Tailscale).",
+  "Расположение и размер кнопок меняются в «Настройках».",
+  "Звоните Роману: дружба открывает бесплатное такси.",
+  "Телефон Нико — это быстрый доступ к друзьям, миссиям и такси.",
+  "Сохраняйтесь в убежище: кровать — точка сохранения."
+], tipIx = Math.floor(Math.random() * tips.length);
+function showTip() {
+  var s = $("tipTxt"); s.style.opacity = 0;
+  setTimeout(function () { s.textContent = tips[tipIx]; s.style.opacity = 1; tipIx = (tipIx + 1) % tips.length; }, 450);
+}
+showTip(); setInterval(showTip, 9000);
+
+// modes
+var MODE_TXT = { quality: "30 FPS", balance: "60 FPS", performance: "60 FPS" };
+function setMode(m, send) {
+  var bs = $("seg").querySelectorAll("button");
+  for (var i = 0; i < bs.length; i++) bs[i].classList.toggle("on", bs[i].getAttribute("data-m") === m);
+  $("fpsTxt").textContent = MODE_TXT[m] || "60 FPS";
+  if (send) go("mode", "m=" + m);
+}
+$("seg").addEventListener("click", function (e) {
+  var b = e.target.closest("button"); if (b) setMode(b.getAttribute("data-m"), true);
+});
+
+// actions
+$("play").onclick = function () { go("play"); };
+$("tg").onclick = function () { go("telegram"); };
+document.addEventListener("click", function (e) {
+  var b = e.target.closest("[data-a]"); if (b) go(b.getAttribute("data-a"));
+});
+function seenKey() { return "nmp_seen_" + BUILD; }
+$("newBtn").onclick = function () { $("sheet").classList.add("open"); };
+$("sheetOk").onclick = function () {
+  $("sheet").classList.remove("open");
+  try { localStorage.setItem(seenKey(), "1"); } catch (e) {}
+  $("newDot").style.display = "none";
+};
+try { if (localStorage.getItem(seenKey())) $("newDot").style.display = "none"; } catch (e) {}
+
+function ago(ms) {
+  var d = new Date(ms), now = new Date(), day = 864e5;
+  var t = ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
+  var startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  if (ms >= startToday) return "сегодня, " + t;
+  if (ms >= startToday - day) return "вчера, " + t;
+  return ("0" + d.getDate()).slice(-2) + "." + ("0" + (d.getMonth() + 1)).slice(-2) + "." + d.getFullYear() + ", " + t;
+}
+
+// data from the app: {version, device, thermal(0..6), mode, save:{name, time, thumb, count}}
+window.nmpInit = function (d) {
+  if (!d) return;
+  if (d.version) { BUILD = d.version; $("ver").textContent = "4NMP " + d.version; $("newTitle").textContent = "Что нового в " + d.version; }
+  try { if (localStorage.getItem(seenKey())) $("newDot").style.display = "none"; else $("newDot").style.display = ""; } catch (e) {}
+  if (d.device) $("devTxt").innerHTML = "<b></b>"; if (d.device) $("devTxt").firstChild.textContent = d.device;
+  var h = $("heat"); h.className = "dot" + (d.thermal >= 3 ? " hot" : d.thermal >= 1 ? " warn" : "");
+  $("devChip").title = ["Норма", "Тёплый", "Умеренный нагрев", "Сильный нагрев", "Критично", "Критично", "Отключение"][d.thermal || 0];
+  if (d.mode) setMode(d.mode, false);
+  if (d.save) {
+    $("eyebrow").textContent = "Продолжить историю";
+    $("saveTitle").textContent = "Сохранение " + (d.save.slot || "");
+    $("saveMeta").textContent = ago(d.save.time) + (d.save.count > 1 ? " · всего сохранений: " + d.save.count : "");
+    if (d.save.thumb) $("thumb").style.backgroundImage = "url(" + d.save.thumb + ")";
+  } else {
+    $("eyebrow").textContent = "Начать историю";
+    $("saveTitle").textContent = "Добро пожаловать в Либерти-Сити";
+    $("saveMeta").textContent = d.ready === false ? "Сначала укажите файлы игры: «Файлы игры» внизу." : "Сохранений пока нет: начните новую игру.";
+  }
+};
+if (/[?&]demo/.test(location.search)) nmpInit({ version: "1.3.4", device: "Snapdragon 8 Gen 5", thermal: 0, mode: "balance",
+  save: { slot: "№ 12", time: Date.now() - 864e5 - 3600e3, count: 2 } });
+</script>
+</body>
+</html>

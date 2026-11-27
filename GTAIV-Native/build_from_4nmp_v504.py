@@ -5,14 +5,16 @@
   - working MP / co-op hub (shell/nmp_mp_hub.html), bridge -> UDP 3076
   - package com.rommy.gtaiv, label, Wi-Fi multicast permissions, version
   - LAN discovery port 3076 + a thermal / FPS mini patch in the launcher's profiles
+  - 4NMP main menu: launcher/ (NmpHomeActivity, classes3.dex) + shell/home/ (HTML)
 usage: build_from_4nmp_v504.py <4NMP-v504.apk> <libq.so> <out unsigned.apk>
 """
-import hashlib, os, struct, sys, zipfile, zlib
+import glob, hashlib, os, shutil, struct, subprocess, sys, tempfile, zipfile, zlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_from_4nmp as base
 
-base.VERSION_CODE = 633
-base.VERSION_NAME = "1.3.3-v504"
+base.VERSION_CODE = 634
+base.VERSION_NAME = "1.3.4"
+base.LABEL = "4NMP"  # the project's name
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 def patch_dex(dex):
@@ -76,6 +78,36 @@ def patch_args(text, name):
         extra += [""] + MINI_PATCH
     return "\n".join(lines + extra + [""]).encode()
 
+SDK = os.environ.get("ANDROID_SDK_ROOT", "/opt/android-sdk")
+LAUNCHER_ACTIVITY = ("com.rommy.NmpLauncherActivity", "com.rommy.NmpHomeActivity")
+
+def build_launcher_dex():
+    """launcher/src -> classes3.dex (javac against android.jar + a stub of the 4NMP launcher)."""
+    android_jar = sorted(glob.glob(os.path.join(SDK, "platforms", "android-*", "android.jar")))[-1]
+    d8 = sorted(glob.glob(os.path.join(SDK, "build-tools", "*", "d8")))[-1]
+    src = os.path.join(HERE, "launcher")
+    with tempfile.TemporaryDirectory() as tmp:
+        stubs, cls, out = (os.path.join(tmp, x) for x in ("stubs", "cls", "dex"))
+        for d in (stubs, cls, out): os.makedirs(d)
+        javac = ["javac", "-nowarn", "-Xlint:-options", "-source", "8", "-target", "8", "-bootclasspath", android_jar]
+        subprocess.run(javac + ["-d", stubs] + glob.glob(os.path.join(src, "stubs", "**", "*.java"), recursive=True), check=True)
+        subprocess.run(javac + ["-cp", stubs, "-d", cls] + glob.glob(os.path.join(src, "src", "**", "*.java"), recursive=True), check=True)
+        classes = glob.glob(os.path.join(cls, "**", "*.class"), recursive=True)
+        subprocess.run([d8, "--release", "--min-api", "29", "--lib", android_jar, "--classpath", stubs,
+                        "--output", out] + classes, check=True)
+        return open(os.path.join(out, "classes.dex"), "rb").read()
+
+def rename_activity(axml):
+    """The launcher activity becomes NmpHomeActivity (a subclass of the 4NMP launcher)."""
+    buf = bytes(axml)
+    strings, utf8, flags, pool_size = base.read_pool(buf, 8)
+    old, new = LAUNCHER_ACTIVITY
+    assert strings.count(old) == 1, "launcher activity not found in the manifest"
+    strings[strings.index(old)] = new
+    pool = base.write_pool(strings, utf8, flags)
+    rest = buf[8 + pool_size:]
+    return struct.pack("<HHI", 0x0003, 8, 8 + len(pool) + len(rest)) + pool + rest
+
 def main():
     src, libq, out = sys.argv[1:4]
     with zipfile.ZipFile(src) as zin, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
@@ -84,7 +116,7 @@ def main():
             if n.startswith("META-INF/") and n.split("/")[-1].upper().endswith((".SF", ".RSA", ".MF", ".EC", ".DSA")):
                 continue
             data = zin.read(n)
-            if n == "AndroidManifest.xml": data = base.patch_manifest(data)
+            if n == "AndroidManifest.xml": data = rename_activity(base.patch_manifest(data))
             elif n == "resources.arsc": data = base.patch_arsc(data)
             elif n == "classes2.dex": data = patch_dex(data)
             elif n == "lib/arm64-v8a/libmain.so": data = patch_libmain(data)
@@ -99,6 +131,14 @@ def main():
             zout.writestr(zipfile.ZipInfo(n, item.date_time), data,
                           zipfile.ZIP_STORED if store else zipfile.ZIP_DEFLATED)
         zout.write(libq, "lib/arm64-v8a/libq.so")
+        assert "classes3.dex" not in zin.namelist()
+        zout.writestr("classes3.dex", build_launcher_dex())
+        home = os.path.join(HERE, "shell", "home")
+        for path in sorted(glob.glob(os.path.join(home, "**", "*"), recursive=True)):
+            if os.path.isfile(path):
+                name = "assets/home/" + os.path.relpath(path, home).replace(os.sep, "/")
+                stored = path.endswith((".png", ".jpg", ".woff2"))
+                zout.write(path, name, zipfile.ZIP_STORED if stored else zipfile.ZIP_DEFLATED)
     print("wrote", out)
 
 if __name__ == "__main__":
