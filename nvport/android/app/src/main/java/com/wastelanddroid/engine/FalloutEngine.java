@@ -194,26 +194,6 @@ public final class FalloutEngine {
         } catch (Exception ignored) {
         }
         args.add("env:NVF_TEX_MIP_SKIP=" + mip);
-        // GPU mesh preprocessing for the engine (console `fdgpu none|preprocess|culling|auto`,
-        // kept in gpu_preprocess.txt): auto lets the engine choose (the CPU path on an
-        // Adreno 8xx).
-        try {
-            java.io.File gp = new java.io.File(homeDir(context, game.id), "gpu_preprocess.txt");
-            String mode = gp.isFile() ? readText(gp).trim() : "auto";
-            if (mode.matches("none|preprocess|culling|auto")) args.add("env:NVPORT_GPU_PREPROCESS=" + mode);
-        } catch (Exception ignored) {
-        }
-        // Skinning: joints from uniform buffers on Adreno 5xx/6xx (characters drawn as a
-        // floating head on Snapdragon 778G), Bevy's storage buffers elsewhere; console
-        // `fdskin uniform|storage|auto` (skinning.txt) chooses.
-        try {
-            java.io.File home = homeDir(context, game.id);
-            java.io.File sk = new java.io.File(home, "skinning.txt");
-            String mode = sk.isFile() ? readText(sk).trim() : "auto";
-            boolean uniform = mode.equals("uniform") || (mode.equals("auto") && com.wastelanddroid.game.DeviceProfile.adreno6OrOlder(home));
-            if (uniform) args.add("env:NVPORT_SKIN_UNIFORM=1");
-        } catch (Exception ignored) {
-        }
         // The resolution row of the game's settings shows the height in use (0: native).
         args.add("env:NVPORT_RENDER_HEIGHT=" + Math.max(0, renderHeight(context)));
         // Snapdragon 7+ Gen 2 and up, and every high class chip: the engine's settings page

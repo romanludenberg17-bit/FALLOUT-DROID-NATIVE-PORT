@@ -1014,7 +1014,7 @@ index 2ea26c6..bb9eb07 100644
  }
  
 diff --git a/engine/nvf-play/src/console.rs b/engine/nvf-play/src/console.rs
-index 4e8f628..a8817f5 100644
+index 4e8f628..ab0b97c 100644
 --- a/engine/nvf-play/src/console.rs
 +++ b/engine/nvf-play/src/console.rs
 @@ -720,6 +720,7 @@ fn typing(
@@ -1025,7 +1025,7 @@ index 4e8f628..a8817f5 100644
                      c.print("Quests and info: sq, sqt, movetoqt [n], sqs <quest>, sqv <quest>, sv, caqs, inv, getavinfo <av>, setgs <setting> <value>, cam, qqq, advlevel (level up), poker [casino] (a poker table)");
                      c.print("Toggles: tcl (collision), tai (actors' AI), tdetect, tgm, tscr (scripts), tg (grass), ts (sky), tws (water), tt (trees), tlv (leaves), ToggleLODLand, ToggleNavmesh, tlik (head tracking), temo (emotions), tcg [radius] (collision shapes)");
                      c.print("bat <file> (console lines from a text file), rbat [file] (record lines for bat), scof [file] (write the console to a file), slpm [1-5] (a practice lock), [ref.]mfg expression|phoneme|modifier <id> <0-100>, mfg reset");
-@@ -777,6 +778,97 @@ fn typing(
+@@ -777,6 +778,36 @@ fn typing(
                  return;
              }
              // `bat <file>`: the file's lines run next, in order, as if typed.
@@ -1047,67 +1047,6 @@ index 4e8f628..a8817f5 100644
 +                    _ => c.print(format!("fdland on|off (now {})", if fnv_world::index::parent_land_off() { "off" } else { "on" })),
 +                }
 +            }
-+            // [nvport] `fdshadows off|sun|cloud|both`: the four shadow tests (nvforever
-+            // shadow_census.rs sets the Sun shadows and Cloud shadows rows and marks the log).
-+            "fdshadows" => {
-+                let ask = match rest.trim() {
-+                    "off" => 1,
-+                    "sun" => 2,
-+                    "cloud" => 3,
-+                    "both" => 4,
-+                    _ => 0,
-+                };
-+                if ask == 0 {
-+                    c.print("fdshadows off|sun|cloud|both");
-+                } else {
-+                    SHADOW_TEST.store(ask, std::sync::atomic::Ordering::Relaxed);
-+                    c.print(format!("fdshadows: test {ask} ({}); the run log's 'shadow census' lines every 10 s", rest.trim()));
-+                }
-+            }
-+            // [nvport] `fdgpu none|preprocess|culling|auto`: Bevy's GPU mesh preprocessing
-+            // for the next start (bevy_render gpu_preprocessing.rs, `NVPORT_GPU_PREPROCESS`).
-+            "fdgpu" => {
-+                let file = std::env::var_os("NVFOREVER_HOME").map(|h| std::path::PathBuf::from(h).join("gpu_preprocess.txt"));
-+                let mode = rest.trim();
-+                match (matches!(mode, "none" | "preprocess" | "culling" | "auto"), file) {
-+                    (true, Some(f)) => {
-+                        let _ = std::fs::write(&f, mode);
-+                        c.print(format!("fdgpu: {mode} from the next start"));
-+                    }
-+                    _ => c.print(format!(
-+                        "fdgpu none|preprocess|culling|auto (this run: {})",
-+                        std::env::var("NVPORT_GPU_PREPROCESS").unwrap_or_else(|_| "auto".into())
-+                    )),
-+                }
-+            }
-+            // [nvport] `fddecals projected|flat`: how impact decals are drawn from the next
-+            // start (nvforever decals.rs).
-+            "fddecals" => {
-+                let file = std::env::var_os("NVFOREVER_HOME").map(|h| std::path::PathBuf::from(h).join("decals.txt"));
-+                match (rest.trim(), file) {
-+                    (m @ ("projected" | "flat"), Some(f)) => {
-+                        let _ = std::fs::write(&f, m);
-+                        c.print(format!("fddecals: {m} from the next start"));
-+                    }
-+                    _ => c.print("fddecals projected|flat"),
-+                }
-+            }
-+            // [nvport] `fdskin uniform|storage|auto`: where skinned shapes read their joints
-+            // from the next start (bevy_pbr skin.rs, `NVPORT_SKIN_UNIFORM`; auto: uniform on
-+            // Adreno 5xx/6xx).
-+            "fdskin" => {
-+                let file = std::env::var_os("NVFOREVER_HOME").map(|h| std::path::PathBuf::from(h).join("skinning.txt"));
-+                match (rest.trim(), file) {
-+                    (m @ ("uniform" | "storage" | "auto"), Some(f)) => {
-+                        let _ = std::fs::write(&f, m);
-+                        c.print(format!("fdskin: {m} from the next start"));
-+                    }
-+                    _ => c.print(format!(
-+                        "fdskin uniform|storage|auto (this run: {})",
-+                        if std::env::var("NVPORT_SKIN_UNIFORM").is_ok_and(|v| v == "1") { "uniform" } else { "storage" }
-+                    )),
-+                }
-+            }
 +            "fxtest" => {
 +                FX_TEST.store(true, std::sync::atomic::Ordering::Relaxed);
 +                c.print("fxtest: three cards before the camera for 20 s: red opaque (left), green blended (middle), blue added (right)");
@@ -1123,20 +1062,18 @@ index 4e8f628..a8817f5 100644
              "bat" => {
                  batches += 1;
                  let found = if batches > MAX_BATCHES { Err(format!("bat: more than {MAX_BATCHES} batch files on one line")) } else { batch_lines(rest, &batch_roots(data.as_deref())) };
-@@ -1067,6 +1159,12 @@ pub fn place_name(d: &PlayData, cell: u32) -> String {
+@@ -1065,6 +1096,10 @@ pub fn place_name(d: &PlayData, cell: u32) -> String {
+     })
+ }
  
- /// The player's Extra Console Details tweak: a selected reference's details add its
- /// base's model [design: docs/design/tweaks.md].
 +/// [nvport] `fxtest`: asks the renderer for three test cards before the camera (opaque red,
 +/// blended green, added blue), to tell on a phone which kinds of drawing reach the screen.
-+/// [nvport] `fdshadows`'s ask: 1 off, 2 sun, 3 cloud, 4 both (nvforever shadow_census.rs).
-+pub static SHADOW_TEST: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 +pub static FX_TEST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 +
+ /// The player's Extra Console Details tweak: a selected reference's details add its
+ /// base's model [design: docs/design/tweaks.md].
  static MODEL_DETAILS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
- 
- /// Set by the Tweaks tab.
-@@ -1141,6 +1239,57 @@ pub fn describe(id: u32, d: &PlayData, sim: &SimState, rt: Option<&mut Runtime>)
+@@ -1141,6 +1176,57 @@ pub fn describe(id: u32, d: &PlayData, sim: &SimState, rt: Option<&mut Runtime>)
  }
  
  /// Where `coc <cell>` goes: the cell's COC spot (interiors and exterior cells alike).
@@ -3244,45 +3181,20 @@ index 012291e..0734019 100644
  /// file. Nothing here allocates (there is no memory), and the log's lock is never waited on
  /// (the failing allocation can be the log's own).
 diff --git a/engine/nvforever/src/decals.rs b/engine/nvforever/src/decals.rs
-index f9dd8cb..2e4c6ff 100644
+index f9dd8cb..95c340a 100644
 --- a/engine/nvforever/src/decals.rs
 +++ b/engine/nvforever/src/decals.rs
-@@ -91,9 +91,33 @@ const MISSES_LOGGED: u32 = 8;
- #[derive(Component)]
- struct Decal {
-     age: f32,
--    material: Handle<ForwardDecalMaterial<StandardMaterial>>,
-+    material: Option<Handle<ForwardDecalMaterial<StandardMaterial>>>,
-+    /// [nvport] Android: the decal as a flat quad on the surface (its material).
-+    flat: Option<Handle<StandardMaterial>>,
+@@ -94,6 +94,9 @@ struct Decal {
+     material: Handle<ForwardDecalMaterial<StandardMaterial>>,
  }
  
-+/// [nvport] Flat quads lifted off the surface instead of forward decals: only when asked
-+/// (`fddecals flat`, `<home>/decals.txt`). alpha24-47 drew them on every phone, as forward
-+/// decals showed none then (a forward decal reads the depth prepass it is drawn against);
-+/// flat quads stand off curved surfaces (bodies) as squares and pictures in the air. Since
-+/// alpha47 the phones prepare meshes on the CPU (Adreno 8xx), and forward decals are the
-+/// default again, as upstream.
-+fn flat_decals() -> bool {
-+    static FLAT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-+    *FLAT.get_or_init(|| {
-+        let flat = std::env::var_os("NVFOREVER_HOME")
-+            .and_then(|h| std::fs::read_to_string(std::path::Path::new(&h).join("decals.txt")).ok())
-+            .is_some_and(|t| t.trim() == "flat");
-+        info!("decals: {}", if flat { "flat quads (fddecals flat)" } else { "forward decals projected on the depth prepass" });
-+        flat
-+    })
-+}
 +/// [nvport] No decal closer than this to the camera, game units (module notes, `place`).
 +const NEAR_CAMERA: f32 = 48.0;
-+
-+/// How far a flat decal lies off its surface, in game units.
-+const FLAT_LIFT: f32 = 0.4;
 +
  /// A live decal: its entity, texture set and where it was put (game space).
  struct Live {
      entity: Entity,
-@@ -112,6 +136,8 @@ struct Decals {
+@@ -112,6 +115,8 @@ struct Decals {
      placed: u32,
      on_actors: u32,
      near_another: u32,
@@ -3291,7 +3203,7 @@ index f9dd8cb..2e4c6ff 100644
      /// On an actor flagged No Blood Decal (docs/spec-notes/actor-flags.md §2).
      no_decal: u32,
      over_frame_cap: u32,
-@@ -142,6 +168,7 @@ impl Default for Decals {
+@@ -142,6 +147,7 @@ impl Default for Decals {
              placed: 0,
              on_actors: 0,
              near_another: 0,
@@ -3299,11 +3211,8 @@ index f9dd8cb..2e4c6ff 100644
              no_decal: 0,
              over_frame_cap: 0,
              no_body: 0,
-@@ -193,9 +220,10 @@ fn place(
-     sfx: Option<Res<Sfx>>,
-     mut models: ModelCtx,
+@@ -195,7 +201,7 @@ fn place(
      mut materials: ResMut<Assets<ForwardDecalMaterial<StandardMaterial>>>,
-+    (mut flat_materials, mut quad): (ResMut<Assets<StandardMaterial>>, Local<Option<Handle<Mesh>>>),
      mut st: ResMut<Decals>,
      root: Query<(Entity, &GlobalTransform), With<WorldRoot>>,
 -    (rigs, nodes): (Query<&ActorRig>, Query<&GlobalTransform>),
@@ -3311,13 +3220,13 @@ index f9dd8cb..2e4c6ff 100644
      (streamer, cells): (Option<Res<Streamer>>, Query<&Transform, With<CellEntity>>),
      shapes: Query<DrawnShape>,
  ) {
-@@ -213,6 +241,14 @@ fn place(
+@@ -213,6 +219,14 @@ fn place(
          let Some(impact) = sfx.forms.impacts.get(&hit.impact) else { continue };
          let Some((set, data)) = sfx.forms.decal(impact) else { continue };
          let Some(set_id) = impact.texture_set else { continue };
 +        // [nvport] None within NEAR_CAMERA of the eye: a decal there lies round the camera
-+        // and a forward decal then covers the whole screen (players' reports: a huge
-+        // square at a shot); seen from so close it could not be drawn right anyway.
++        // and a forward decal then covers the whole screen; seen from so close it could not
++        // be drawn right anyway.
 +        let eye = cams.iter().next().map(|c| c.translation());
 +        if eye.is_some_and(|e| root_place.affine().transform_point3(Vec3::from_array(hit.point)).distance(e) < NEAR_CAMERA) {
 +            st.near_camera += 1;
@@ -3326,97 +3235,7 @@ index f9dd8cb..2e4c6ff 100644
          let mut point = Vec3::from_array(hit.point);
          let mut normal_game = Vec3::from_array(hit.normal);
          if let Some(actor) = hit.actor {
-@@ -340,8 +376,7 @@ fn place(
-             _ => (0.0, false),
-         };
-         let [r, g, b] = data.color;
--        let material = materials.add(ForwardDecalMaterial {
--            base: StandardMaterial {
-+        let base_material = StandardMaterial {
-                 base_color: Color::srgb_u8(r, g, b),
-                 base_color_texture: Some(base),
-                 specular_texture: normal.clone().filter(|_| masked),
-@@ -354,15 +389,23 @@ fn place(
-                 uv_transform: quarter((st.rng.next_f32() * 4.0) as u32),
-                 alpha_mode: AlphaMode::Blend,
-                 ..default()
--            },
--            extension: ForwardDecalMaterialExt { depth_fade_factor: if hit.actor.is_some() { data.depth.clamp(1.0, ACTOR_DEPTH) } else { data.depth.max(MIN_DEPTH) } },
--        });
-+            };
-+        let (material, flat) = if flat_decals() {
-+            let m = StandardMaterial { depth_bias: 8.0, ..base_material };
-+            (None, Some(flat_materials.add(m)))
-+        } else {
-+            (Some(materials.add(ForwardDecalMaterial {
-+                base: base_material,
-+                extension: ForwardDecalMaterialExt { depth_fade_factor: if hit.actor.is_some() { data.depth.clamp(1.0, ACTOR_DEPTH) } else { data.depth.max(MIN_DEPTH) } },
-+            })), None)
-+        };
-         let side = data.side(st.rng.next_f32());
-         let side = if hit.actor.is_some() { side.min(ACTOR_MAX_SIDE) } else { side };
-         let normal_dir = normal_game.normalize_or(Vec3::Z);
-         let spin = st.rng.next_f32() * std::f32::consts::TAU;
-         // The decal's quad lies in its xz plane, facing +y.
--        let game_place = Transform { translation: point, rotation: Quat::from_rotation_arc(Vec3::Y, normal_dir) * Quat::from_rotation_y(spin), scale: Vec3::new(side, 1.0, side) };
-+        let lifted = if flat_decals() { point + normal_dir * FLAT_LIFT } else { point };
-+        let game_place = Transform { translation: lifted, rotation: Quat::from_rotation_arc(Vec3::Y, normal_dir) * Quat::from_rotation_y(spin), scale: Vec3::new(side, 1.0, side) };
-         let (parent, place) = match bone {
-             None => match cell {
-                 Some((e, origin)) => (e, Transform { translation: point - origin, ..game_place }),
-@@ -373,9 +416,26 @@ fn place(
-                 (e, Transform::from_matrix(Mat4::from(g.affine().inverse() * world)))
-             }
-         };
--        let entity = commands
--            .spawn((ForwardDecal, MeshMaterial3d(material.clone()), place, Visibility::default(), RenderLayers::layer(DECAL_LAYER), Decal { age: 0.0, material }, ChildOf(parent)))
--            .id();
-+        let entity = match (&material, &flat) {
-+            (Some(m), _) => commands
-+                .spawn((ForwardDecal, MeshMaterial3d(m.clone()), place, Visibility::default(), RenderLayers::layer(DECAL_LAYER), Decal { age: 0.0, material: material.clone(), flat: None }, ChildOf(parent)))
-+                .id(),
-+            (None, Some(f)) => {
-+                let mesh = quad
-+                    .get_or_insert_with(|| {
-+                        // Tangents: the decal sets' normal maps need them, and a mesh
-+                        // without them is never drawn with a normal-mapped material.
-+                        let m = Mesh::from(Plane3d::new(Vec3::Y, Vec2::splat(0.5)));
-+                        let m = m.clone().with_generated_tangents().unwrap_or(m);
-+                        models.meshes.add(m)
-+                    })
-+                    .clone();
-+                commands
-+                    .spawn((Mesh3d(mesh), MeshMaterial3d(f.clone()), place, Visibility::default(), RenderLayers::layer(DECAL_LAYER), bevy::light::NotShadowCaster, Decal { age: 0.0, material: None, flat: flat.clone() }, ChildOf(parent)))
-+                    .id()
-+            }
-+            (None, None) => continue,
-+        };
-         if st.reported.insert(hit.impact) {
-             info!(
-                 "decals: {} leaves {} ({}) on {}: side {side:.0} of {:.0}-{:.0}, depth {:.0}",
-@@ -416,6 +476,7 @@ fn fade(
-     mut st: ResMut<Decals>,
-     mut decals: Query<(Entity, &mut Decal)>,
-     mut materials: ResMut<Assets<ForwardDecalMaterial<StandardMaterial>>>,
-+    mut flat_materials: ResMut<Assets<StandardMaterial>>,
- ) {
-     let dt = time.delta_secs();
-     st.clock += dt;
-@@ -429,9 +490,12 @@ fn fade(
-             commands.entity(e).try_despawn();
-             gone.push(e);
-         } else if left < DECAL_FADE {
--            if let Some(mut m) = materials.get_mut(&d.material) {
-+            if let Some(mut m) = d.material.as_ref().and_then(|h| materials.get_mut(h)) {
-                 m.base.base_color.set_alpha(left / DECAL_FADE);
-             }
-+            if let Some(mut m) = d.flat.as_ref().and_then(|h| flat_materials.get_mut(h)) {
-+                m.base_color.set_alpha(left / DECAL_FADE);
-+            }
-         }
-     }
-     st.faded += gone.len() as u32;
-@@ -446,8 +510,8 @@ fn report(mut exit: MessageReader<AppExit>, st: Res<Decals>) {
+@@ -446,8 +460,8 @@ fn report(mut exit: MessageReader<AppExit>, st: Res<Decals>) {
      let exit_seen = exit.read().last().is_some();
      if exit_seen && st.placed + st.near_another + st.no_body + st.no_cell > 0 {
          info!(
@@ -4801,10 +4620,10 @@ index bf97e78..4b28395 100644
              bevy::core_pipeline::prepass::DepthPrepass,
 diff --git a/engine/nvforever/src/shadow_census.rs b/engine/nvforever/src/shadow_census.rs
 new file mode 100644
-index 0000000..6d21460
+index 0000000..b687e7c
 --- /dev/null
 +++ b/engine/nvforever/src/shadow_census.rs
-@@ -0,0 +1,196 @@
+@@ -0,0 +1,160 @@
 +//! [nvport] Sun shadows and cloud shadows diagnosed apart (owner's report: sun shadows come
 +//! and go instead of staying; with cloud shadows on, the player's and NPCs' models
 +//! flicker). Every 10 s of play, one line for each system, from what the frames did:
@@ -4816,10 +4635,6 @@ index 0000000..6d21460
 +//! `shadow census: pipelines waiting <w> (most in one frame), failed <e>` and each failed
 +//! pipeline's label and error once (a failed or long-compiling variant is not drawn: a
 +//! model that skips frames flickers).
-+//!
-+//! Console `fdshadows off|sun|cloud|both` (`nvf_play::console::SHADOW_TEST`) sets the
-+//! two rows for the four tests, through the rows' own setters (kept in the INI as the page
-+//! keeps them), and marks the log (`shadow test: …`).
 +
 +use bevy::light::{Cascades, DirectionalLight};
 +use bevy::prelude::*;
@@ -4852,7 +4667,7 @@ index 0000000..6d21460
 +
 +impl Plugin for ShadowCensusPlugin {
 +    fn build(&self, app: &mut App) {
-+        app.add_systems(PostUpdate, census).add_systems(Update, shadow_test);
++        app.add_systems(PostUpdate, census);
 +        if let Some(render) = app.get_sub_app_mut(RenderApp) {
 +            render.add_systems(Render, pipelines.in_set(RenderSystems::Cleanup));
 +        }
@@ -4968,38 +4783,6 @@ index 0000000..6d21460
 +    let keep_dir = c.last_dir;
 +    let keep_on = c.was_on;
 +    *c = Counts { last_dir: keep_dir, was_on: keep_on, ..default() };
-+}
-+
-+fn shadow_test(world: &mut World) {
-+    let ask = nvf_play::console::SHADOW_TEST.swap(0, Ordering::Relaxed);
-+    if ask == 0 {
-+        return;
-+    }
-+    let (sun, cloud) = match ask {
-+        1 => (false, false),
-+        2 => (true, false),
-+        3 => (false, true),
-+        _ => (true, true),
-+    };
-+    use nvf_play::settings::{flip, pick, Settings};
-+    let Some(s) = world.get_resource::<Settings>() else { return };
-+    let sun_row = s.index("sun-shadows");
-+    let cloud_row = s.index("cloud-shadows");
-+    let cloud_now = cloud_row.and_then(|i| s.list().get(i).copied()).is_some_and(|r| (r.get)(world));
-+    if let Some(i) = sun_row {
-+        let name = if sun { if crate::shadow_rate::sun_shadow_choice(world) == 0 { "Quality" } else { crate::shadow_rate::SUN_SHADOW_CHOICES[crate::shadow_rate::sun_shadow_choice(world)] } } else { "Off" };
-+        pick(world, i, name);
-+    }
-+    if let Some(i) = cloud_row {
-+        if cloud_now != cloud {
-+            flip(world, i);
-+        }
-+    }
-+    info!(
-+        "shadow test {ask}: sun shadows {}, cloud shadows {}",
-+        if sun { "on" } else { "off" },
-+        if cloud { "on" } else { "off" }
-+    );
 +}
 diff --git a/engine/nvforever/src/shadow_rate.rs b/engine/nvforever/src/shadow_rate.rs
 index d428306..9e87692 100644
@@ -5366,10 +5149,10 @@ index 3589236..299ebbe 100644
  type GpuMeshExtractionQuery = (
      Entity,
 diff --git a/engine/vendor/bevy_pbr/src/render/skin.rs b/engine/vendor/bevy_pbr/src/render/skin.rs
-index c9ab356..9599981 100644
+index c9ab356..a98e6b0 100644
 --- a/engine/vendor/bevy_pbr/src/render/skin.rs
 +++ b/engine/vendor/bevy_pbr/src/render/skin.rs
-@@ -169,7 +169,20 @@ impl SkinUniformInfo {
+@@ -169,7 +169,23 @@ impl SkinUniformInfo {
  /// Returns true if skinning must use uniforms (and dynamic offsets) because
  /// storage buffers aren't supported on the current platform.
  pub fn skins_use_uniform_buffers(limits: &WgpuLimits) -> bool {
@@ -5378,14 +5161,17 @@ index c9ab356..9599981 100644
 +}
 +
 +/// NVForever (nvport): joints from uniform buffers (Bevy's own path where storage buffers
-+/// are missing) when `NVPORT_SKIN_UNIFORM=1`: the launcher asks it on Adreno 5xx/6xx
-+/// (Snapdragon 778G's Adreno 642L drew characters as a floating head, the skinned body
-+/// gone), and console `fdskin uniform|storage|auto` chooses for the next start.
++/// are missing) on Adreno 6xx and older (Snapdragon 778G's Adreno 642L drew characters as
++/// a floating head, the skinned body gone). Logged once as `skinning: …`.
 +fn nvport_uniform_skins() -> bool {
 +    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 +    *ON.get_or_init(|| {
-+        let on = std::env::var("NVPORT_SKIN_UNIFORM").is_ok_and(|v| v.trim() == "1");
-+        bevy_log::warn!("skinning: joints read from {} buffers", if on { "uniform (NVPORT_SKIN_UNIFORM=1)" } else { "storage" });
++        let name = bevy_render::renderer::adapter_name().unwrap_or("");
++        let model = name
++            .strip_prefix("Adreno (TM) ")
++            .map(|m| m.chars().map_while(|c| c.to_digit(10)).fold(0u32, |a, d| a * 10 + d));
++        let on = cfg!(target_os = "android") && model.is_some_and(|m| m > 0 && m < 700);
++        bevy_log::warn!("skinning: joints read from {} buffers ({name})", if on { "uniform" } else { "storage" });
 +        on
 +    })
  }
@@ -5409,7 +5195,7 @@ index 7566f48..c5c142e 100644
      let source = view_target.main_texture_view();
  
 diff --git a/engine/vendor/bevy_render/src/batching/gpu_preprocessing.rs b/engine/vendor/bevy_render/src/batching/gpu_preprocessing.rs
-index fba76a2..7e2368e 100644
+index fba76a2..dcccbd3 100644
 --- a/engine/vendor/bevy_render/src/batching/gpu_preprocessing.rs
 +++ b/engine/vendor/bevy_render/src/batching/gpu_preprocessing.rs
 @@ -1542,6 +1542,14 @@ where
@@ -5427,25 +5213,15 @@ index fba76a2..7e2368e 100644
  impl FromWorld for GpuPreprocessingSupport {
      fn from_world(world: &mut World) -> Self {
          let adapter = world.resource::<RenderAdapter>();
-@@ -1580,6 +1588,33 @@ impl FromWorld for GpuPreprocessingSupport {
+@@ -1580,6 +1588,23 @@ impl FromWorld for GpuPreprocessingSupport {
  
          let adapter_info = RenderAdapterInfo::new(adapter.get_info());
  
-+        // NVForever (nvport): the mode can be chosen for a run, `NVPORT_GPU_PREPROCESS` =
-+        // `none` (meshes prepared and culled on the CPU, direct draws), `preprocess` (GPU
-+        // preparation, no GPU culling) or `culling` (Bevy's full path). `auto` or unset: on
-+        // an Adreno 8xx (Snapdragon 8 Gen 4/5, whose driver loses the device in heavy
-+        // scenes, both games, since the first alpha builds) the CPU path, as Bevy itself
-+        // does for Adreno 730 and older; elsewhere Bevy's own choice. Logged as
-+        // `gpu preprocessing: …`. An experiment to find the device loss's cause: if the loss
-+        // goes with it, the GPU path on that driver is the cause.
-+        let asked = std::env::var("NVPORT_GPU_PREPROCESS").unwrap_or_default();
++        // NVForever (nvport): on an Adreno 8xx and a Huawei Maleoon the CPU path (below);
++        // elsewhere Bevy's own choice. Logged as `gpu preprocessing: …`.
 +        let adreno8 = crate::get_adreno_model(&adapter_info).is_some_and(|m| (800..900).contains(&m));
 +        let maleoon = adapter_info.vendor == 0x19E5 || adapter_info.name.to_ascii_lowercase().contains("maleoon");
-+        let forced = match asked.trim() {
-+            "none" => Some(GpuPreprocessingMode::None),
-+            "preprocess" => Some(GpuPreprocessingMode::PreprocessingOnly),
-+            "culling" => Some(GpuPreprocessingMode::Culling),
++        let forced = match () {
 +            // alpha47-49 ran the CPU path here and Fallout 3 stopped losing the device at its
 +            // menu (alpha8-46 lost it every time on Snapdragon 8 Gen 5); alpha50's GPU
 +            // preparation without culling is not proven there: the CPU path again.
@@ -5461,7 +5237,7 @@ index fba76a2..7e2368e 100644
          let max_supported_mode = if device.limits().max_compute_workgroup_size_x == 0
              || is_non_supported_android_device(&adapter_info)
              || adapter_info.backend == wgpu::Backend::Gl
-@@ -1598,6 +1633,24 @@ impl FromWorld for GpuPreprocessingSupport {
+@@ -1598,6 +1623,23 @@ impl FromWorld for GpuPreprocessingSupport {
              info_once!("GPU preprocessing is fully supported on this device.");
              GpuPreprocessingMode::Culling
          };
@@ -5470,9 +5246,8 @@ index fba76a2..7e2368e 100644
 +            Some(f) => {
 +                let f = if (f as u8) > (max_supported_mode as u8) { max_supported_mode } else { f };
 +                bevy_log::warn!(
-+                    "gpu preprocessing: {} for this run (NVPORT_GPU_PREPROCESS={:?}, {}; the device supports {})",
++                    "gpu preprocessing: {} on {}, as chosen for it (the device supports {})",
 +                    mode_name(f),
-+                    asked,
 +                    adapter_info.name,
 +                    mode_name(max_supported_mode)
 +                );
@@ -5528,6 +5303,34 @@ index 17628cb..4f44875 100644
                  prepare_next_frame.assets.push((id, extracted_asset));
              }
              Err(PrepareAssetError::AsBindGroupError(e)) => {
+diff --git a/engine/vendor/bevy_render/src/renderer/mod.rs b/engine/vendor/bevy_render/src/renderer/mod.rs
+index a28dd97..0aad44c 100644
+--- a/engine/vendor/bevy_render/src/renderer/mod.rs
++++ b/engine/vendor/bevy_render/src/renderer/mod.rs
+@@ -156,6 +156,15 @@ wgpu_wrapper! {
+     pub struct RenderAdapterInfo(AdapterInfo);
+ }
+ 
++/// NVForever (nvport): the adapter's name, for choices made where only the device's limits
++/// are at hand (bevy_pbr's skinning).
++static ADAPTER_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
++
++/// NVForever (nvport): the name of the adapter in use, once the renderer is made.
++pub fn adapter_name() -> Option<&'static str> {
++    ADAPTER_NAME.get().map(String::as_str)
++}
++
+ const GPU_NOT_FOUND_ERROR_MESSAGE: &str = if cfg!(target_os = "linux") {
+     "Unable to find a GPU! Make sure you have installed required drivers! For extra information, see: https://github.com/bevyengine/bevy/blob/latest/docs/linux_dependencies.md"
+ } else {
+@@ -383,6 +392,7 @@ pub async fn initialize_renderer(
+     debug!("Configured wgpu adapter Limits: {:#?}", device.limits());
+     debug!("Configured wgpu adapter Features: {:#?}", device.features());
+ 
++    let _ = ADAPTER_NAME.set(adapter_info.name.clone());
+     RenderResources(
+         RenderDevice::from(device),
+         RenderQueue::new(queue),
 diff --git a/engine/vendor/bevy_render/src/renderer/render_device.rs b/engine/vendor/bevy_render/src/renderer/render_device.rs
 index 614b9b3..4b8ff10 100644
 --- a/engine/vendor/bevy_render/src/renderer/render_device.rs

@@ -8,6 +8,13 @@
   running on that phone; `fdgpu` still chooses per phone.
 - GPU family `maleoon` (Huawei's PCI vendor 0x19E5) in the run log and `gpu_family.txt`; it
   was "other".
+- Test toggles removed (the owner: no workarounds in the build): console `fdgpu`, `fdskin`,
+  `fddecals`, `fdshadows`, their files (`gpu_preprocess.txt`, `skinning.txt`, `decals.txt`)
+  and the launcher's `NVPORT_GPU_PREPROCESS` / `NVPORT_SKIN_UNIFORM`. The engine decides from
+  the Vulkan device it runs on: meshes prepared on the CPU on Adreno 8xx and Maleoon, Bevy's
+  choice elsewhere; joints from uniform buffers on Adreno 6xx and older (decided from the
+  device's own name at the first start, no longer from the previous run's file); impact
+  decals always forward decals (the flat-quad mode and its code are gone).
 
 ## 2.0.0-alpha53 (352)
 - Textures blinking to other textures or to white, and the white "square" at a shot (both

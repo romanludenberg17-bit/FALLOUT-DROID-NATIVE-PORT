@@ -165,26 +165,6 @@ public final class DeviceProfile {
         }
     }
 
-    /**
-     * An Adreno 5xx/6xx (their joints read from storage buffers in the vertex shader drew
-     * characters as a floating head on Snapdragon 778G): from the Vulkan name when the engine
-     * has written it, else from the chip.
-     */
-    public static boolean adreno6OrOlder(java.io.File home) {
-        String v = vulkanGpu(home);
-        if (v != null) {
-            java.util.regex.Matcher mm = java.util.regex.Pattern.compile("Adreno \\(TM\\) (\\d)\\d\\d").matcher(v);
-            return mm.find() && (mm.group(1).equals("5") || mm.group(1).equals("6"));
-        }
-        String c = chipName();
-        for (String s : new String[]{"Snapdragon 888", "Snapdragon 865", "Snapdragon 855", "Snapdragon 780G", "Snapdragon 778G",
-                "Snapdragon 765G", "Snapdragon 750G", "Snapdragon 730G", "Snapdragon 695", "Snapdragon 680", "Snapdragon 675",
-                "Snapdragon 7 Gen 1", "Snapdragon 4 Gen 1", "Snapdragon 4 Gen 2"}) {
-            if (c.equals(s)) return true;
-        }
-        return false;
-    }
-
     static String socModel() {
         return Build.VERSION.SDK_INT >= 31 ? Build.SOC_MANUFACTURER + " " + Build.SOC_MODEL : Build.HARDWARE;
     }
