@@ -12,8 +12,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_from_4nmp as base
 from tools import stfs_extract
 
-base.VERSION_CODE = 631
-base.VERSION_NAME = "1.3.1-v504"
+base.VERSION_CODE = 632
+base.VERSION_NAME = "1.3.2-v504"
 FPS_OVERLAY = False
 HERE = os.path.dirname(os.path.abspath(__file__))
 

@@ -656,21 +656,27 @@ static void ensure_render_fixes(const char* pkg) {
 
 // The converted-texture cache was built by an older build and may hold the
 // broken conversions: move it aside once so the textures are rebuilt.
-static void reset_texture_cache_once(const char* pkg) {
+// 1.2.5-1.3.1 moved <game parent>/shader_cache/texture_cache aside once
+// ("reset"). It is not a disposable cache: it holds the textures the installer
+// converted from game.iso, and without it the game stays on a black screen.
+// Put it back.
+static void restore_texture_cache(const char* pkg) {
   char save[400];
   if (!portable_save_dir(pkg, save, sizeof(save))) return;
   char* slash = strrchr(save, '/');
   if (!slash) return;
   *slash = 0;  // <game parent>
-  char cache[460], old[480], marker[480];
+  char cache[460], old[480], aside[500];
   snprintf(cache, sizeof(cache), "%s/shader_cache/texture_cache", save);
   snprintf(old, sizeof(old), "%s/shader_cache/texture_cache.old", save);
-  snprintf(marker, sizeof(marker), "%s/shader_cache/.texture-cache-v625", save);
-  if (access(marker, F_OK) == 0) return;
-  if (access(cache, F_OK) == 0 && access(old, F_OK) != 0 && rename(cache, old) == 0)
-    __android_log_print(ANDROID_LOG_INFO, TAG, "texture cache moved to %s", old);
-  FILE* m = fopen(marker, "w");
-  if (m) fclose(m);
+  if (access(old, F_OK) != 0) return;
+  if (access(cache, F_OK) == 0) {
+    // an incomplete cache the engine started after the move: keep it aside
+    snprintf(aside, sizeof(aside), "%s/shader_cache/texture_cache.partial", save);
+    rename(cache, aside);
+  }
+  int ok = rename(old, cache) == 0;
+  __android_log_print(ANDROID_LOG_INFO, TAG, "texture cache restored: %s", ok ? "ok" : strerror(errno));
 }
 
 // ---- Diagnostics in shared storage (Android/data is hidden from file
@@ -875,7 +881,7 @@ __attribute__((constructor)) static void lanshim_init(void) {
       write_diagnostics(pkg);  // first: shows the state left by the previous run
       start_crash_capture();
       ensure_render_fixes(pkg);
-      reset_texture_cache_once(pkg);
+      restore_texture_cache(pkg);
     }
   }
   sync_touch_icons();
