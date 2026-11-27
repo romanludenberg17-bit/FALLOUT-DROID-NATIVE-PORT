@@ -294,9 +294,17 @@ static void install_complete_save(void) {
   undo_installed_save(store, old_name);
   char portable_dir[400];
   const int have_portable = portable_save_dir(pkg, portable_dir, sizeof(portable_dir));
-  if (have_portable) undo_installed_save(portable_dir, old_name);
+  if (have_portable) {
+    undo_installed_save(portable_dir, old_name);
+    undo_installed_save(portable_dir, name);  // 1.2.5 put the package at the folder root
+  }
+  // Xbox 360 USB layout the launcher imports from: <profile>/<title>/00000001/<file>.
+  // The package's own profile id; the engine rebinds it to this profile.
+  static const char layout[] = "E0001BBC781D8027/545407F2/00000001";
+  char content_dir[460];
+  if (have_portable) snprintf(content_dir, sizeof(content_dir), "%s/%s", portable_dir, layout);
   if (restore) {
-    if (have_portable) undo_installed_save(portable_dir, name);
+    if (have_portable) undo_installed_save(content_dir, name);
     __android_log_print(ANDROID_LOG_INFO, TAG, "own save restored");
     return;
   }
@@ -313,18 +321,21 @@ static void install_complete_save(void) {
 
   // Only the portable save folder beside the game: the engine adopts saves
   // from there and rebinds their header to this profile.
-  char targets[1][400];
+  char targets[1][460];
   int count = 0;
-  if (portable_save_dir(pkg, targets[0], sizeof(targets[0]))) count = 1;
+  if (have_portable) { snprintf(targets[0], sizeof(targets[0]), "%s", content_dir); count = 1; }
   if (!count) { __android_log_print(ANDROID_LOG_WARN, TAG, "no portable save folder; 100%% save not installed"); return; }
   for (int i = 0; i < count; ++i) {
     mkdirs(targets[i]);
     char to[500], marker[500];
     snprintf(to, sizeof(to), "%s/%s", targets[i], name);
     __android_log_print(ANDROID_LOG_INFO, TAG, "100%% save -> %s: %s", to, copy_file(source, to) ? "ok" : "failed");
-    // Run the engine's portable-save import again so the new package is adopted.
-    snprintf(marker, sizeof(marker), "%s/.portable-imported", targets[i]);
-    unlink(marker);
+    // Run the portable-save import again so the new package is adopted.
+    static const char* levels[] = {"", "/E0001BBC781D8027", "/E0001BBC781D8027/545407F2", "/E0001BBC781D8027/545407F2/00000001"};
+    for (int k = 0; k < 4; ++k) {
+      snprintf(marker, sizeof(marker), "%s%s/.portable-imported", portable_dir, levels[k]);
+      unlink(marker);
+    }
   }
   char marker[500];
   snprintf(marker, sizeof(marker), "%s/.portable-imported", store);
@@ -370,7 +381,61 @@ static void sync_touch_icons(void) {
   if (copied) __android_log_print(ANDROID_LOG_INFO, TAG, "touch icons updated: %d", copied);
 }
 
+// Vehicle badges / decals and mission markers drew black where they should be
+// transparent. Keep the Adreno renderer's alpha-sensitive shortcuts off: the
+// UBO path for shared constants (alpha test threshold), GPU detiling and the
+// inert-blending drop. Lines are appended to args.txt (read on the next start).
+static const char* kRenderFixes[] = {
+    "--gta4_native_ubo_shared_constants=false",
+    "--gta4_native_gpu_detile=false",
+    "--gta4_native_drop_inert_blending=false",
+};
+
+static void ensure_render_fixes(const char* pkg) {
+  char args[300];
+  snprintf(args, sizeof(args), "/storage/emulated/0/Android/data/%s/files/args.txt", pkg);
+  FILE* f = fopen(args, "r");
+  if (!f) return;
+  int have[3] = {0, 0, 0};
+  char line[512];
+  while (fgets(line, sizeof(line), f))
+    for (int i = 0; i < 3; ++i)
+      if (!strncmp(line, kRenderFixes[i], strlen(kRenderFixes[i]))) have[i] = 1;
+  fclose(f);
+  if (have[0] && have[1] && have[2]) return;
+  if (!(f = fopen(args, "a"))) return;
+  fputs("\n# Transparent decals / mission markers (render fixes)\n", f);
+  for (int i = 0; i < 3; ++i) if (!have[i]) { fputs(kRenderFixes[i], f); fputc('\n', f); }
+  fclose(f);
+}
+
+// The converted-texture cache was built by an older build and may hold the
+// broken conversions: move it aside once so the textures are rebuilt.
+static void reset_texture_cache_once(const char* pkg) {
+  char save[400];
+  if (!portable_save_dir(pkg, save, sizeof(save))) return;
+  char* slash = strrchr(save, '/');
+  if (!slash) return;
+  *slash = 0;  // <game parent>
+  char cache[460], old[480], marker[480];
+  snprintf(cache, sizeof(cache), "%s/shader_cache/texture_cache", save);
+  snprintf(old, sizeof(old), "%s/shader_cache/texture_cache.old", save);
+  snprintf(marker, sizeof(marker), "%s/shader_cache/.texture-cache-v625", save);
+  if (access(marker, F_OK) == 0) return;
+  if (access(cache, F_OK) == 0 && access(old, F_OK) != 0 && rename(cache, old) == 0)
+    __android_log_print(ANDROID_LOG_INFO, TAG, "texture cache moved to %s", old);
+  FILE* m = fopen(marker, "w");
+  if (m) fclose(m);
+}
+
 __attribute__((constructor)) static void lanshim_init(void) {
+  {
+    char pkg[128];
+    if (package_name(pkg, sizeof(pkg))) {
+      ensure_render_fixes(pkg);
+      reset_texture_cache_once(pkg);
+    }
+  }
   sync_touch_icons();
   install_complete_save();
   reset_foreign_touch_layout();

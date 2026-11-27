@@ -11,8 +11,8 @@ import hashlib, os, struct, sys, zipfile, zlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_from_4nmp as base
 
-base.VERSION_CODE = 625
-base.VERSION_NAME = "1.2.5-v504"
+base.VERSION_CODE = 626
+base.VERSION_NAME = "1.2.6-v504"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 def patch_dex(dex):
@@ -50,7 +50,9 @@ def patch_args(text):
     # Frame limit belongs to the in-game menu (a line here overrides it on every launch).
     lines = [l for l in text.splitlines() if not l.startswith("--gta4_frame_limit=")]
     extra = ["", "# LAN co-op (serverless)", "--gta4_multiplayer_backend=lan", "--gta4_lan_discovery_port=3076",
-             ""]
+             "# Transparent decals / mission markers (render fixes)",
+             "--gta4_native_ubo_shared_constants=false", "--gta4_native_gpu_detile=false",
+             "--gta4_native_drop_inert_blending=false", ""]
     return "\n".join(lines + extra).encode()
 
 def main():
