@@ -175,4 +175,40 @@ public final class DeviceProfile {
         activityManager.getMemoryInfo(memoryInfo);
         return memoryInfo.totalMem / 1048576L;
     }
+
+    /** The fastest core's top clock in MHz (cpufreq), 0 when not readable. */
+    public static int maxCpuMhz() {
+        int best = 0;
+        for (int i = 0; i < 16; i++) {
+            java.io.File f = new java.io.File("/sys/devices/system/cpu/cpu" + i + "/cpufreq/cpuinfo_max_freq");
+            if (!f.isFile()) continue;
+            try {
+                String t = new String(java.nio.file.Files.readAllBytes(f.toPath()), java.nio.charset.StandardCharsets.US_ASCII).trim();
+                best = Math.max(best, (int) (Long.parseLong(t) / 1000));
+            } catch (Exception ignored) {
+            }
+        }
+        return best;
+    }
+
+    /**
+     * The phone's graphics tier for the engine (`NVPORT_TIER`): the highest graphics profile
+     * the engine takes and allows on it. From the chip's class (autoQuality: SoC, RAM), the
+     * CPU's top clock and the RAM: HIGH chips "high", MEDIUM "medium", LOW "low", the weakest
+     * GPUs (veryLow) and phones under 4 GB of RAM or with no core of 2 GHz "potato". An unknown
+     * chip of the LOW class with a core of 3 GHz or more, 8 cores and 8 GB is "medium".
+     */
+    public static String performanceTier(Context context) {
+        long ram = totalRamMb(context);
+        int mhz = maxCpuMhz();
+        int cores = Runtime.getRuntime().availableProcessors();
+        if (veryLow() || ram < 3500 || (mhz > 0 && mhz < 2000)) return "potato";
+        Quality q = autoQuality(context);
+        if (q == Quality.LOW && mhz >= 3000 && cores >= 8 && ram >= 7500) q = Quality.MEDIUM;
+        switch (q) {
+            case HIGH: return "high";
+            case MEDIUM: return "medium";
+            default: return "low";
+        }
+    }
 }

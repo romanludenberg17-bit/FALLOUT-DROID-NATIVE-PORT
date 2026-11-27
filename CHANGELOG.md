@@ -1,5 +1,24 @@
 # Fallout Droid Native — CHANGELOG
 
+## 2.0.0-alpha55 (354)
+- Automatic graphics setup and a ceiling per phone, both games (each game's home keeps its
+  own): the launcher reads the phone's tier from the chip's class, the CPU's top clock and
+  the RAM (`DeviceProfile.performanceTier`, passed as `NVPORT_TIER`): High (Snapdragon 8 Gen
+  3 and up, Dimensity 9300+, Exynos 2500 with 7 GB+), Medium, Low, Potato (the weakest GPUs,
+  under 3.5 GB of RAM, or no core of 2 GHz). An unknown chip of the low class with a 3 GHz
+  core, 8 cores and 8 GB is Medium.
+  - The first start on a phone (and the first after its tier changes) takes the tier's
+    graphics profile, row by row through each row's own setter (`graphics profile:
+    automatic setup …`; `<home>/graphics_tier.txt`).
+  - No graphics row may ask more than the tier's profile: a row set above it, on the page or
+    by an old INI, goes back to the profile's value (`graphics cap: <row> held …`, once per
+    row); choosing a profile above the tier takes the tier's. Never Ultra on a phone: the
+    tester's Snapdragon 8 Gen 5 at native resolution with TAA ran 30-40 FPS and went from
+    Hot to Critical in two minutes.
+  - TAA is above every phone tier (High allows FXAA): with TAA the impact dust and debris
+    drew as black streaks trailing away from the camera (gone in the tester's video with
+    FXAA). TAA itself is not fixed for particles.
+
 ## 2.0.0-alpha54 (353)
 - Huawei Maleoon (Kirin 9000S, Maleoon 910): meshes prepared on the CPU, as on Adreno 8xx.
   A tester's report (alpha49, HUAWEI ADY-LX9) shows Fallout 3 ending with SIGSEGV about a

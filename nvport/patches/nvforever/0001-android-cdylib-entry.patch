@@ -4200,10 +4200,10 @@ index 0000000..46e7d2e
 +}
 diff --git a/engine/nvforever/src/phone_profiles.rs b/engine/nvforever/src/phone_profiles.rs
 new file mode 100644
-index 0000000..1299a42
+index 0000000..21e78af
 --- /dev/null
 +++ b/engine/nvforever/src/phone_profiles.rs
-@@ -0,0 +1,305 @@
+@@ -0,0 +1,417 @@
 +//! [nvport] Graphics Profile (Ultra, High, Medium, Low, Potato) on a phone: one row over
 +//! the real rows of the settings page. Taking a profile sets each of its rows through the
 +//! row's own setter, exactly as a change on the page would, so every row applies itself
@@ -4378,10 +4378,21 @@ index 0000000..1299a42
 +
 +const PROFILES: [Profile; 5] = [ULTRA, HIGH, MEDIUM, LOW, POTATO];
 +
-+/// This phone's default profile: High on the chips that get the full graphics rows
-+/// (`NVPORT_FULL_GFX`, the launcher's strong class), else by the RAM: Medium from 6 GB,
-+/// Low from 4 GB, Potato under that.
++/// This phone's profile (its tier): the launcher's `NVPORT_TIER` (`high`, `medium`, `low`,
++/// `potato`: from the chip's class, its CPU's top clock and the RAM, `DeviceProfile.
++/// performanceTier`); without it, High on the chips that get the full graphics rows
++/// (`NVPORT_FULL_GFX`), else by the RAM: Medium from 6 GB, Low from 4 GB, Potato under
++/// that. It is taken at the first start ([`go_live`]) and is the most any row may ask
++/// ([`hold_to_tier`]). Never Ultra on a phone: a Snapdragon 8 Gen 5 at native resolution
++/// with TAA ran 30-40 FPS and went from Hot to Critical in two minutes (a tester's report).
 +pub fn default_profile() -> usize {
++    match std::env::var("NVPORT_TIER").as_deref().map(str::trim) {
++        Ok("high") => return 1,
++        Ok("medium") => return 2,
++        Ok("low") => return 3,
++        Ok("potato") => return 4,
++        _ => {}
++    }
 +    if std::env::var("NVPORT_FULL_GFX").is_ok_and(|v| v == "1") {
 +        return 1;
 +    }
@@ -4429,6 +4440,8 @@ index 0000000..1299a42
 +    if !LIVE.load(std::sync::atomic::Ordering::Relaxed) {
 +        return;
 +    }
++    // A profile above this phone's tier takes the tier's.
++    let n = n.max(default_profile());
 +    let Some(profile) = PROFILES.get(n) else { return };
 +    let mut set = 0;
 +    for &(key, want) in profile.iter() {
@@ -4464,7 +4477,7 @@ index 0000000..1299a42
 +
 +pub fn register(app: &mut App) {
 +    use nvf_play::settings::{add_setting, Setting, Slider};
-+    app.add_systems(Update, go_live);
++    app.add_systems(Update, (go_live, hold_to_tier.after(go_live)));
 +    add_setting(
 +        app,
 +        Setting::slider(
@@ -4496,7 +4509,106 @@ index 0000000..1299a42
 +    }
 +    *done = true;
 +    LIVE.store(true, std::sync::atomic::Ordering::Relaxed);
++    auto_setup(world);
 +    log_at_start(world);
++}
++
++/// The tier set up last, kept in `<home>/graphics_tier.txt`.
++fn tier_file() -> Option<std::path::PathBuf> {
++    std::env::var_os("NVFOREVER_HOME").map(|h| std::path::PathBuf::from(h).join("graphics_tier.txt"))
++}
++
++/// Automatic setup at the start: the first start on this phone, or the first after its
++/// tier changed (a new launcher's reading of the chip), takes the tier's profile, every
++/// row through its own setter (kept in the INI as the page keeps it). Later starts keep
++/// the player's rows, held at most at the tier ([`hold_to_tier`]). Logged as
++/// `graphics profile: automatic setup …`.
++fn auto_setup(world: &mut World) {
++    let tier = default_profile();
++    let file = tier_file();
++    let done = file.as_ref().and_then(|f| std::fs::read_to_string(f).ok()).is_some_and(|t| t.trim() == NAMES[tier]);
++    if done {
++        return;
++    }
++    info!("graphics profile: automatic setup for this phone's tier {}", NAMES[tier]);
++    take(world, tier);
++    if let Some(f) = file {
++        let _ = std::fs::write(f, NAMES[tier]);
++    }
++}
++
++/// The anti-aliasing choices by their cost, the cheapest first.
++const AA_COST: [&str; 7] = ["Off", "FXAA", "SMAA", "2x", "TAA", "4x", "8x"];
++
++/// Where a list row's choice `name` stands, the cheapest 0: anti-aliasing by
++/// [`AA_COST`], every other list in its own order (Off, then dearer).
++fn rank(world: &World, s: &Settings, i: usize, key: &str, name: &str) -> Option<usize> {
++    if key == "anti-aliasing" {
++        return AA_COST.iter().position(|a| *a == name);
++    }
++    (s.choices(i)?.names)(world).iter().position(|n| n == name)
++}
++
++/// Whether row `key` asks more than `cap` (a profile's value): a switch on where the
++/// profile has it off (the dynamic resolution, on in every profile, is never held), a
++/// slider above it, a resolution above it, fewer texture levels dropped, a dearer choice.
++fn above(world: &World, s: &Settings, i: usize, key: &str, cap: Want) -> bool {
++    if s.disabled_status(world, i).is_some() {
++        return false;
++    }
++    let Some(row) = s.list().get(i) else { return false };
++    match cap {
++        On(on) => !on && row.slider.is_none() && s.choices(i).is_none() && (row.get)(world),
++        Part(p) => row.slider.is_some_and(|sl| (sl.get)(world) > p.clamp(sl.min, 1.0) + sl.step.max(0.01) * 0.51),
++        Nth(n, count) => row.slider.is_some_and(|sl| {
++            let now = choice_index((sl.get)(world), count);
++            if key == "texture-quality" { now < n } else { now > n }
++        }),
++        Pick(name) => s.choices(i).is_some_and(|c| {
++            let now = (c.chosen)(world);
++            matches!((rank(world, s, i, key, &now), rank(world, s, i, key, name)), (Some(a), Some(b)) if a > b)
++        }),
++    }
++}
++
++/// Every graphics row at most at this phone's tier's profile (checked twice a second):
++/// a row set above it, on the page or by an old INI, goes back to the profile's value,
++/// through its own setter. Logged once per row: `graphics cap: <row> held at the <tier>
++/// profile's value on this phone`.
++fn hold_to_tier(world: &mut World, mut next: Local<f64>, mut said: Local<std::collections::HashSet<&'static str>>) {
++    if !LIVE.load(std::sync::atomic::Ordering::Relaxed) {
++        return;
++    }
++    let now = world.resource::<Time<Real>>().elapsed_secs_f64();
++    if now < *next {
++        return;
++    }
++    *next = now + 0.5;
++    let tier = default_profile();
++    for &(key, cap) in PROFILES[tier].iter() {
++        let Some(s) = world.get_resource::<Settings>() else { return };
++        let Some(i) = s.index(key) else { continue };
++        if !above(world, s, i, key, cap) {
++            continue;
++        }
++        match cap {
++            On(_) => {
++                settings::flip(world, i);
++            }
++            Part(p) => {
++                settings::set_slider(world, i, p);
++            }
++            Nth(idx, count) => {
++                settings::set_slider(world, i, choice_part(idx, count));
++            }
++            Pick(name) => {
++                settings::pick(world, i, name);
++            }
++        }
++        if said.insert(key) {
++            info!("graphics cap: {key} held at the {} profile's value on this phone", NAMES[tier]);
++        }
++    }
 +}
 +
 +/// Logs the profile the rows match at the start (after the INI was read).

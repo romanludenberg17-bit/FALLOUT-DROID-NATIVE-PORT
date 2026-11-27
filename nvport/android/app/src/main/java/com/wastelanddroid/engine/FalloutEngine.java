@@ -199,6 +199,9 @@ public final class FalloutEngine {
         // Snapdragon 7+ Gen 2 and up, and every high class chip: the engine's settings page
         // shows the graphics rows again and the player's choices there stand.
         if (strongGraphics(context)) args.add("env:NVPORT_FULL_GFX=1");
+        // The graphics tier: the engine sets this phone's profile at the first start and keeps
+        // every graphics row at most at that profile (nvforever phone_profiles.rs).
+        args.add("env:NVPORT_TIER=" + com.wastelanddroid.game.DeviceProfile.performanceTier(context));
         profile.addArgs(args);
         java.util.Map<String, java.util.Map<String, String>> ini = new java.util.LinkedHashMap<>();
         ini.put("Settings", profile.iniSettings());
