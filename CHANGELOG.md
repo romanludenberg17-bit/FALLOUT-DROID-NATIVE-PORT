@@ -1,5 +1,11 @@
 # Fallout Droid Native — CHANGELOG
 
+## 2.0.0-alpha57 (356)
+- Launcher: an intro video (`assets/video/intro.mp4`, 5.5 s, H.264 re-encoded from the owner's
+  HEVC clip) plays once per app start after the ROMMY card, fitted to the screen; a tap
+  skips it, and it is muted if the WebView refuses sound without a touch. Not again when the
+  launcher page comes back from a game.
+
 ## 2.0.0-alpha56 (355)
 - Crash with TAA on a phone fixed (a tester's report, alpha55, Snapdragon 8 Gen 5: "the
   game stops", Vulkan validation in `taa_pass`, "Attachments have differing sizes: 1100 x

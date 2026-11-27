@@ -3271,7 +3271,19 @@ body.gamepad-connected-mode #ingame-controls-layer {
 /* v1.1.83 QUOTE WRAP FIX */ .setup-tip-text,#setup-tip-text{white-space:normal!important;overflow-wrap:break-word!important;word-break:normal!important;line-height:1.45!important;}
 </style>
 </head>
-<body><div id="rommy-splash" style="position:fixed;inset:0;z-index:999999;background:#000;display:flex;align-items:center;justify-content:center;opacity:1;transition:opacity 0.45s ease-in;pointer-events:auto;"><img id="rommy-splash-img" src="../art/rommy_splash.jpg" alt="ROMMY PRODUCTION" style="width:100%;height:100%;object-fit:contain;display:block;background:#000;opacity:0;transform:scale(0.97);transition:opacity 0.45s ease-out,transform 0.45s ease-out;"></div><script>(function(){var s=document.getElementById("rommy-splash"),im=document.getElementById("rommy-splash-img");if(!s||!im)return;requestAnimationFrame(function(){requestAnimationFrame(function(){im.style.opacity="1";im.style.transform="scale(1)";});});setTimeout(function(){s.style.opacity="0";s.style.pointerEvents="none";setTimeout(function(){if(s&&s.parentNode)s.parentNode.removeChild(s);},480);},1100);})();</script>
+<body><div id="rommy-splash" style="position:fixed;inset:0;z-index:999999;background:#000;display:flex;align-items:center;justify-content:center;opacity:1;transition:opacity 0.45s ease-in;pointer-events:auto;"><img id="rommy-splash-img" src="../art/rommy_splash.jpg" alt="ROMMY PRODUCTION" style="width:100%;height:100%;object-fit:contain;display:block;background:#000;opacity:0;transform:scale(0.97);transition:opacity 0.45s ease-out,transform 0.45s ease-out;"></div><script>(function(){var s=document.getElementById("rommy-splash"),im=document.getElementById("rommy-splash-img");if(!s||!im)return;requestAnimationFrame(function(){requestAnimationFrame(function(){im.style.opacity="1";im.style.transform="scale(1)";});});function fdSplashOut(){s.style.opacity="0";s.style.pointerEvents="none";setTimeout(function(){if(s&&s.parentNode)s.parentNode.removeChild(s);},480);}
+/* Intro video once per app start (sessionStorage: not again when the page comes back), after the ROMMY card; a tap skips it. */
+function fdIntro(){var seen=false;try{seen=sessionStorage.getItem("fdIntroShown")==="1";sessionStorage.setItem("fdIntroShown","1");}catch(e){}
+if(seen){fdSplashOut();return;}
+var v=document.createElement("video");v.src="../video/intro.mp4";v.setAttribute("playsinline","");v.playsInline=true;v.preload="auto";
+v.style.cssText="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;opacity:0;transition:opacity 0.35s ease-out;";
+var done=false;function end(){if(done)return;done=true;try{v.pause();}catch(e){}fdSplashOut();}
+v.addEventListener("ended",end);v.addEventListener("error",end);s.addEventListener("click",end);
+v.addEventListener("playing",function(){im.style.opacity="0";v.style.opacity="1";});
+s.appendChild(v);
+var p=v.play();if(p&&p.catch)p.catch(function(){v.muted=true;var q=v.play();if(q&&q.catch)q.catch(end);});
+setTimeout(end,15000);}
+setTimeout(fdIntro,1100);})();</script>
 
 <!-- 1. LOADING SCREEN SLIDESHOW BACKDROP (All 11 Loading Screens from resources.zip) -->
 <div id="slideshow-backdrop">
