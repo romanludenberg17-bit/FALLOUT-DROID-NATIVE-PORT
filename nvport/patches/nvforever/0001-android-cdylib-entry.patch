@@ -4200,10 +4200,10 @@ index 0000000..46e7d2e
 +}
 diff --git a/engine/nvforever/src/phone_profiles.rs b/engine/nvforever/src/phone_profiles.rs
 new file mode 100644
-index 0000000..21e78af
+index 0000000..7831d9b
 --- /dev/null
 +++ b/engine/nvforever/src/phone_profiles.rs
-@@ -0,0 +1,417 @@
+@@ -0,0 +1,415 @@
 +//! [nvport] Graphics Profile (Ultra, High, Medium, Low, Potato) on a phone: one row over
 +//! the real rows of the settings page. Taking a profile sets each of its rows through the
 +//! row's own setter, exactly as a change on the page would, so every row applies itself
@@ -4477,7 +4477,9 @@ index 0000000..21e78af
 +
 +pub fn register(app: &mut App) {
 +    use nvf_play::settings::{add_setting, Setting, Slider};
-+    app.add_systems(Update, (go_live, hold_to_tier.after(go_live)));
++    // The ceiling after every change of the frame (the page's, a script's), so a row above
++    // the tier never reaches a drawn frame.
++    app.add_systems(Update, go_live).add_systems(PostUpdate, hold_to_tier);
 +    add_setting(
 +        app,
 +        Setting::slider(
@@ -4571,19 +4573,15 @@ index 0000000..21e78af
 +    }
 +}
 +
-+/// Every graphics row at most at this phone's tier's profile (checked twice a second):
++/// Every graphics row at most at this phone's tier's profile (checked every frame; alpha55
++/// checked twice a second, and a TAA chosen on the page drew until then):
 +/// a row set above it, on the page or by an old INI, goes back to the profile's value,
 +/// through its own setter. Logged once per row: `graphics cap: <row> held at the <tier>
 +/// profile's value on this phone`.
-+fn hold_to_tier(world: &mut World, mut next: Local<f64>, mut said: Local<std::collections::HashSet<&'static str>>) {
++fn hold_to_tier(world: &mut World, mut said: Local<std::collections::HashSet<&'static str>>) {
 +    if !LIVE.load(std::sync::atomic::Ordering::Relaxed) {
 +        return;
 +    }
-+    let now = world.resource::<Time<Real>>().elapsed_secs_f64();
-+    if now < *next {
-+        return;
-+    }
-+    *next = now + 0.5;
 +    let tier = default_profile();
 +    for &(key, cap) in PROFILES[tier].iter() {
 +        let Some(s) = world.get_resource::<Settings>() else { return };
@@ -4999,6 +4997,40 @@ index bd2755d..bca55f7 100644
      if let Ok((mut light, mut t)) = sun.single_mut() {
          aim_sun(&mut light, &mut t, light_dir, to_bevy.rotation * Vec3::Y, PI * unit * sky.sun_scale() * sun_mod);
      }
+diff --git a/engine/nvforever/src/taa.rs b/engine/nvforever/src/taa.rs
+index 8ccdaae..53573c2 100644
+--- a/engine/nvforever/src/taa.rs
++++ b/engine/nvforever/src/taa.rs
+@@ -221,10 +221,10 @@ fn prepare(
+     mut histories: ResMut<Histories>,
+     device: Res<RenderDevice>,
+     queue: Res<RenderQueue>,
+-    views: Query<(Entity, &ExtractedView, &Msaa, &TemporalAa, Option<&ViewPrepassTextures>)>,
++    views: Query<(Entity, &ExtractedView, &Msaa, &TemporalAa, Option<&ViewPrepassTextures>, Option<&ViewTarget>)>,
+ ) {
+     let mut seen = Vec::new();
+-    for (entity, view, msaa, taa, prepass) in &views {
++    for (entity, view, msaa, taa, prepass, target) in &views {
+         seen.push(entity);
+         let format = view.target_format;
+         let pipeline = match pipelines.by_format.get(&format) {
+@@ -242,7 +242,15 @@ fn prepare(
+                 id
+             }
+         };
+-        let size = view.viewport.zw().max(UVec2::ONE);
++        // The history is written beside the picture in one pass, so it takes the picture's
++        // own texture size. [nvport] A phone's dynamic resolution draws into part of that
++        // texture (a viewport of 1100 x 504 in a 1650 x 756 picture): sized by the
++        // viewport, the two attachments differed and Vulkan stopped the game ("Attachments
++        // have differing sizes", a tester's report).
++        let size = target
++            .map(|t| { let e = t.main_texture().size(); UVec2::new(e.width, e.height) })
++            .unwrap_or_else(|| view.viewport.zw())
++            .max(UVec2::ONE);
+         let mut history = |label: &'static str| {
+             textures.get(
+                 &device,
 diff --git a/engine/nvforever/src/terminal_view.rs b/engine/nvforever/src/terminal_view.rs
 index 5a7c1e2..5f62ce4 100644
 --- a/engine/nvforever/src/terminal_view.rs

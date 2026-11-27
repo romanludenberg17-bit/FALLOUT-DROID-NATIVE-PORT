@@ -1,5 +1,20 @@
 # Fallout Droid Native — CHANGELOG
 
+## 2.0.0-alpha56 (355)
+- Crash with TAA on a phone fixed (a tester's report, alpha55, Snapdragon 8 Gen 5: "the
+  game stops", Vulkan validation in `taa_pass`, "Attachments have differing sizes: 1100 x
+  504 … 1650 x 756"). The TAA history was sized by the view's viewport, while the pass
+  writes it beside the picture, whose texture is larger when the phone's dynamic resolution
+  draws into part of it. The history now takes the picture texture's size. The same
+  mismatch is a likely cause of the black streaks trailing behind impact dust with TAA (not
+  seen on a phone since; TAA stays above the phone tiers for its cost).
+- Graphics ceiling checked every frame after the frame's changes (alpha55: twice a second,
+  so a TAA chosen on the page drew for up to half a second before going back to FXAA, which
+  is when that crash came).
+- Seen in the same report: the automatic setup took the High profile on its first start (8
+  rows changed); New Vegas ran 50-59 FPS where alpha54's Custom rows (native resolution,
+  TAA) ran 30-40.
+
 ## 2.0.0-alpha55 (354)
 - Automatic graphics setup and a ceiling per phone, both games (each game's home keeps its
   own): the launcher reads the phone's tier from the chip's class, the CPU's top clock and
