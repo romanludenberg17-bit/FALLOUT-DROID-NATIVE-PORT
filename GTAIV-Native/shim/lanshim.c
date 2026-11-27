@@ -23,6 +23,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
+#include <dirent.h>
 #include <android/log.h>
 
 #define TAG "gta4-lanshim"
@@ -167,7 +169,157 @@ static void reset_foreign_touch_layout(void) {
   if (m) fclose(m);
 }
 
+// ---- "Game completed": install the bundled 100% save once ----
+// The MP hub's "Игра пройдена" button appends --gta4_complete_save=1 to
+// args.txt and starts the game. Before the engine looks at its saves, the
+// bundled Resources/saves/<file> is copied into every save folder the
+// launcher uses (an existing file is kept as .bak), then the line is removed.
+static int package_name(char* out, size_t len) {
+  FILE* f = fopen("/proc/self/cmdline", "r");
+  if (!f) return 0;
+  size_t n = fread(out, 1, len - 1, f);
+  fclose(f);
+  out[n] = 0;
+  char* colon = strchr(out, ':');
+  if (colon) *colon = 0;
+  return out[0] != 0;
+}
+
+static int copy_file(const char* from, const char* to) {
+  FILE* in = fopen(from, "rb");
+  if (!in) return 0;
+  char tmp[600];
+  snprintf(tmp, sizeof(tmp), "%s.tmp", to);
+  FILE* out = fopen(tmp, "wb");
+  if (!out) { fclose(in); return 0; }
+  char buf[65536];
+  size_t n;
+  int ok = 1;
+  while ((n = fread(buf, 1, sizeof(buf), in)) > 0) ok &= fwrite(buf, 1, n, out) == n;
+  fclose(in);
+  ok &= fclose(out) == 0;
+  if (!ok) { unlink(tmp); return 0; }
+  char bak[620];
+  snprintf(bak, sizeof(bak), "%s.bak", to);
+  if (access(to, F_OK) == 0) rename(to, bak);
+  return rename(tmp, to) == 0;
+}
+
+static void mkdirs(const char* dir) {
+  char p[512];
+  snprintf(p, sizeof(p), "%s", dir);
+  for (char* c = p + 1; *c; ++c) if (*c == '/') { *c = 0; mkdir(p, 0775); *c = '/'; }
+  mkdir(p, 0775);
+}
+
+static void install_complete_save(void) {
+  char pkg[128];
+  if (!package_name(pkg, sizeof(pkg))) return;
+  char args[300];
+  snprintf(args, sizeof(args), "/storage/emulated/0/Android/data/%s/files/args.txt", pkg);
+  FILE* f = fopen(args, "r");
+  if (!f) return;
+  char* kept = NULL;
+  size_t kept_len = 0, cap = 0;
+  int requested = 0;
+  char line[512];
+  while (fgets(line, sizeof(line), f)) {
+    if (!strncmp(line, "--gta4_complete_save=", 21)) { requested = line[21] == '1'; continue; }
+    size_t l = strlen(line);
+    if (kept_len + l + 1 > cap) { cap = (cap + l + 1) * 2; kept = realloc(kept, cap); if (!kept) { fclose(f); return; } }
+    memcpy(kept + kept_len, line, l); kept_len += l; kept[kept_len] = 0;
+  }
+  fclose(f);
+  if (!requested) { free(kept); return; }
+  f = fopen(args, "w");  // one shot: drop the request line
+  if (f) { if (kept) fwrite(kept, 1, kept_len, f); fclose(f); }
+  free(kept);
+
+  const char* name = "SGTA412";
+  char source[300] = {0};
+  const char* roots[] = {"/data/user/0/%s/files/Resources/saves/%s", "/data/data/%s/files/Resources/saves/%s",
+                         "/storage/emulated/0/Android/data/%s/files/Resources/saves/%s"};
+  for (int i = 0; i < 3 && !source[0]; ++i) {
+    char c[300];
+    snprintf(c, sizeof(c), roots[i], pkg, name);
+    if (access(c, R_OK) == 0) snprintf(source, sizeof(source), "%s", c);
+  }
+  if (!source[0]) { __android_log_print(ANDROID_LOG_WARN, TAG, "bundled 100%% save not found"); return; }
+
+  char targets[3][400];
+  int count = 0;
+  snprintf(targets[count++], sizeof(targets[0]), "/storage/emulated/0/Android/data/%s/files/LibertyRecomp/saves", pkg);
+  // The launcher's selected game folder (SharedPreferences "cache_location"/"game"): saves live beside it.
+  char prefs[300];
+  snprintf(prefs, sizeof(prefs), "/data/data/%s/shared_prefs/cache_location.xml", pkg);
+  if ((f = fopen(prefs, "r"))) {
+    char xml[4096] = {0};
+    size_t n = fread(xml, 1, sizeof(xml) - 1, f);
+    fclose(f);
+    xml[n] = 0;
+    static const char key[] = "name=\"game\">";
+    char* at = strstr(xml, key);
+    if (at) {
+      at += sizeof(key) - 1;
+      char* end = strchr(at, '<');
+      if (end && end - at < 300) {
+        char game[300];
+        snprintf(game, sizeof(game), "%.*s", (int)(end - at), at);
+        char* slash = strrchr(game, '/');
+        if (slash) { *slash = 0; snprintf(targets[count++], sizeof(targets[0]), "%s/save", game); }
+      }
+    }
+  }
+  for (int i = 0; i < count; ++i) {
+    mkdirs(targets[i]);
+    char to[500];
+    snprintf(to, sizeof(to), "%s/%s", targets[i], name);
+    __android_log_print(ANDROID_LOG_INFO, TAG, "100%% save -> %s: %s", to, copy_file(source, to) ? "ok" : "failed");
+  }
+}
+
+// Keep LibertyRecomp/touch-icons in step with the icons bundled in this APK
+// (the launcher unpacks assets/Resources into files/Resources).
+static void sync_touch_icons(void) {
+  char pkg[128];
+  if (!package_name(pkg, sizeof(pkg))) return;
+  char src[300] = {0}, dst[300];
+  const char* roots[] = {"/data/user/0/%s/files/Resources/touch-icons", "/data/data/%s/files/Resources/touch-icons"};
+  for (int i = 0; i < 2 && !src[0]; ++i) {
+    char c[300];
+    snprintf(c, sizeof(c), roots[i], pkg);
+    if (access(c, R_OK) == 0) snprintf(src, sizeof(src), "%s", c);
+  }
+  if (!src[0]) return;
+  snprintf(dst, sizeof(dst), "/storage/emulated/0/Android/data/%s/files/LibertyRecomp/touch-icons", pkg);
+  mkdirs(dst);
+  DIR* dir = opendir(src);
+  if (!dir) return;
+  struct dirent* e;
+  int copied = 0;
+  while ((e = readdir(dir))) {
+    const size_t n = strlen(e->d_name);
+    if (n < 5 || strcmp(e->d_name + n - 4, ".png")) continue;
+    char from[600], to[600];
+    snprintf(from, sizeof(from), "%s/%s", src, e->d_name);
+    snprintf(to, sizeof(to), "%s/%s", dst, e->d_name);
+    struct stat a, b;
+    if (stat(from, &a) != 0) continue;
+    if (stat(to, &b) == 0 && a.st_size == b.st_size) continue;
+    if (copy_file(from, to)) {
+      char bak[620];
+      snprintf(bak, sizeof(bak), "%s.bak", to);
+      unlink(bak);
+      ++copied;
+    }
+  }
+  closedir(dir);
+  if (copied) __android_log_print(ANDROID_LOG_INFO, TAG, "touch icons updated: %d", copied);
+}
+
 __attribute__((constructor)) static void lanshim_init(void) {
+  sync_touch_icons();
+  install_complete_save();
   reset_foreign_touch_layout();
   pthread_t t;
   if (pthread_create(&t, NULL, take_multicast_lock, NULL) == 0) pthread_detach(t);

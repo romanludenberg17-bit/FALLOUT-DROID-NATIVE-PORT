@@ -11,14 +11,14 @@ import hashlib, os, struct, sys, zipfile, zlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_from_4nmp as base
 
-base.VERSION_CODE = 621
-base.VERSION_NAME = "1.2.1-v504"
+base.VERSION_CODE = 622
+base.VERSION_NAME = "1.2.2-v504"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 def patch_dex(dex):
     d = bytearray(dex)
     for old, new in ((bytes.fromhex("1306020c"), bytes.fromhex("1306040c")),   # bridge -> 3076
-                     (b"nmp_v504_clean", b"nmp_v620_clean")):                 # args.txt reset once
+                     (b"nmp_v504_clean", b"nmp_v622_clean")):                 # args.txt reset once
         assert d.count(old) == 1, old
         j = d.find(old); d[j:j + len(old)] = new
     d[12:32] = hashlib.sha1(bytes(d[32:])).digest()
@@ -33,8 +33,12 @@ def patch_libmain(so):
     return bytes(d)
 
 def patch_args(text):
-    extra = "\n# LAN co-op (serverless)\n--gta4_multiplayer_backend=lan\n--gta4_lan_discovery_port=3076\n"
-    return (text.rstrip("\n") + extra).encode()
+    # Frame limit belongs to the in-game menu (a line here overrides it on every launch).
+    lines = [l for l in text.splitlines() if not l.startswith("--gta4_frame_limit=")]
+    extra = ["", "# LAN co-op (serverless)", "--gta4_multiplayer_backend=lan", "--gta4_lan_discovery_port=3076",
+             "# Vehicle badges / decals drew a black box: keep alpha-tested materials on the full shaders",
+             "--gta4_native_mobile_coverage_free=false", "--gta4_native_mobile_opaque_depth=false", ""]
+    return "\n".join(lines + extra).encode()
 
 def main():
     src, libq, out = sys.argv[1:4]
@@ -48,6 +52,9 @@ def main():
             elif n == "resources.arsc": data = base.patch_arsc(data)
             elif n == "classes2.dex": data = patch_dex(data)
             elif n == "lib/arm64-v8a/libmain.so": data = patch_libmain(data)
+            elif n.startswith("assets/Resources/touch-icons/") and os.path.isfile(
+                    os.path.join(HERE, "touch-icons-v504", os.path.basename(n))):
+                data = open(os.path.join(HERE, "touch-icons-v504", os.path.basename(n)), "rb").read()
             elif n == "assets/nmp_mp_hub.html":
                 data = open(os.path.join(HERE, "shell", "nmp_mp_hub.html"), "rb").read()
             elif n.startswith("assets/default_args") and n.endswith(".txt"):
@@ -56,6 +63,7 @@ def main():
             zout.writestr(zipfile.ZipInfo(n, item.date_time), data,
                           zipfile.ZIP_STORED if store else zipfile.ZIP_DEFLATED)
         zout.write(libq, "lib/arm64-v8a/libq.so")
+        zout.write(os.path.join(HERE, "saves", "SGTA412"), "assets/Resources/saves/SGTA412")
     print("wrote", out)
 
 if __name__ == "__main__":

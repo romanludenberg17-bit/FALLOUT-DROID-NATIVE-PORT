@@ -72,6 +72,7 @@
       <div class="tab" data-tab="coop">Co-op</div>
       <div class="tab" data-tab="servers">Серверы</div>
       <div class="tab" data-tab="friends">Друзья</div>
+      <div class="tab" data-tab="game">Игра</div>
     </div>
     <div class="top-meta">4NMP • P2P БЕЗ СЕРВЕРА</div>
   </div>
@@ -152,6 +153,17 @@
       <span class="btn main" id="fAdd">Добавить друга</span>
       <p style="margin-top:8px">Нажмите на друга слева, чтобы подключиться к его игре.</p>
     </div>
+    <!-- ===== ИГРА ===== -->
+    <div class="col-left hidden" data-page="game">
+      <div class="row sel"><span class="row-lbl">Игра пройдена</span><span class="row-val">100%</span></div>
+    </div>
+    <div class="col-right hidden" data-page="game">
+      <h2>Игра пройдена</h2><div class="line"></div>
+      <p>Загружает сохранение со 100% прохождением: сразу свободная игра или кооп.</p>
+      <p style="margin-top:8px">Текущее сохранение в этом слоте не удаляется: оно остаётся рядом с расширением <b>.bak</b>.</p>
+      <span class="btn main" id="completeSave">Загрузить 100% и играть</span>
+      <p style="margin-top:8px">В игре: Пауза → Игра → Загрузить игру → сохранение со 100%.</p>
+    </div>
   </div>
 
   <div class="bottombar">
@@ -178,6 +190,9 @@ function remember(ip, name) {
 }
 // The launcher writes "--gta4_player_name=<nick>" as its own args.txt line;
 // a VPN address rides along as the next line (--gta4_lan_ipv4).
+function launchWith(params, lines) {
+  go("nmp://launch_coop?" + params + "&nick=" + encodeURIComponent(nick() + lines));
+}
 function launch(params) {
   var extra = "", vpn = ($("myVpnIp").value || "").trim();
   store.set("vpnIp", vpn);
@@ -247,6 +262,7 @@ $("fAdd").onclick = function () {
   var friends = store.get("friends", []); friends.push({ name: name, ip: ip }); store.set("friends", friends);
   $("fName").value = $("fIp").value = ""; render(); go("nmp://add_friend");
 };
+$("completeSave").onclick = function () { launchWith("lan=1", "\n--gta4_complete_save=1"); };
 function closeHub() { go("nmp://close"); }
 $("back").onclick = closeHub;
 window.addEventListener("keydown", function (e) {
