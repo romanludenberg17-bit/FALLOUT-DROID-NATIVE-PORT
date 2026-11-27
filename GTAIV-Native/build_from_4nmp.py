@@ -22,8 +22,8 @@ import zipfile
 import zlib
 
 PACKAGE = "com.rommy.gtaiv"
-VERSION_CODE = 612          # above the 4NMP shell's 502 so updates always replace it
-VERSION_NAME = "1.1.2-native"
+VERSION_CODE = 613          # above the 4NMP shell's 502 so updates always replace it
+VERSION_NAME = "1.1.3-native"
 LABEL = "GTA IV Native"
 EXTRA_PERMISSIONS = ["android.permission.ACCESS_WIFI_STATE",
                      "android.permission.CHANGE_WIFI_MULTICAST_STATE"]
@@ -168,6 +168,13 @@ def patch_dex(dex):
     assert d.count(bridge) == 1, "unexpected NmpCoopBridge layout"
     j = d.find(bridge)
     d[j:j + 4] = bytes.fromhex("1306040c")      # const/16 v6, 3076
+    # NmpLauncherActivity.onCreate deletes args.txt once per marker name: a new
+    # marker (same length, same sort position) resets args written by the 4NMP
+    # shell profile (30 FPS cap, reduced quality) to this engine's profile.
+    marker = b"nmp_v502_clean"
+    assert d.count(marker) == 1
+    j = d.find(marker)
+    d[j:j + len(marker)] = b"nmp_v612_clean"
     d[12:32] = hashlib.sha1(bytes(d[32:])).digest()
     struct.pack_into("<I", d, 8, zlib.adler32(bytes(d[12:])) & 0xFFFFFFFF)
     return bytes(d)
