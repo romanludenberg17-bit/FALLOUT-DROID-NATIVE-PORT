@@ -11,14 +11,17 @@ import hashlib, os, struct, sys, zipfile, zlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_from_4nmp as base
 
-base.VERSION_CODE = 623
-base.VERSION_NAME = "1.2.3-v504"
+base.VERSION_CODE = 624
+base.VERSION_NAME = "1.2.4-v504"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 def patch_dex(dex):
     d = bytearray(dex)
     for old, new in ((bytes.fromhex("1306020c"), bytes.fromhex("1306040c")),   # bridge -> 3076
-                     (b"nmp_v504_clean", b"nmp_v622_clean")):                 # args.txt reset once
+                     (b"nmp_v504_clean", b"nmp_v624_clean"),                  # args.txt reset once
+                     # writeCoopArgs: skipping the intro left the game on a black screen
+                     # (and the line stayed in args.txt for every later start)
+                     (b"\n--gta4_skip_intro=true\n", b"\n#-gta4_skip_intro=true\n")):
         assert d.count(old) == 1, old
         j = d.find(old); d[j:j + len(old)] = new
     d[12:32] = hashlib.sha1(bytes(d[32:])).digest()

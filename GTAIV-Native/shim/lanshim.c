@@ -212,6 +212,48 @@ static void mkdirs(const char* dir) {
   mkdir(p, 0775);
 }
 
+// <selected game folder>/../save (SharedPreferences "cache_location"/"game").
+static int portable_save_dir(const char* pkg, char* out, size_t len) {
+  char prefs[300];
+  snprintf(prefs, sizeof(prefs), "/data/data/%s/shared_prefs/cache_location.xml", pkg);
+  FILE* f = fopen(prefs, "r");
+  if (!f) return 0;
+  char xml[4096] = {0};
+  size_t n = fread(xml, 1, sizeof(xml) - 1, f);
+  fclose(f);
+  xml[n] = 0;
+  static const char key[] = "name=\"game\">";
+  char* at = strstr(xml, key);
+  if (!at) return 0;
+  at += sizeof(key) - 1;
+  char* end = strchr(at, '<');
+  if (!end || end - at >= 300) return 0;
+  char game[300];
+  snprintf(game, sizeof(game), "%.*s", (int)(end - at), at);
+  char* slash = strrchr(game, '/');
+  if (!slash) return 0;
+  *slash = 0;
+  snprintf(out, len, "%s/save", game);
+  return 1;
+}
+
+// Put the user's own file back (from .bak) where the 100% save was installed.
+static void undo_installed_save(const char* dir, const char* name) {
+  char path[500], bak[520];
+  snprintf(path, sizeof(path), "%s/%s", dir, name);
+  snprintf(bak, sizeof(bak), "%s/%s.bak", dir, name);
+  if (access(bak, F_OK) == 0) {
+    if (rename(bak, path) == 0) __android_log_print(ANDROID_LOG_INFO, TAG, "restored %s", path);
+  } else if (access(path, F_OK) == 0) {
+    // No backup: remove it only if it is exactly the bundled 100% save.
+    struct stat st;
+    if (stat(path, &st) == 0 && st.st_size == 707822) {
+      unlink(path);
+      __android_log_print(ANDROID_LOG_INFO, TAG, "removed installed save %s", path);
+    }
+  }
+}
+
 static void install_complete_save(void) {
   char pkg[128];
   if (!package_name(pkg, sizeof(pkg))) return;
@@ -221,27 +263,40 @@ static void install_complete_save(void) {
   if (!f) return;
   char* kept = NULL;
   size_t kept_len = 0, cap = 0;
-  int requested = 0, stripped = 0;
+  int requested = 0, stripped = 0, restore = 0;
   char line[512];
   while (fgets(line, sizeof(line), f)) {
     if (!strncmp(line, "--gta4_complete_save=", 21)) { requested = line[21] == '1'; continue; }
+    if (!strncmp(line, "--gta4_restore_save=", 20)) { restore = line[20] == '1'; continue; }
     // 1.2.2 tried these for the vehicle badge boxes; they did not help and cost speed.
     if (!strncmp(line, "--gta4_native_mobile_coverage_free=false", 40) ||
         !strncmp(line, "--gta4_native_mobile_opaque_depth=false", 39) ||
-        !strncmp(line, "# Vehicle badges / decals drew a black box", 42)) { stripped = 1; continue; }
+        !strncmp(line, "# Vehicle badges / decals drew a black box", 42) ||
+        !strncmp(line, "--gta4_skip_intro=true", 22)) { stripped = 1; continue; }
     size_t l = strlen(line);
     if (kept_len + l + 1 > cap) { cap = (cap + l + 1) * 2; kept = realloc(kept, cap); if (!kept) { fclose(f); return; } }
     memcpy(kept + kept_len, line, l); kept_len += l; kept[kept_len] = 0;
   }
   fclose(f);
-  if (requested || stripped) {
+  if (requested || stripped || restore) {
     f = fopen(args, "w");  // one shot: drop the request line (and stale lines)
     if (f) { if (kept) fwrite(kept, 1, kept_len, f); fclose(f); }
   }
   free(kept);
-  if (!requested) return;
-
   const char* name = "SGTA412";
+  // Profile store: 1.2.2 also copied the save here, outside portable-save
+  // adoption (the header stays bound to another profile -> endless black
+  // screen). Always undo that copy.
+  char store[400];
+  snprintf(store, sizeof(store), "/storage/emulated/0/Android/data/%s/files/LibertyRecomp/saves", pkg);
+  undo_installed_save(store, name);
+  if (restore) {
+    char portable[400];
+    if (portable_save_dir(pkg, portable, sizeof(portable))) undo_installed_save(portable, name);
+    __android_log_print(ANDROID_LOG_INFO, TAG, "own save restored");
+    return;
+  }
+  if (!requested) return;
   char source[300] = {0};
   const char* roots[] = {"/data/user/0/%s/files/Resources/saves/%s", "/data/data/%s/files/Resources/saves/%s",
                          "/storage/emulated/0/Android/data/%s/files/Resources/saves/%s"};
@@ -252,30 +307,12 @@ static void install_complete_save(void) {
   }
   if (!source[0]) { __android_log_print(ANDROID_LOG_WARN, TAG, "bundled 100%% save not found"); return; }
 
-  char targets[3][400];
+  // Only the portable save folder beside the game: the engine adopts saves
+  // from there and rebinds their header to this profile.
+  char targets[1][400];
   int count = 0;
-  snprintf(targets[count++], sizeof(targets[0]), "/storage/emulated/0/Android/data/%s/files/LibertyRecomp/saves", pkg);
-  // The launcher's selected game folder (SharedPreferences "cache_location"/"game"): saves live beside it.
-  char prefs[300];
-  snprintf(prefs, sizeof(prefs), "/data/data/%s/shared_prefs/cache_location.xml", pkg);
-  if ((f = fopen(prefs, "r"))) {
-    char xml[4096] = {0};
-    size_t n = fread(xml, 1, sizeof(xml) - 1, f);
-    fclose(f);
-    xml[n] = 0;
-    static const char key[] = "name=\"game\">";
-    char* at = strstr(xml, key);
-    if (at) {
-      at += sizeof(key) - 1;
-      char* end = strchr(at, '<');
-      if (end && end - at < 300) {
-        char game[300];
-        snprintf(game, sizeof(game), "%.*s", (int)(end - at), at);
-        char* slash = strrchr(game, '/');
-        if (slash) { *slash = 0; snprintf(targets[count++], sizeof(targets[0]), "%s/save", game); }
-      }
-    }
-  }
+  if (portable_save_dir(pkg, targets[0], sizeof(targets[0]))) count = 1;
+  if (!count) { __android_log_print(ANDROID_LOG_WARN, TAG, "no portable save folder; 100%% save not installed"); return; }
   for (int i = 0; i < count; ++i) {
     mkdirs(targets[i]);
     char to[500];

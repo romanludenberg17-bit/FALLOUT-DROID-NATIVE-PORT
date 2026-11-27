@@ -162,6 +162,7 @@
       <p>Загружает сохранение со 100% прохождением: сразу свободная игра или кооп.</p>
       <p style="margin-top:8px">Текущее сохранение в этом слоте не удаляется: оно остаётся рядом с расширением <b>.bak</b>.</p>
       <span class="btn main" id="completeSave">Загрузить 100% и играть</span>
+      <span class="btn" id="restoreSave">Вернуть моё сохранение</span>
       <p style="margin-top:8px">В игре: Пауза → Игра → Загрузить игру → сохранение со 100%.</p>
     </div>
   </div>
@@ -263,6 +264,7 @@ $("fAdd").onclick = function () {
   $("fName").value = $("fIp").value = ""; render(); go("nmp://add_friend");
 };
 $("completeSave").onclick = function () { launchWith("lan=1", "\n--gta4_complete_save=1"); };
+$("restoreSave").onclick = function () { launchWith("lan=1", "\n--gta4_restore_save=1"); };
 function closeHub() { go("nmp://close"); }
 $("back").onclick = closeHub;
 window.addEventListener("keydown", function (e) {
