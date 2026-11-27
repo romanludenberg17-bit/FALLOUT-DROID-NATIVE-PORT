@@ -310,7 +310,7 @@ index 0000000..2c66a55
 +
 +}  // extern "C"
 diff --git a/glue/rexglue-sdk-main/gta4-recomp/src/gta4_app.cpp b/glue/rexglue-sdk-main/gta4-recomp/src/gta4_app.cpp
-index 68d694b..27d8d9e 100644
+index 68d694b..669b513 100644
 --- a/glue/rexglue-sdk-main/gta4-recomp/src/gta4_app.cpp
 +++ b/glue/rexglue-sdk-main/gta4-recomp/src/gta4_app.cpp
 @@ -12,6 +12,8 @@
@@ -341,7 +341,7 @@ index 68d694b..27d8d9e 100644
                        "LAN discovery UDP port")
      .range(1, 65535)
      .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-@@ -627,10 +632,31 @@ struct GTA4App::TitleProfileSyncState {
+@@ -627,10 +632,70 @@ struct GTA4App::TitleProfileSyncState {
    bool stopping = false;
  };
  
@@ -356,6 +356,40 @@ index 68d694b..27d8d9e 100644
 +}
 +}  // namespace
 +
++namespace {
++// A ready game folder (default.xex + default.xexp + game.iso or extracted
++// files) somewhere in shared storage, e.g. Download/<app>/game_cache/game.
++// Used when the launcher passed no usable --game_data_root (lost selection
++// after an update, or a folder outside the launcher's default path).
++std::optional<std::filesystem::path> FindReadyGameFolder() {
++#if REX_PLATFORM_ANDROID
++  namespace fs = std::filesystem;
++  const fs::path roots[] = {"/storage/emulated/0/Download", "/storage/emulated/0", "/sdcard/Download"};
++  for (const auto& root : roots) {
++    std::error_code error;
++    if (!fs::is_directory(root, error)) continue;
++    size_t visited = 0;
++    fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, error);
++    for (; !error && it != fs::recursive_directory_iterator(); it.increment(error)) {
++      if (++visited > 20000) break;
++      const auto& path = it->path();
++      const auto name = path.filename().string();
++      if (it.depth() >= 5 || name.starts_with(".") || name == "Android" || name == "DCIM" ||
++          name == "Pictures" || name == "Movies" || name == "Music") {
++        if (it->is_directory(error)) it.disable_recursion_pending();
++        continue;
++      }
++      if (!it->is_directory(error) || !fs::is_regular_file(path / "default.xex", error)) continue;
++      if (!fs::is_regular_file(path / "game.iso", error) && !fs::exists(path / "common.rpf", error))
++        continue;
++      if (gta4::install::IsInstallReady(path, nullptr)) return path;
++    }
++  }
++#endif
++  return std::nullopt;
++}
++}  // namespace
++
  std::optional<rex::PathConfig> GTA4App::OnFinalizePaths(
      const rex::PathConfig& defaults, std::function<void(rex::PathConfig)> resume) {
    auto paths = defaults;
@@ -366,15 +400,20 @@ index 68d694b..27d8d9e 100644
 +                             gta4::install::IsInstallReady(defaults.game_data_root, nullptr);
 +  if (!external_game) {
 +    if (!defaults.game_data_root.empty()) {
-+      REXLOG_WARN("Selected game folder is not usable, using the installed game: {}",
-+                  defaults.game_data_root.string());
++      REXLOG_WARN("Selected game folder is not usable: {}", defaults.game_data_root.string());
 +    }
 +    paths.game_data_root = liberty_root_ / "game";
++    if (!gta4::install::IsInstallReady(paths.game_data_root, nullptr)) {
++      if (auto found = FindReadyGameFolder()) {
++        REXLOG_INFO("Using the game folder found in shared storage: {}", found->string());
++        paths.game_data_root = *found;
++      }
++    }
 +  }
    paths.marketplace_content_root = liberty_root_ / "dlc";
    paths.config_path = native_config_path_;
  
-@@ -794,6 +820,9 @@ void GTA4App::OnPreSetup(rex::RuntimeConfig& config) {
+@@ -794,6 +859,9 @@ void GTA4App::OnPreSetup(rex::RuntimeConfig& config) {
    config.live.community_url = REXCVAR_GET(gta4_community_url);
    config.live.player_name = REXCVAR_GET(gta4_player_name);
    config.live.lan_discovery_port = static_cast<uint16_t>(REXCVAR_GET(gta4_lan_discovery_port));
@@ -384,7 +423,7 @@ index 68d694b..27d8d9e 100644
    config.live.community_backend_factory =
        &LibertyRecomp::Network::CreateCommunityMultiplayerBackend;
    config.live.voice_audio_device = gta4::voice::CreateAudioDevice();
-@@ -1334,7 +1363,7 @@ void GTA4App::OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) {
+@@ -1334,7 +1402,7 @@ void GTA4App::OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) {
    gta4::game_center::Initialize();
    context_touch_overlay_ =
        std::make_unique<gta4::input::ContextTouchOverlay>(
