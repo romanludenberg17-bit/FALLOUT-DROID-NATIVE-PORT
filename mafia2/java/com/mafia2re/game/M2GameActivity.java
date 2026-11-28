@@ -131,6 +131,7 @@ public class M2GameActivity extends GameActivity implements ControlsOverlay.List
         LinearLayout rows = new LinearLayout(this);
         rows.setOrientation(LinearLayout.VERTICAL);
         rows.setPadding(0, dp(6), 0, dp(6));
+        if (DeviceProfile.detectCached(this).isAdreno()) rows.addView(adrenoBlock());
         rows.addView(OptionRow.create(this, cfg, GameConfig.FPS, 16, v -> {
             applyFpsLimit();
             cfg.writeIni();
@@ -162,6 +163,48 @@ public class M2GameActivity extends GameActivity implements ControlsOverlay.List
         card.setScaleY(0.96f);
         card.setAlpha(0f);
         card.animate().scaleX(1).scaleY(1).alpha(1).setDuration(160).start();
+    }
+
+    /** "Графика Adreno": pick a driver variant, the game restarts with it right away. */
+    private android.view.View adrenoBlock() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(0, dp(4), 0, dp(12));
+        box.addView(Ui.caption(this, "Графика Adreno"));
+        TextView hint = Ui.text(this, "Если на экране полосы или мусор — выберите другой вариант. Игра перезапустится, прогресс с последнего сохранения.",
+                12, Ui.DIM, Ui.body(this));
+        hint.setPadding(0, dp(4), 0, dp(6));
+        box.addView(hint);
+        int cur = cfg.adrenoVariant();
+        for (int i = 0; i < GameConfig.ADRENO_VARIANTS.length; i++) {
+            final int idx = i;
+            boolean on = i == cur;
+            TextView b = Ui.text(this, (on ? "●  " : "○  ") + GameConfig.ADRENO_VARIANTS[i], 15, on ? Ui.IVORY : 0xFFD4D0CA, Ui.body(this));
+            b.setPadding(dp(12), dp(10), dp(12), dp(10));
+            b.setBackground(Ui.ripple(on ? Ui.round(0x33D9322F, Ui.ACCENT, 1, 8, this) : Ui.round(0x12FFFFFF, 0, 0, 8, this), 0x40D9322F));
+            b.setOnClickListener(v -> {
+                cfg.applyAdrenoVariant(idx);
+                relaunchGame();
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+            lp.topMargin = dp(6);
+            box.addView(b, lp);
+        }
+        return box;
+    }
+
+    /** Ends the process and lets the launcher start the game again with the new settings. */
+    private void relaunchGame() {
+        cfg.markGameAlive();
+        Intent i = new Intent(this, LauncherActivity.class).putExtra(LauncherActivity.EXTRA_AUTOSTART, true)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        PendingIntent pi = PendingIntent.getActivity(this, 8, i, PendingIntent.FLAG_CANCEL_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+        if (am != null) am.set(AlarmManager.ELAPSED_REALTIME, SystemClock.elapsedRealtime() + 500, pi);
+        if (resumedAt > 0) cfg.addPlaySeconds((SystemClock.elapsedRealtime() - resumedAt) / 1000);
+        resumedAt = 0;
+        finishAffinity();
+        Process.killProcess(Process.myPid());
     }
 
     private void closePanel() {

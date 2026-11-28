@@ -251,6 +251,7 @@ final class GameConfig {
 
     /** Value for TU_DEBUG, "" to block the port's own default, or null to leave it unset. */
     String turnipDebug(DeviceProfile dp) {
+        if (get(DRIVER) == 1) return null;    // TU_DEBUG only matters to Turnip
         switch (get(TURNIP)) {
             case 1: return "sysmem";
             case 2: return "noubwc";
@@ -260,8 +261,34 @@ final class GameConfig {
         }
     }
 
+    /** Quick graphics variants for Adreno, switchable from the in-game port menu. */
+    static final String[] ADRENO_VARIANTS = {
+            "Новый Turnip + совместимость",
+            "Новый Turnip без флагов",
+            "Стандартный Turnip + noubwc",
+            "Системный драйвер Qualcomm",
+    };
+
+    /** {vulkan_driver, turnip_build, tu_debug_mode} for each variant. */
+    private static final int[][] ADRENO_VARIANT_VALUES = {{0, 2, 3}, {0, 2, 4}, {0, 1, 2}, {1, 1, 4}};
+
+    void applyAdrenoVariant(int i) {
+        int[] v = ADRENO_VARIANT_VALUES[i];
+        prefs.edit().putInt(DRIVER.key, v[0]).putInt(TURNIP_BUILD.key, v[1]).putInt(TURNIP.key, v[2]).commit();
+    }
+
+    /** Index of the variant matching the current settings, or -1. */
+    int adrenoVariant() {
+        for (int i = 0; i < ADRENO_VARIANT_VALUES.length; i++) {
+            int[] v = ADRENO_VARIANT_VALUES[i];
+            if (get(DRIVER) == v[0] && get(TURNIP_BUILD) == v[1] && get(TURNIP) == v[2]) return i;
+        }
+        return -1;
+    }
+
     /** True to point the port at lib/…/libvulkan_freedreno_next.so (MAFIA2RE_CUSTOM_DRIVER). */
     boolean useNextTurnip(DeviceProfile dp) {
+        if (get(DRIVER) == 1) return false;   // the system driver: no Turnip at all
         int v = get(TURNIP_BUILD);
         return v == 2 || (v == 0 && dp.adrenoModel() >= 800);
     }

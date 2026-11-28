@@ -175,6 +175,14 @@ final class DeviceProfile {
         return new DeviceProfile(soc, gpu, ramMiB, mhz, 8, modernCpu, modernCpu, (1 << 22) | (1 << 12));
     }
 
+    private static DeviceProfile cached;
+
+    static DeviceProfile detectCached(Context ctx) {
+        if (testOverride != null) return testOverride;
+        if (cached == null) cached = detect(ctx);
+        return cached;
+    }
+
     static DeviceProfile detect(Context ctx) {
         if (testOverride != null) return testOverride;
         String soc = socName();

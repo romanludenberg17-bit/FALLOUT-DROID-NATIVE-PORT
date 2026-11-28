@@ -220,6 +220,40 @@ public class M2Test {
     }
 
     @Test
+    public void adrenoVariantsMapToDriverSettings() {
+        GameConfig cfg = new GameConfig(ctx);
+        DeviceProfile a829 = DeviceProfile.forTest("SM8845", "Adreno (TM) 829", 12000, 4000, true);
+        cfg.applyAdrenoVariant(0);
+        assertEquals(0, cfg.adrenoVariant());
+        assertTrue(cfg.useNextTurnip(a829));
+        assertEquals("sysmem,noubwc", cfg.turnipDebug(a829));
+        cfg.applyAdrenoVariant(1);
+        assertEquals("", cfg.turnipDebug(a829));
+        cfg.applyAdrenoVariant(2);
+        assertFalse(cfg.useNextTurnip(a829));
+        assertEquals("noubwc", cfg.turnipDebug(a829));
+        cfg.applyAdrenoVariant(3);                       // Qualcomm's own driver: no Turnip, no TU_DEBUG
+        assertEquals(1, cfg.get(GameConfig.DRIVER));
+        assertFalse(cfg.useNextTurnip(a829));
+        assertNull(cfg.turnipDebug(a829));
+        assertEquals(3, cfg.adrenoVariant());
+    }
+
+    @Test
+    public void portMenuShowsAdrenoVariants() throws Exception {
+        DeviceProfile.testOverride = DeviceProfile.forTest("SM8845", "Adreno (TM) 829", 12000, 4000, true);
+        ActivityController<M2GameActivity> c = game();
+        View root = c.get().getWindow().getDecorView();
+        ControlsOverlay o = find(root, ControlsOverlay.class);
+        ShadowLooper.idleMainLooper(300, java.util.concurrent.TimeUnit.MILLISECONDS);
+        ControlLayout.Element gear = o.layout.byId("gear");
+        touch(o, MotionEvent.ACTION_DOWN, 0, gear.cx, gear.cy);
+        touch(o, MotionEvent.ACTION_UP, 0, gear.cx, gear.cy);
+        assertNotNull(findText(root, "Системный драйвер Qualcomm"));
+        shot(root, "17_port_menu_adreno");
+    }
+
+    @Test
     public void failedStartIsReportedOnce() {
         GameConfig cfg = new GameConfig(ctx);
         cfg.markGameStart();

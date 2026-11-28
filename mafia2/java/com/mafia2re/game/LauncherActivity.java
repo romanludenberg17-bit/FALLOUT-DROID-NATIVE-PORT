@@ -41,7 +41,8 @@ import java.util.Locale;
  * folder, the game starts".
  */
 public class LauncherActivity extends Activity {
-    static final String VERSION = "1.2.0";
+    static final String VERSION = "1.2.1";
+    static final String EXTRA_AUTOSTART = "remaf2.autostart";
     private static final int REQ_TREE = 41;
     private static final int TAB_PLAY = 0, TAB_SETTINGS = 1, TAB_CONTROLS = 2, TAB_FILES = 3, TAB_ABOUT = 4;
     private static final String[] TAB_NAMES = {"ИГРАТЬ", "НАСТРОЙКИ", "УПРАВЛЕНИЕ", "ФАЙЛЫ ИГРЫ", "О ПОРТЕ"};
@@ -79,7 +80,7 @@ public class LauncherActivity extends Activity {
             getWindow().getAttributes().layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         }
         immersive();
-        device = DeviceProfile.detect(this);
+        device = DeviceProfile.detectCached(this);
         cfg.ensureDefaults(device);
         autodetectGame();
         build();
@@ -87,6 +88,11 @@ public class LauncherActivity extends Activity {
         try {
             io.avm.r7.s.g(this);
         } catch (Throwable ignored) {
+        }
+        // Relaunch requested from the in-game port menu (graphics variant changed).
+        if (getIntent() != null && getIntent().getBooleanExtra(EXTRA_AUTOSTART, false)) {
+            getIntent().removeExtra(EXTRA_AUTOSTART);
+            page.post(this::launchGame);
         }
     }
 
