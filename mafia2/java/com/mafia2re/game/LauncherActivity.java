@@ -41,7 +41,7 @@ import java.util.Locale;
  * folder, the game starts".
  */
 public class LauncherActivity extends Activity {
-    static final String VERSION = "1.1.2";
+    static final String VERSION = "1.2.0";
     private static final int REQ_TREE = 41;
     private static final int TAB_PLAY = 0, TAB_SETTINGS = 1, TAB_CONTROLS = 2, TAB_FILES = 3, TAB_ABOUT = 4;
     private static final String[] TAB_NAMES = {"ИГРАТЬ", "НАСТРОЙКИ", "УПРАВЛЕНИЕ", "ФАЙЛЫ ИГРЫ", "О ПОРТЕ"};
@@ -431,12 +431,12 @@ public class LauncherActivity extends Activity {
             TextView a = Ui.text(this, modes[m], 16, Ui.IVORY, Ui.bodyBold(this));
             a.setGravity(Gravity.CENTER);
             cell.addView(a);
-            TextView bsub = Ui.text(this, GameConfig.presetSummary(device.tier, m), 11, on ? 0xFFFF8A80 : Ui.DIM, Ui.body(this));
+            TextView bsub = Ui.text(this, GameConfig.presetSummary(device, m), 11, on ? 0xFFFF8A80 : Ui.DIM, Ui.body(this));
             bsub.setGravity(Gravity.CENTER);
             bsub.setPadding(0, dp(2), 0, 0);
             cell.addView(bsub);
             cell.setOnClickListener(v -> {
-                cfg.applyMode(device.tier, mode);
+                cfg.applyMode(device, mode);
                 refreshChips();
                 showTab(TAB_PLAY);
             });
@@ -580,9 +580,22 @@ public class LauncherActivity extends Activity {
                 .append(" · Android ").append(Build.VERSION.RELEASE).append('\n')
                 .append(device.soc).append(" · ").append(device.gpu).append(" · ").append(device.ramMiB).append(" MiB\n")
                 .append("ini: ").append(readTail(new File(dir, "mafia2re.ini"), 4000)).append('\n');
-        for (String n : new String[]{"mafia2-native.prev.log", "mafia2-native.log"}) {
+        File note = dir == null ? null : new File(dir, "remaf2-launch.txt");
+        if (note != null && note.exists()) sb.append("===== remaf2-launch.txt =====\n").append(readTail(note, 4000));
+        for (String n : new String[]{"mafia2-native.log", "mafia2-native.prev.log"}) {
             File f = dir == null ? null : new File(dir, n);
-            if (f != null && f.exists()) sb.append("===== ").append(n).append(" =====\n").append(readTail(f, 90_000)).append('\n');
+            if (f == null || !f.exists()) continue;
+            StringBuilder body = new StringBuilder();
+            int skipped = 0;
+            for (String line : readTail(f, 400_000).split("\n")) {
+                if (line.startsWith("VirtualAlloc(") || line.startsWith("SetThreadPriority(")) {
+                    skipped++;
+                    continue;
+                }
+                body.append(line).append('\n');
+            }
+            String b = body.length() > 60_000 ? body.substring(body.length() - 60_000) : body.toString();
+            sb.append("===== ").append(n).append(" (").append(skipped).append(" строк памяти/потоков скрыто) =====\n").append(b).append('\n');
         }
         if (sb.indexOf("=====") < 0) {
             toast("Лога пока нет — запустите игру хотя бы раз.");
@@ -661,7 +674,7 @@ public class LauncherActivity extends Activity {
                 {"Ядра", device.cores + " × " + (device.bigCoreMHz > 0 ? device.bigCoreMHz + " МГц" : "?")},
                 {"ARMv8.2 (LSE + RCpc)", device.cpuSupported() ? "есть" : "нет — игра не запустится"},
                 {"Vulkan", vk},
-                {"Класс", device.tierName(false)},
+                {"Профиль", device.profileNote()},
         };
         for (String[] r : rows) {
             LinearLayout row = new LinearLayout(this);
@@ -679,7 +692,9 @@ public class LauncherActivity extends Activity {
                         + "• Иконки кнопок с game-icons.net.\n"
                         + "• Всё приложение на русском.\n"
                         + "• Если игра закрылась при запуске — лаунчер предложит отправить лог.\n"
-                        + "• Полосы на Adreno 8xx: «Совместимость Turnip» (TU_DEBUG=sysmem) включается сама.\n"
+                        + "• Adreno 8xx: новая сборка Turnip и режим совместимости (sysmem + noubwc) — сами.\n"
+                        + "• Профили для Helio G85/G99/G100 и Mali: 480p в «Скорости» на Mali-G52, анизотропия, ткань APEX.\n"
+                        + "• Профили памяти 4 и 6 ГБ: ограничение текстур, срез мипов, 16-бит распаковка DXT на Mali.\n"
                         + "• Кнопка «Отправить лог» во вкладке «Файлы игры», Telegram в шапке.",
                 13, 0xFFD4D0CA, Ui.body(this));
         news.setLineSpacing(0, 1.25f);
@@ -786,20 +801,42 @@ public class LauncherActivity extends Activity {
             message("Процессор не поддерживается", compatWarning());
             return;
         }
+        cfg.computeAutoKeys(device);
         cfg.writeIni();
         try {
             Os.setenv("MAFIA2RE_GAME", game.getAbsolutePath(), true);
             String tu = cfg.turnipDebug(device);
             if (tu == null) Os.unsetenv("TU_DEBUG");
             else Os.setenv("TU_DEBUG", tu, true);
+            // A driver the user dropped into files/driver wins; else the newer bundled Turnip
+            // when asked for (the port loads MAFIA2RE_CUSTOM_DRIVER through adrenotools).
             File drv = installCustomDriver();
+            if (drv == null && cfg.useNextTurnip(device) && device.isAdreno()) {
+                File next = new File(getApplicationInfo().nativeLibraryDir, "libvulkan_freedreno_next.so");
+                if (next.canRead()) drv = next;
+            }
             if (drv == null) Os.unsetenv("MAFIA2RE_CUSTOM_DRIVER");
             else Os.setenv("MAFIA2RE_CUSTOM_DRIVER", drv.getAbsolutePath(), true);
+            writeLaunchNote(tu, drv);
         } catch (Exception ignored) {
         }
         startActivity(new Intent(this, M2GameActivity.class));
         overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
         finish();
+    }
+
+    /** What the launcher handed to the game; included in "Отправить лог". */
+    private void writeLaunchNote(String tu, File drv) {
+        File dir = getExternalFilesDir(null);
+        if (dir == null) return;
+        String s = "ReMaf2 " + VERSION + " launch " + new java.util.Date() + "\n"
+                + "TU_DEBUG=" + (tu == null ? "(unset)" : "\"" + tu + "\"") + "\n"
+                + "MAFIA2RE_CUSTOM_DRIVER=" + (drv == null ? "(unset)" : drv.getAbsolutePath()) + "\n"
+                + "vulkan_driver=" + GameConfig.DRIVER.name(GameConfig.DRIVER.indexOf(cfg.get(GameConfig.DRIVER))) + "\n";
+        try (FileOutputStream out = new FileOutputStream(new File(dir, "remaf2-launch.txt"))) {
+            out.write(s.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (Exception ignored) {
+        }
     }
 
     /** A .so dropped into files/driver is copied to private storage (same rule as the port's setup). */

@@ -173,7 +173,7 @@ public class M2Test {
         assertEquals(DeviceProfile.TIER_LOW, g85.tier);
         cfg.ensureDefaults(g85);
         assertEquals(GameConfig.MODE_SPEED, cfg.mode());
-        assertEquals(540, cfg.get(GameConfig.RES));
+        assertEquals(480, cfg.get(GameConfig.RES));         // Mali-G52: 480p in Speed
         assertEquals(2, cfg.get(GameConfig.TEX));
         assertEquals(30, cfg.get(GameConfig.FPS));
     }
@@ -198,22 +198,25 @@ public class M2Test {
     }
 
     @Test
-    public void turnipSysmemOnAdreno8xx() throws Exception {
+    public void turnipSettingsForAdreno8xx() throws Exception {
         GameConfig cfg = new GameConfig(ctx);
         DeviceProfile a829 = DeviceProfile.forTest("SM8845", "Adreno (TM) 829", 12000, 4000, true);
         DeviceProfile a740 = DeviceProfile.forTest("SM8550", "Adreno (TM) 740", 12000, 3200, true);
         DeviceProfile mali = DeviceProfile.forTest("MT6769Z", "Mali-G52 MC2", 4000, 2000, true);
-        assertEquals("sysmem", cfg.turnipDebug(a829));
+        assertEquals("sysmem,noubwc", cfg.turnipDebug(a829));
+        assertTrue(cfg.useNextTurnip(a829));
         assertNull(cfg.turnipDebug(a740));
+        assertFalse(cfg.useNextTurnip(a740));
         assertNull(cfg.turnipDebug(mali));
-        cfg.set(GameConfig.TURNIP, 1);
-        assertEquals("sysmem", cfg.turnipDebug(a740));
         cfg.set(GameConfig.TURNIP, 2);
+        assertEquals("noubwc", cfg.turnipDebug(a740));
+        cfg.set(GameConfig.TURNIP, 4);
         assertEquals("", cfg.turnipDebug(a829));
-        // Not written to the engine ini.
+        cfg.set(GameConfig.TURNIP_BUILD, 1);
+        assertFalse(cfg.useNextTurnip(a829));
         cfg.writeIni();
         String ini = new String(Files.readAllBytes(new File(ctx.getExternalFilesDir(null), "mafia2re.ini").toPath()), StandardCharsets.UTF_8);
-        assertFalse(ini, ini.contains("tu_sysmem"));
+        assertFalse(ini, ini.contains("tu_debug_mode") || ini.contains("turnip_build"));
     }
 
     @Test
@@ -225,6 +228,54 @@ public class M2Test {
         cfg.markGameStart();
         cfg.markGameAlive();
         assertFalse(new GameConfig(ctx).takeFailedStart());
+    }
+
+    @Test
+    public void profilesForHelioAndRam() {
+        DeviceProfile g85 = DeviceProfile.testOverride;                                          // Mali-G52, ~4 GB
+        DeviceProfile g99 = DeviceProfile.forTest("MT6789", "Mali-G57 MC2", 8 * 1024 - 300, 2200, true);
+        DeviceProfile g100_6 = DeviceProfile.forTest("MT6789V", "Mali-G57 MC2", 6 * 1024 - 300, 2200, true);
+        DeviceProfile sd8g2 = DeviceProfile.forTest("SM8550", "Adreno (TM) 740", 12 * 1024, 3200, true);
+        assertTrue(g85.entryGpu());
+        assertFalse(g99.entryGpu());
+        assertEquals(4, g85.ramClass());
+        assertEquals(6, g100_6.ramClass());
+        assertEquals(480, GameConfig.preset(g85, GameConfig.MODE_SPEED)[0]);
+        assertEquals(540, GameConfig.preset(g99, GameConfig.MODE_SPEED)[0]);
+        assertEquals(2, GameConfig.preset(g85, GameConfig.MODE_SPEED)[1]);        // 4 GB: low textures in Speed
+        assertEquals(1, GameConfig.preset(g85, GameConfig.MODE_QUALITY)[1]);      // 4 GB: medium at best
+        assertTrue(GameConfig.preset(g100_6, GameConfig.MODE_QUALITY)[1] >= 1);  // 6 GB: medium at best
+        assertEquals(0, GameConfig.preset(sd8g2, GameConfig.MODE_QUALITY)[1]);
+
+        GameConfig cfg = new GameConfig(ctx);
+        cfg.applyMode(g85, GameConfig.MODE_SPEED);
+        cfg.computeAutoKeys(g85);
+        cfg.writeIni();
+        String ini = readIni();
+        assertTrue(ini, ini.contains("max_aniso = 2\n"));
+        assertTrue(ini, ini.contains("texture_skip_min_size = 128\n"));
+        assertTrue(ini, ini.contains("decode_16bit = 1\n"));
+        assertTrue(ini, ini.contains("no_apex_clothing = 1\n"));
+
+        cfg.set(GameConfig.CLOTH, 1);
+        cfg.applyMode(sd8g2, GameConfig.MODE_BALANCE);
+        cfg.computeAutoKeys(sd8g2);
+        cfg.writeIni();
+        ini = readIni();
+        assertTrue(ini, ini.contains("max_aniso = 8\n"));
+        assertTrue(ini, ini.contains("texture_skip_min_size = 256\n"));
+        assertTrue(ini, ini.contains("decode_16bit = 0\n"));
+        assertTrue(ini, ini.contains("no_apex_clothing = 0\n"));
+        // Each key once, even after several rewrites.
+        assertEquals(ini.indexOf("max_aniso"), ini.lastIndexOf("max_aniso"));
+    }
+
+    private String readIni() throws RuntimeException {
+        try {
+            return new String(Files.readAllBytes(new File(ctx.getExternalFilesDir(null), "mafia2re.ini").toPath()), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Test
@@ -244,12 +295,12 @@ public class M2Test {
         File ini = new File(ctx.getExternalFilesDir(null), "mafia2re.ini");
         Files.write(ini.toPath(), "custom_key = 5\nrender_height = 1080\n".getBytes(StandardCharsets.UTF_8));
         GameConfig cfg = new GameConfig(ctx);
-        cfg.applyMode(DeviceProfile.TIER_LOW, GameConfig.MODE_SPEED);
+        cfg.applyMode(DeviceProfile.testOverride, GameConfig.MODE_SPEED);
         cfg.set(GameConfig.DRIVER, 1);
         cfg.writeIni();
         String s = new String(Files.readAllBytes(ini.toPath()), StandardCharsets.UTF_8);
         assertTrue(s, s.contains("custom_key = 5"));
-        assertTrue(s, s.contains("render_height = 540\n"));
+        assertTrue(s, s.contains("render_height = 480\n"));
         assertFalse(s, s.contains("1080"));
         assertTrue(s, s.contains("vulkan_driver = system"));
         assertTrue(s, s.contains("fps_limit = 30"));
@@ -334,7 +385,7 @@ public class M2Test {
     // ------------------------------------------------------------------ in game
 
     private ActivityController<M2GameActivity> game() {
-        new GameConfig(ctx).applyMode(DeviceProfile.TIER_LOW, GameConfig.MODE_SPEED);
+        new GameConfig(ctx).applyMode(DeviceProfile.testOverride, GameConfig.MODE_SPEED);
         return Robolectric.buildActivity(M2GameActivity.class).setup();
     }
 

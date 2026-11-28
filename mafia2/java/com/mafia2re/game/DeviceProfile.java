@@ -70,6 +70,38 @@ final class DeviceProfile {
         return "adreno".equals(gpuFamily);
     }
 
+    /**
+     * The weakest GPUs the port runs on: Mali-G52/G51/G31 and older Bifrost (Helio G80/G85/G88,
+     * Exynos 850), Adreno below 615, PowerVR. These get 480p in the Speed mode.
+     */
+    boolean entryGpu() {
+        String g = gpu.toLowerCase(Locale.ROOT);
+        if ("mali".equals(gpuFamily)) {
+            int n = num(g, "g([0-9]{2,3})");
+            return n == 52 || n == 51 || n == 31 || n == 71 || n == 72 || n == 76 || n < 0;
+        }
+        if (isAdreno()) return adrenoModel() > 0 && adrenoModel() < 615;
+        return "powervr".equals(gpuFamily);
+    }
+
+    /** 4 for phones with about 4 GB of RAM (and less), 6 for about 6 GB, 8 for more. */
+    int ramClass() {
+        if (ramMiB <= 0) return 8;
+        if (ramMiB < 4700) return 4;
+        if (ramMiB < 7000) return 6;
+        return 8;
+    }
+
+    /** One line for the launcher: what the automatic profile does on this phone. */
+    String profileNote() {
+        StringBuilder sb = new StringBuilder(tierName(false));
+        if (entryGpu()) sb.append(" · слабый GPU: 480p в «Скорости»");
+        if (ramClass() == 4) sb.append(" · 4 ГБ: экономия памяти");
+        else if (ramClass() == 6) sb.append(" · 6 ГБ: средние текстуры");
+        if (!isAdreno()) sb.append(" · без DXT: 16-бит распаковка");
+        return sb.toString();
+    }
+
     /** 650, 740, 829...; 0 when not an Adreno or unknown. */
     int adrenoModel() {
         return isAdreno() ? Math.max(0, num(gpu.toLowerCase(Locale.ROOT), "adreno[^0-9]*([0-9]{3})")) : 0;

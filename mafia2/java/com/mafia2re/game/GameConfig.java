@@ -64,7 +64,7 @@ final class GameConfig {
 
     // ------------------------------------------------------------------ engine options
     static final Option RES = new Option("render_height", "Разрешение", "Resolution",
-            s("540p", "720p", "900p", "1080p"), s("540p", "720p", "900p", "1080p"), v(540, 720, 900, 1080), true,
+            s("480p", "540p", "720p", "900p", "1080p"), s("480p", "540p", "720p", "900p", "1080p"), v(480, 540, 720, 900, 1080), true,
             "Внутреннее разрешение рендера. Главный рычаг производительности.", "Internal render height. The main performance knob.");
     static final Option TEX = new Option("texture_skip_mips", "Текстуры", "Textures",
             s("Полные", "Средние", "Низкие"), s("Full", "Medium", "Low"), v(0, 1, 2), true,
@@ -125,11 +125,24 @@ final class GameConfig {
      * striped garbage in GMEM mode. Not an ini key: the launcher sets the variable, and the port
      * keeps an existing TU_DEBUG (setenv without overwrite).
      */
-    static final Option TURNIP = new Option("tu_sysmem", "Совместимость Turnip", "Turnip compatibility",
-            s("Авто", "Вкл", "Выкл"), s("Auto", "On", "Off"), v(0, 1, 2), true,
-            "Убирает полосы и мусор на Adreno 8xx. «Авто» включает её на Adreno 8xx.", "");
+    static final Option TURNIP = new Option("tu_debug_mode", "Совместимость Turnip", "Turnip compatibility",
+            s("Авто", "sysmem", "noubwc", "оба", "Выкл"), s("Auto", "sysmem", "noubwc", "both", "Off"), v(0, 1, 2, 3, 4), true,
+            "Мусор и полосы на Adreno 8xx: без тайлового рендера (sysmem) и без сжатия (noubwc). «Авто» на Adreno 8xx — оба.", "");
 
-    static final Option[] GRAPHICS = {RES, TEX, DETAIL, FPS, BATTERY, DRIVER, TURNIP};
+    /** Which bundled Turnip build: the port's default or the newer "freedreno_next". */
+    static final Option TURNIP_BUILD = new Option("turnip_build", "Версия Turnip", "Turnip build",
+            s("Авто", "Стандартная", "Новая"), s("Auto", "Standard", "Newer"), v(0, 1, 2), true,
+            "«Новая» — более свежий Mesa из APK, лучше знает Adreno 8xx. «Авто» берёт её на Adreno 8xx.", "");
+
+    /** APEX cloth simulation (coats, clothes): heavy on the CPU of entry chips. */
+    static final Option CLOTH = new Option("apex_cloth", "Ткань одежды (APEX)", "APEX cloth",
+            s("Авто", "Вкл", "Выкл"), s("Auto", "On", "Off"), v(0, 1, 2), true,
+            "Расчёт ткани нагружает процессор. «Авто» выключает её на слабых телефонах в «Скорости» и при 4 ГБ.", "");
+
+    static final Option[] GRAPHICS = {RES, TEX, DETAIL, FPS, BATTERY, CLOTH, DRIVER, TURNIP_BUILD, TURNIP};
+
+    /** Engine keys the launcher derives from the phone (written to the ini, not shown as rows). */
+    static final String[] AUTO_KEYS = {"max_aniso", "texture_skip_min_size", "decode_16bit", "no_apex_clothing"};
     static final Option[] AUDIO_LANG = {VOICE, LANG};
     static final Option[] TOUCH = {OPACITY, SCALE, CAM, INVERT, GYRO, AIM, STICK, AUTORUN, FIRE_LOOK, VIBRATE, LABELS, SHOW_FPS, PAD_HIDE};
 
@@ -156,13 +169,43 @@ final class GameConfig {
     }
 
     static int[] preset(int tier, int mode) {
-        return PRESETS[Math.max(0, Math.min(3, tier))][Math.max(0, Math.min(2, mode))];
+        return PRESETS[Math.max(0, Math.min(3, tier))][Math.max(0, Math.min(2, mode))].clone();
+    }
+
+    /**
+     * The preset for this phone: the tier table, then the weakest GPUs drop to 480p in Speed,
+     * and the RAM class caps texture quality (4 GB: Medium at best, Low in Speed; 6 GB: Medium).
+     */
+    static int[] preset(DeviceProfile dp, int mode) {
+        int[] p = preset(dp.tier, mode);
+        if (mode == MODE_SPEED && dp.entryGpu()) p[0] = 480;
+        int ram = dp.ramClass();
+        if (ram == 4) p[1] = Math.max(p[1], mode == MODE_SPEED ? 2 : 1);
+        else if (ram == 6) p[1] = Math.max(p[1], 1);
+        return p;
     }
 
     /** "720p · 30 FPS" summary for the mode buttons. */
-    static String presetSummary(int tier, int mode) {
-        int[] p = preset(tier, mode);
+    static String presetSummary(DeviceProfile dp, int mode) {
+        int[] p = preset(dp, mode);
         return p[0] + "p · " + (p[3] == 0 ? "∞" : String.valueOf(p[3])) + " FPS";
+    }
+
+    /** Engine keys derived from the phone and the mode; remembered for in-game ini rewrites. */
+    void computeAutoKeys(DeviceProfile dp) {
+        int ram = dp.ramClass();
+        int aniso = dp.tier >= DeviceProfile.TIER_ULTRA ? 16 : dp.tier == DeviceProfile.TIER_HIGH ? 8 : dp.tier == DeviceProfile.TIER_MID ? 4 : 2;
+        if (ram == 4) aniso = Math.min(aniso, 2);
+        else if (ram == 6) aniso = Math.min(aniso, 4);
+        int cloth = get(CLOTH);
+        boolean noCloth = cloth == 2 || (cloth == 0 && dp.tier == DeviceProfile.TIER_LOW && (mode() == MODE_SPEED || ram == 4));
+        prefs.edit()
+                .putInt("x.max_aniso", aniso)
+                .putInt("x.texture_skip_min_size", ram == 4 ? 128 : 256)
+                // GPUs without BC (Mali, Xclipse, PowerVR) get DXT decoded on the CPU: 16-bit halves it.
+                .putInt("x.decode_16bit", !dp.isAdreno() && ram <= 6 ? 1 : 0)
+                .putInt("x.no_apex_clothing", noCloth ? 1 : 0)
+                .apply();
     }
 
     int get(Option o) {
@@ -197,7 +240,7 @@ final class GameConfig {
     /** First run: pick the mode for this phone so the game starts playable. */
     void ensureDefaults(DeviceProfile dp) {
         if (prefs.getInt("graphics_mode", -1) < 0) {
-            applyMode(dp.tier, dp.tier == DeviceProfile.TIER_LOW ? MODE_SPEED : MODE_BALANCE);
+            applyMode(dp, dp.tier == DeviceProfile.TIER_LOW ? MODE_SPEED : MODE_BALANCE);
             set(DRIVER, 0);
         }
         // 1.1.0 forced the system driver on Adreno 8xx; the port's own choice ("Auto": it
@@ -208,10 +251,19 @@ final class GameConfig {
 
     /** Value for TU_DEBUG, "" to block the port's own default, or null to leave it unset. */
     String turnipDebug(DeviceProfile dp) {
-        int v = get(TURNIP);
-        if (v == 1 || (v == 0 && dp.adrenoModel() >= 800)) return "sysmem";
-        if (v == 2) return "";
-        return null;
+        switch (get(TURNIP)) {
+            case 1: return "sysmem";
+            case 2: return "noubwc";
+            case 3: return "sysmem,noubwc";
+            case 4: return "";
+            default: return dp.adrenoModel() >= 800 ? "sysmem,noubwc" : null;
+        }
+    }
+
+    /** True to point the port at lib/…/libvulkan_freedreno_next.so (MAFIA2RE_CUSTOM_DRIVER). */
+    boolean useNextTurnip(DeviceProfile dp) {
+        int v = get(TURNIP_BUILD);
+        return v == 2 || (v == 0 && dp.adrenoModel() >= 800);
     }
 
     // ------------------------------------------------------------------ start-up watchdog
@@ -233,8 +285,8 @@ final class GameConfig {
         return failed;
     }
 
-    void applyMode(int tier, int mode) {
-        int[] p = preset(tier, mode);
+    void applyMode(DeviceProfile dp, int mode) {
+        int[] p = preset(dp, mode);
         prefs.edit()
                 .putInt("graphics_mode", mode)
                 .putInt(RES.key, p[0])
@@ -282,11 +334,12 @@ final class GameConfig {
                     boolean ours = false;
                     for (Option o : GRAPHICS) ours |= o.key.equals(k);
                     for (Option o : AUDIO_LANG) ours |= o.key.equals(k);
+                    for (String a : AUTO_KEYS) ours |= a.equals(k);
                     if (!ours && !line.trim().isEmpty()) sb.append(line).append('\n');
                 }
             }
             for (Option o : GRAPHICS) {
-                if (o == TURNIP) continue;   // environment variable, see turnipDebug()
+                if (o == TURNIP || o == TURNIP_BUILD || o == CLOTH) continue;   // environment / auto keys
                 if (o == DRIVER) {
                     int d = get(DRIVER);
                     if (d == 1) sb.append("vulkan_driver = system\n");
@@ -296,6 +349,9 @@ final class GameConfig {
                 sb.append(o.key).append(" = ").append(get(o)).append('\n');
             }
             for (Option o : AUDIO_LANG) sb.append(o.key).append(" = ").append(get(o)).append('\n');
+            for (String a : AUTO_KEYS) {
+                if (prefs.contains("x." + a)) sb.append(a).append(" = ").append(prefs.getInt("x." + a, 0)).append('\n');
+            }
             File tmp = new File(dir, "mafia2re.ini.tmp");
             try (FileOutputStream out = new FileOutputStream(tmp)) {
                 out.write(sb.toString().getBytes(StandardCharsets.UTF_8));
