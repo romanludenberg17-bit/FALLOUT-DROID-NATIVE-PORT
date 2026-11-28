@@ -41,7 +41,7 @@ import java.util.Locale;
  * folder, the game starts".
  */
 public class LauncherActivity extends Activity {
-    static final String VERSION = "1.3.2";
+    static final String VERSION = "1.3.3";
     static final String EXTRA_AUTOSTART = "remaf2.autostart";
     private static final int REQ_TREE = 41;
     private static final int TAB_PLAY = 0, TAB_SETTINGS = 1, TAB_CONTROLS = 2, TAB_FILES = 3, TAB_ABOUT = 4;
@@ -515,7 +515,7 @@ public class LauncherActivity extends Activity {
     private View controlsPage() {
         LinearLayout c = card();
         c.addView(Ui.caption(this, "Раскладка"));
-        TextView d = Ui.text(this, "Три набора кнопок — пешком, за рулём и в меню. Каждую кнопку можно передвинуть, изменить её размер и прозрачность или спрятать.",
+        TextView d = Ui.text(this, "Три набора кнопок — пешком, за рулём и в меню. Удержание «Действия» — сесть в машину или выйти, удержание «Оружия» — граната. Каждую кнопку можно передвинуть, изменить её размер и прозрачность, спрятать или вернуть.",
                 14, 0xFFD4D0CA, Ui.body(this));
         d.setPadding(0, dp(8), 0, dp(12));
         d.setLineSpacing(0, 1.1f);
@@ -709,6 +709,7 @@ public class LauncherActivity extends Activity {
                         + "• Стик как в шутерах: меньше, бег при толчке вперёд, фиксация бега замком.\n"
                         + "• Иконки кнопок с game-icons.net.\n"
                         + "• Всё приложение на русском.\n"
+                        + "• Удержание «Действия» — машина, удержание «Оружия» — граната; лишние кнопки скрыты.\n"
                         + "• Полный экран, умное скрытие кнопок, компактный счётчик FPS, раскладка под два больших пальца.\n"
                         + "• Adreno 8xx (Snapdragon 8 Elite, 8 Gen 5): встроен DD-Turnip (Mesa 27) — правильный вывод кадра на Android 16/17.\n"
                         + "• Если игра закрылась при запуске — лаунчер предложит отправить лог.\n"

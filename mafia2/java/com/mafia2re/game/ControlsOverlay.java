@@ -325,9 +325,28 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
 
     // ------------------------------------------------------------------ buttons
 
+    /** Long press = second action (Действие → машина, Оружие → граната). */
+    static final long HOLD_MS = 380;
+
     private void pressButton(ControlLayout.Element e, int pid) {
         e.pointer = pid;
         buzz();
+        if (e.kind == ControlLayout.Kind.KEY && e.holdKey != 0) {
+            e.holdStart = SystemClock.uptimeMillis();
+            e.holdFired = false;
+            postDelayed(() -> {
+                if (e.pointer == pid && !e.holdFired) {
+                    e.holdFired = true;
+                    performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                    key(e.holdKey, true);
+                    if (!stateKnown && e.holdKey == ControlLayout.K_F)
+                        manualCtx = ctx == ControlLayout.CAR ? ControlLayout.FOOT : ControlLayout.CAR;
+                    invalidate();
+                }
+            }, HOLD_MS);
+            invalidate();
+            return;
+        }
         switch (e.kind) {
             case MOUSE_LEFT:
                 mouseButton(1, true);
@@ -360,10 +379,27 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         invalidate();
     }
 
+    /** A short press: key down now, up a moment later so the game's input polling sees it. */
+    private void tapKey(int code) {
+        key(code, true);
+        postDelayed(() -> key(code, false), 80);
+    }
+
     private void releaseButton(ControlLayout.Element e) {
         int pid = e.pointer;
         e.pointer = -1;
         touches.remove(pid);
+        if (e.kind == ControlLayout.Kind.KEY && e.holdKey != 0) {
+            if (e.holdFired) {
+                key(e.holdKey, false);
+                if (!stateKnown && e.holdKey == ControlLayout.K_F) onContextChanged();
+            } else {
+                tapKey(e.key);
+            }
+            e.holdFired = false;
+            invalidate();
+            return;
+        }
         switch (e.kind) {
             case MOUSE_LEFT:
                 mouseButton(1, false);
@@ -413,7 +449,10 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
                 e.pointer = -1;
                 if (e.kind == ControlLayout.Kind.MOUSE_LEFT) mouseButton(1, false);
                 else if (e.kind == ControlLayout.Kind.MOUSE_RIGHT && !aimToggle) mouseButton(2, false);
-                else if (e.kind == ControlLayout.Kind.KEY || e.kind == ControlLayout.Kind.PAUSE) key(e.key, false);
+                else if (e.kind == ControlLayout.Kind.KEY && e.holdKey != 0) {
+                    if (e.holdFired) key(e.holdKey, false);
+                    e.holdFired = false;
+                } else if (e.kind == ControlLayout.Kind.KEY || e.kind == ControlLayout.Kind.PAUSE) key(e.key, false);
             }
         }
         if (mouseState != 0 && ctx == ControlLayout.MENU) {
@@ -854,7 +893,7 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
             e.fx = e.fy = -1;
             e.scale = 1;
             e.alpha = 1;
-            e.hidden = false;
+            e.hidden = e.hiddenByDefault;
         }
         relayout();
         cache.clear();
@@ -999,6 +1038,17 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
                 Bitmap b = button(e, pressed);
                 blit.setAlpha(Math.round(Math.min(1f, pressed ? Math.max(a, 0.9f) : a) * 255));
                 c.drawBitmap(b, e.cx - b.getWidth() / 2f, e.cy - b.getHeight() / 2f, blit);
+            }
+            if (!editing && e.holdKey != 0 && e.pointer >= 0 && !e.holdFired) {
+                float t = Math.min(1f, (SystemClock.uptimeMillis() - e.holdStart) / (float) HOLD_MS);
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeCap(Paint.Cap.ROUND);
+                paint.setStrokeWidth(3f * density);
+                paint.setColor(0xFFFFFFFF);
+                arcBox.set(e.cx - e.r - 3 * density, e.cy - e.r - 3 * density, e.cx + e.r + 3 * density, e.cy + e.r + 3 * density);
+                c.drawArc(arcBox, -90, 360 * t, false, paint);
+                paint.setStyle(Paint.Style.FILL);
+                if (t < 1f) postInvalidateDelayed(16);
             }
             if (labels || editing) drawLabel(c, e, editing ? 0.9f : Math.min(0.85f, a));
             if (editing && e.hidden) {
@@ -1288,6 +1338,18 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
             c.drawArc(new RectF(cx - ar, cy - ar, cx + ar, cy + ar), 245, 50, false, p);
         }
         Glyphs.draw(getContext(), c, e.glyph, cx, cy, r * 0.5f, 0xFFFFFFFF);
+        if (e.holdGlyph != null) {
+            // Badge: what a long press does.
+            float br = r * 0.34f, bx = cx + r * 0.68f, by = cy + r * 0.68f;
+            Paint bp = new Paint(Paint.ANTI_ALIAS_FLAG);
+            bp.setColor(pressed ? 0xFF8A1416 : 0xF0D9322F);
+            c.drawCircle(bx, by, br, bp);
+            bp.setStyle(Paint.Style.STROKE);
+            bp.setStrokeWidth(1.2f * density);
+            bp.setColor(0xCCFFFFFF);
+            c.drawCircle(bx, by, br, bp);
+            Glyphs.draw(getContext(), c, e.holdGlyph, bx, by, br * 0.62f, 0xFFFFFFFF);
+        }
         cache.put(k, b);
         return b;
     }

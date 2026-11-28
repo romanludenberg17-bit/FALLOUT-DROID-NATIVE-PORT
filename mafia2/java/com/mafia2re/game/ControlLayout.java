@@ -33,6 +33,15 @@ final class ControlLayout {
         float fx = -1, fy = -1, scale = 1f, alpha = 1f;
         boolean hidden;
 
+        /** Second action on a long press (key code), its badge glyph, and the default visibility. */
+        int holdKey;
+        String holdGlyph;
+        boolean hiddenByDefault;
+
+        // Runtime for long presses.
+        long holdStart;
+        boolean holdFired;
+
         // Runtime.
         float cx, cy, r;
         int pointer = -1;
@@ -119,6 +128,22 @@ final class ControlLayout {
         // Menus.
         add("ok", "Выбрать", "Select", "ok", Kind.KEY, K_ENTER, MENU, R, 84, B, 92, 34);
         add("back", "Назад", "Back", "back", Kind.KEY, K_ESC, MENU, R, 186, B, 72, 28);
+        smartPairs();
+    }
+
+    /**
+     * Smart pairs: the rarely needed key rides on a frequent button as a long press, and its own
+     * button is hidden by default (can be shown again in the editor).
+     *   Действие: tap E, hold F (enter / leave a car).   Оружие: tap next weapon, hold grenade.
+     */
+    private void smartPairs() {
+        Element action = byId("action"), weapon = byId("weapon");
+        action.holdKey = K_F;
+        action.holdGlyph = "car_in";
+        weapon.holdKey = K_1;
+        weapon.holdGlyph = "grenade";
+        byId("car_in").hiddenByDefault = true;
+        byId("grenade").hiddenByDefault = true;
     }
 
     Element byId(String id) {
@@ -129,12 +154,16 @@ final class ControlLayout {
     static ControlLayout load(Context c) {
         ControlLayout l = new ControlLayout();
         SharedPreferences p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        if (p.getInt("layout_v", 1) < 2) {
+            // 1.3.3: car / grenade buttons became long presses; earlier saved layouts get the new default.
+            p.edit().remove("car_in.h").remove("grenade.h").putInt("layout_v", 2).apply();
+        }
         for (Element e : l.all) {
             e.fx = p.getFloat(e.id + ".x", -1);
             e.fy = p.getFloat(e.id + ".y", -1);
             e.scale = p.getFloat(e.id + ".s", 1f);
             e.alpha = p.getFloat(e.id + ".a", 1f);
-            e.hidden = p.getBoolean(e.id + ".h", false);
+            e.hidden = p.getBoolean(e.id + ".h", e.hiddenByDefault);
         }
         return l;
     }

@@ -307,6 +307,36 @@ public class M2Test {
     }
 
     @Test
+    public void actionTapIsEHoldIsEnterCar() {
+        ActivityController<M2GameActivity> c = game();
+        ControlsOverlay o = find(c.get().getWindow().getDecorView(), ControlsOverlay.class);
+        ShadowLooper.idleMainLooper(300, java.util.concurrent.TimeUnit.MILLISECONDS);
+        assertTrue(o.layout.byId("car_in").hidden);              // its own button is hidden by default
+        assertTrue(o.layout.byId("grenade").hidden);
+        ControlLayout.Element act = o.layout.byId("action");
+        // Tap: E down, then up a moment later; no F.
+        SDLActivity.events.clear();
+        touch(o, MotionEvent.ACTION_DOWN, 0, act.cx, act.cy);
+        touch(o, MotionEvent.ACTION_UP, 0, act.cx, act.cy);
+        ShadowLooper.idleMainLooper(200, java.util.concurrent.TimeUnit.MILLISECONDS);
+        assertEquals("[down 33, up 33]", SDLActivity.events.toString());
+        // Hold: F while held, no E.
+        SDLActivity.events.clear();
+        touch(o, MotionEvent.ACTION_DOWN, 0, act.cx, act.cy);
+        ShadowLooper.idleMainLooper(ControlsOverlay.HOLD_MS + 50, java.util.concurrent.TimeUnit.MILLISECONDS);
+        assertEquals("[down 34]", SDLActivity.events.toString());
+        touch(o, MotionEvent.ACTION_UP, 0, act.cx, act.cy);
+        assertEquals("[down 34, up 34]", SDLActivity.events.toString());
+        // Weapon hold = grenade (key 1).
+        ControlLayout.Element wpn = o.layout.byId("weapon");
+        SDLActivity.events.clear();
+        touch(o, MotionEvent.ACTION_DOWN, 0, wpn.cx, wpn.cy);
+        ShadowLooper.idleMainLooper(ControlsOverlay.HOLD_MS + 50, java.util.concurrent.TimeUnit.MILLISECONDS);
+        touch(o, MotionEvent.ACTION_UP, 0, wpn.cx, wpn.cy);
+        assertEquals("[down 8, up 8]", SDLActivity.events.toString());
+    }
+
+    @Test
     public void failedStartIsReportedOnce() {
         GameConfig cfg = new GameConfig(ctx);
         cfg.markGameStart();
