@@ -147,6 +147,27 @@ static void* take_multicast_lock(void* unused) {
       }
     }
   }
+  // In-game cheats (com.rommy.NmpCheats in classes3.dex): load it with the
+  // app's class loader (a native thread only sees the system classes).
+  if (app && !(*env)->ExceptionCheck(env)) {
+    jclass ctxc = (*env)->FindClass(env, "android/content/Context");
+    jmethodID gcl = ctxc ? (*env)->GetMethodID(env, ctxc, "getClassLoader", "()Ljava/lang/ClassLoader;") : NULL;
+    jobject loader = gcl ? (*env)->CallObjectMethod(env, app, gcl) : NULL;
+    if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); loader = NULL; }
+    if (loader) {
+      jclass clc = (*env)->FindClass(env, "java/lang/ClassLoader");
+      jmethodID load = (*env)->GetMethodID(env, clc, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
+      jobject cls = (*env)->CallObjectMethod(env, loader, load, (*env)->NewStringUTF(env, "com.rommy.NmpCheats"));
+      if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); cls = NULL; }
+      if (cls) {
+        jmethodID install = (*env)->GetStaticMethodID(env, (jclass)cls, "install", "(Landroid/app/Application;)V");
+        if (install) (*env)->CallStaticVoidMethod(env, (jclass)cls, install, app);
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+        else __android_log_print(ANDROID_LOG_INFO, TAG, "in-game cheats installed");
+      }
+    }
+  }
+  if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
   (*vm)->DetachCurrentThread(vm);
   return NULL;
 }
