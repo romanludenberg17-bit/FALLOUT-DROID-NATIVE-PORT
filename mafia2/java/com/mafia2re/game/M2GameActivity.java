@@ -28,6 +28,9 @@ public class M2GameActivity extends GameActivity implements ControlsOverlay.List
 
     @Override
     protected void onCreate(Bundle b) {
+        // Before SDLActivity loads libmain.so: Android may restore this activity on its own
+        // (no launcher in between), and the game must still find its folder and driver.
+        GameEnv.apply(this);
         super.onCreate(b);
         cfg = new GameConfig(this);
         cfg.markGameStart();
@@ -45,6 +48,7 @@ public class M2GameActivity extends GameActivity implements ControlsOverlay.List
             }
         }
         overlay = new ControlsOverlay(this, cfg, true);
+        applySurfaceSize(content);
         overlay.setListener(this);
         if (content != null && at >= 0) content.addView(overlay, at, new FrameLayout.LayoutParams(-1, -1));
         else addContentView(overlay, new ViewGroup.LayoutParams(-1, -1));
@@ -52,6 +56,30 @@ public class M2GameActivity extends GameActivity implements ControlsOverlay.List
         addContentView(host, new ViewGroup.LayoutParams(-1, -1));
         host.setVisibility(View.GONE);
         applyFpsLimit();
+    }
+
+    /** Fixed swapchain size (see GameEnv.surfaceSize); menu clicks are mapped into it. */
+    private void applySurfaceSize(ViewGroup content) {
+        int[] size = GameEnv.surfaceSize(this, cfg);
+        android.view.SurfaceView sv = content == null ? null : findSurface(content);
+        if (size == null || sv == null) return;
+        sv.getHolder().setFixedSize(size[0], size[1]);
+        sv.addOnLayoutChangeListener((v, l, t, r, bt, ol, ot, or, ob) -> {
+            int w = r - l, h = bt - t;
+            if (w > 0 && h > 0) overlay.setPointerScale(size[0] / (float) w, size[1] / (float) h);
+        });
+    }
+
+    private static android.view.SurfaceView findSurface(ViewGroup g) {
+        for (int i = 0; i < g.getChildCount(); i++) {
+            View v = g.getChildAt(i);
+            if (v instanceof android.view.SurfaceView) return (android.view.SurfaceView) v;
+            if (v instanceof ViewGroup) {
+                android.view.SurfaceView s = findSurface((ViewGroup) v);
+                if (s != null) return s;
+            }
+        }
+        return null;
     }
 
     private void applyFpsLimit() {

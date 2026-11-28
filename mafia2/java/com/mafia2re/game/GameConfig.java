@@ -139,7 +139,12 @@ final class GameConfig {
             s("Авто", "Вкл", "Выкл"), s("Auto", "On", "Off"), v(0, 1, 2), true,
             "Расчёт ткани нагружает процессор. «Авто» выключает её на слабых телефонах в «Скорости» и при 4 ГБ.", "");
 
-    static final Option[] GRAPHICS = {RES, TEX, DETAIL, FPS, BATTERY, CLOTH, DRIVER, TURNIP_BUILD, TURNIP};
+    /** Swapchain size: aligned (width multiple of 256 px, scaled by the display) or native. */
+    static final Option SURFACE = new Option("surface_mode", "Буфер экрана", "Screen buffer",
+            s("Авто", "Родной"), s("Auto", "Native"), v(0, 1), true,
+            "«Авто»: размер кадра под разрешение с шириной, кратной 256 px — убирает полосы на Adreno 8xx и разгружает GPU.", "");
+
+    static final Option[] GRAPHICS = {RES, TEX, DETAIL, FPS, BATTERY, CLOTH, SURFACE, DRIVER, TURNIP_BUILD, TURNIP};
 
     /** Engine keys the launcher derives from the phone (written to the ini, not shown as rows). */
     static final String[] AUTO_KEYS = {"max_aniso", "texture_skip_min_size", "decode_16bit", "no_apex_clothing"};
@@ -366,7 +371,7 @@ final class GameConfig {
                 }
             }
             for (Option o : GRAPHICS) {
-                if (o == TURNIP || o == TURNIP_BUILD || o == CLOTH) continue;   // environment / auto keys
+                if (o == TURNIP || o == TURNIP_BUILD || o == CLOTH || o == SURFACE) continue;   // env / auto / Java side
                 if (o == DRIVER) {
                     int d = get(DRIVER);
                     if (d == 1) sb.append("vulkan_driver = system\n");

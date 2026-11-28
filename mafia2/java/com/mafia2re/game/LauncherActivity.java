@@ -41,7 +41,7 @@ import java.util.Locale;
  * folder, the game starts".
  */
 public class LauncherActivity extends Activity {
-    static final String VERSION = "1.2.1";
+    static final String VERSION = "1.2.2";
     static final String EXTRA_AUTOSTART = "remaf2.autostart";
     private static final int REQ_TREE = 41;
     private static final int TAB_PLAY = 0, TAB_SETTINGS = 1, TAB_CONTROLS = 2, TAB_FILES = 3, TAB_ABOUT = 4;
@@ -108,6 +108,14 @@ public class LauncherActivity extends Activity {
         refreshChips();
         showTab(tab);
         if (cfg.takeFailedStart()) {
+            if (device.isAdreno() && cfg.get(GameConfig.DRIVER) == 1) {
+                // DXVK aborts on Qualcomm's own driver here: back to Turnip for the next start.
+                cfg.applyAdrenoVariant(0);
+                dialog("Системный драйвер не подошёл",
+                        "Игра закрылась на драйвере Qualcomm, поэтому снова включён Turnip. Отправьте лог — в нём будет причина от DXVK.",
+                        "ОТПРАВИТЬ ЛОГ", this::shareLog);
+                return;
+            }
             dialog("Игра закрылась при запуске",
                     "Похоже, игра не смогла стартовать. Отправьте лог (Telegram, почта) — по нему видно причину.\n\n"
                             + "Можно попробовать другой драйвер Vulkan: сейчас — «" + GameConfig.DRIVER.name(GameConfig.DRIVER.indexOf(cfg.get(GameConfig.DRIVER))) + "».",
@@ -588,6 +596,8 @@ public class LauncherActivity extends Activity {
                 .append("ini: ").append(readTail(new File(dir, "mafia2re.ini"), 4000)).append('\n');
         File note = dir == null ? null : new File(dir, "remaf2-launch.txt");
         if (note != null && note.exists()) sb.append("===== remaf2-launch.txt =====\n").append(readTail(note, 4000));
+        File[] dxvk = dir == null ? null : dir.listFiles((d, n) -> n.endsWith("_d3d9.log") || n.endsWith("_dxgi.log"));
+        if (dxvk != null) for (File f : dxvk) sb.append("===== ").append(f.getName()).append(" =====\n").append(readTail(f, 20_000)).append('\n');
         for (String n : new String[]{"mafia2-native.log", "mafia2-native.prev.log"}) {
             File f = dir == null ? null : new File(dir, n);
             if (f == null || !f.exists()) continue;
@@ -699,6 +709,8 @@ public class LauncherActivity extends Activity {
                         + "• Всё приложение на русском.\n"
                         + "• Если игра закрылась при запуске — лаунчер предложит отправить лог.\n"
                         + "• Adreno 8xx: новая сборка Turnip и режим совместимости (sysmem + noubwc) — сами.\n"
+                        + "• Буфер экрана с шириной, кратной 256 px: против полос на Adreno 8xx и быстрее на всех.\n"
+                        + "• Перезапуск игры из меню порта больше не теряет папку игры; логи DXVK в «Отправить лог».\n"
                         + "• Профили для Helio G85/G99/G100 и Mali: 480p в «Скорости» на Mali-G52, анизотропия, ткань APEX.\n"
                         + "• Профили памяти 4 и 6 ГБ: ограничение текстур, срез мипов, 16-бит распаковка DXT на Mali.\n"
                         + "• Кнопка «Отправить лог» во вкладке «Файлы игры», Telegram в шапке.",
@@ -807,65 +819,10 @@ public class LauncherActivity extends Activity {
             message("Процессор не поддерживается", compatWarning());
             return;
         }
-        cfg.computeAutoKeys(device);
-        cfg.writeIni();
-        try {
-            Os.setenv("MAFIA2RE_GAME", game.getAbsolutePath(), true);
-            String tu = cfg.turnipDebug(device);
-            if (tu == null) Os.unsetenv("TU_DEBUG");
-            else Os.setenv("TU_DEBUG", tu, true);
-            // A driver the user dropped into files/driver wins; else the newer bundled Turnip
-            // when asked for (the port loads MAFIA2RE_CUSTOM_DRIVER through adrenotools).
-            File drv = installCustomDriver();
-            if (drv == null && cfg.useNextTurnip(device) && device.isAdreno()) {
-                File next = new File(getApplicationInfo().nativeLibraryDir, "libvulkan_freedreno_next.so");
-                if (next.canRead()) drv = next;
-            }
-            if (drv == null) Os.unsetenv("MAFIA2RE_CUSTOM_DRIVER");
-            else Os.setenv("MAFIA2RE_CUSTOM_DRIVER", drv.getAbsolutePath(), true);
-            writeLaunchNote(tu, drv);
-        } catch (Exception ignored) {
-        }
+        GameEnv.apply(this);
         startActivity(new Intent(this, M2GameActivity.class));
         overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
         finish();
-    }
-
-    /** What the launcher handed to the game; included in "Отправить лог". */
-    private void writeLaunchNote(String tu, File drv) {
-        File dir = getExternalFilesDir(null);
-        if (dir == null) return;
-        String s = "ReMaf2 " + VERSION + " launch " + new java.util.Date() + "\n"
-                + "TU_DEBUG=" + (tu == null ? "(unset)" : "\"" + tu + "\"") + "\n"
-                + "MAFIA2RE_CUSTOM_DRIVER=" + (drv == null ? "(unset)" : drv.getAbsolutePath()) + "\n"
-                + "vulkan_driver=" + GameConfig.DRIVER.name(GameConfig.DRIVER.indexOf(cfg.get(GameConfig.DRIVER))) + "\n";
-        try (FileOutputStream out = new FileOutputStream(new File(dir, "remaf2-launch.txt"))) {
-            out.write(s.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        } catch (Exception ignored) {
-        }
-    }
-
-    /** A .so dropped into files/driver is copied to private storage (same rule as the port's setup). */
-    private File installCustomDriver() {
-        File ext = getExternalFilesDir(null);
-        File[] list = ext == null ? null : new File(ext, "driver").listFiles((d, n) -> n.endsWith(".so"));
-        File dst = new File(new File(getFilesDir(), "driver"), "libvulkan_custom.so");
-        if (list == null || list.length == 0) {
-            dst.delete();
-            return null;
-        }
-        File src = list[0];
-        if (dst.exists() && dst.length() == src.length() && dst.lastModified() >= src.lastModified()) return dst;
-        dst.getParentFile().mkdirs();
-        try (FileInputStream in = new FileInputStream(src); FileOutputStream out = new FileOutputStream(dst)) {
-            byte[] buf = new byte[1 << 16];
-            int n;
-            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
-            return dst;
-        } catch (Exception e) {
-            dst.delete();
-            return null;
-        }
     }
 
     // ------------------------------------------------------------------ диалоги

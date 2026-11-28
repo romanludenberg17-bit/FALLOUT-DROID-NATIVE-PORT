@@ -286,10 +286,18 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         if (ix != 0 || iy != 0) SDLActivity.onNativeMouse(mouseState, 2, ix, iy, true);
     }
 
+    /** View pixels -> game window pixels, when the game surface has a fixed (smaller) size. */
+    private float pointerSx = 1f, pointerSy = 1f;
+
+    void setPointerScale(float sx, float sy) {
+        pointerSx = sx;
+        pointerSy = sy;
+    }
+
     private void mouseTo(float x, float y) {
-        menuX = x;
-        menuY = y;
-        if (live) SDLActivity.onNativeMouse(mouseState, 2, x, y, false);
+        menuX = x * pointerSx;
+        menuY = y * pointerSy;
+        if (live) SDLActivity.onNativeMouse(mouseState, 2, menuX, menuY, false);
     }
 
     private void buzz() {
