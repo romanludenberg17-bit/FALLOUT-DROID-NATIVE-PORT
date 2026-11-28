@@ -207,12 +207,33 @@ public class NmpHomeActivity extends NmpLauncherActivity {
   }
 
   // ------------------------------------------------------------ graphics modes
-  private static final String[][] MODES = {
+  private static final String[][] MODES_FAST_GPU = {
       // name, frame limit, 3D resolution scale
       {"quality", "30", "1.0"},
       {"balance", "60", "0.75"},
       {"performance", "60", "0.60"},
   };
+  /** Mali-G57 MC2 class (the launcher's Helio G99 profile caps output at 540p). */
+  private static final String[][] MODES_WEAK_GPU = {
+      {"quality", "30", "0.75"},
+      {"balance", "30", "0.60"},
+      {"performance", "40", "0.50"},
+  };
+
+  private String[][] modes() {
+    return weakGpu() ? MODES_WEAK_GPU : MODES_FAST_GPU;
+  }
+
+  private boolean weakGpu() {
+    File f = argsFile();
+    if (f == null || !f.isFile()) return false;
+    try {
+      return new String(readAll(new FileInputStream(f)), StandardCharsets.UTF_8)
+          .contains("--gta4_output_height_cap=540");
+    } catch (Throwable t) {
+      return false;
+    }
+  }
 
   private File argsFile() {
     File d = getExternalFilesDir(null);
@@ -221,7 +242,7 @@ public class NmpHomeActivity extends NmpLauncherActivity {
 
   private void setMode(String m) {
     String[] mode = null;
-    for (String[] x : MODES) if (x[0].equals(m)) mode = x;
+    for (String[] x : modes()) if (x[0].equals(m)) mode = x;
     if (mode == null) return;
     getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("mode", m).apply();
     if (!applyMode(mode)) {
@@ -275,16 +296,19 @@ public class NmpHomeActivity extends NmpLauncherActivity {
         }
       } catch (Throwable ignored) { }
     }
-    String actual;
-    if ("30".equals(limit)) actual = "quality";
-    else {
-      double sc = 0.75;
-      try { if (scale != null) sc = Double.parseDouble(scale); } catch (NumberFormatException ignored) { }
-      actual = sc <= 0.65 ? "performance" : "balance";
+    // the mode whose frame limit and resolution are closest to args.txt
+    String[][] table = modes();
+    double sc = 0.75;
+    try { if (scale != null) sc = Double.parseDouble(scale); } catch (NumberFormatException ignored) { }
+    String actual = table[1][0];
+    double best = Double.MAX_VALUE;
+    for (String[] x : table) {
+      double dist = Math.abs(Double.parseDouble(x[2]) - sc) + (x[1].equals(limit) ? 0 : 0.5);
+      if (dist < best) { best = dist; actual = x[0]; }
     }
     // a mode chosen before args.txt existed: apply it now
     if (wanted != null && !wanted.equals(actual) && f != null && f.isFile()) {
-      for (String[] x : MODES) if (x[0].equals(wanted) && applyMode(x)) return wanted;
+      for (String[] x : table) if (x[0].equals(wanted) && applyMode(x)) return wanted;
     }
     return actual;
   }
@@ -319,6 +343,14 @@ public class NmpHomeActivity extends NmpLauncherActivity {
     } catch (Throwable ignored) { }
     j.append("\"thermal\":").append(thermal).append(',');
     j.append("\"mode\":").append(q(currentMode())).append(',');
+    j.append("\"modes\":[");
+    String[][] table = modes();
+    for (int i = 0; i < table.length; i++) {
+      if (i > 0) j.append(',');
+      j.append("{\"m\":").append(q(table[i][0])).append(",\"fps\":").append(table[i][1])
+       .append(",\"scale\":").append(table[i][2]).append('}');
+    }
+    j.append("],");
     long played = 0;
     try {
       File pt = getExternalFilesDir(null) == null ? null : new File(getExternalFilesDir(null), "playtime.txt");

@@ -12,15 +12,15 @@ import glob, hashlib, os, shutil, struct, subprocess, sys, tempfile, zipfile, zl
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_from_4nmp as base
 
-base.VERSION_CODE = 637
-base.VERSION_NAME = "1.3.7"
+base.VERSION_CODE = 638
+base.VERSION_NAME = "1.3.8"
 base.LABEL = "4NMP"  # the project's name
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 def patch_dex(dex):
     d = bytearray(dex)
     for old, new in ((bytes.fromhex("1306020c"), bytes.fromhex("1306040c")),   # bridge -> 3076
-                     (b"nmp_v504_clean", b"nmp_v637_clean"),                  # args.txt reset once (Mali profile fixes)
+                     (b"nmp_v504_clean", b"nmp_v638_clean"),                  # args.txt reset once (G99/G100 speed profile)
                      # writeCoopArgs: skipping the intro left the game on a black screen
                      # (and the line stayed in args.txt for every later start)
                      (b"\n--gta4_skip_intro=true\n", b"\n#-gta4_skip_intro=true\n")):
@@ -69,25 +69,39 @@ MINI_PATCH = [
     "--gta4_native_environment_reflection_interval=2",
 ]
 
-# Mali / Helio G99 profiles. Physics runs on the CPU and is fine on Adreno, so
-# the CPU-side switches these profiles alone changed go back to the Adreno
-# profile's values; the renderer becomes "native" (gta4-mobile) and shaders
-# keep FP32 (half precision broke the shadow-map depth compare).
-MALI_DROP = ("--protect_zero=", "--gta4_fps_guard=", "--gta4_model_lod_distance_scale=",
-             "--gta4_native_fs_relaxed_precision=", "--gta4_shadow_map_base_size=", "--gpu_plugin=")
-MALI_PATCH = [
-    "# --- 4NMP Mali / G99 fixes ---",
+# Mali profiles. Physics runs on the CPU and is fine on Adreno: the CPU-side
+# switch only these profiles changed (writable zero page) goes, physics steps
+# are stabilized, and the renderer becomes "native" (gta4-mobile).
+MALI_COMMON_DROP = ("--protect_zero=", "--gpu_plugin=", "--gta4_native_fs_relaxed_precision=")
+MALI_COMMON = [
     "# Native renderer (launcher: Rendering -> Renderer -> Native).",
     "--gpu_plugin=gta4-mobile",
-    "# Physics: same CPU-side setup as the Adreno profile (no writable zero page,",
-    "# no 30 FPS guard cuts), stabilized physics steps on frame-time spikes.",
-    "--gta4_fps_guard=0",
+    "# Physics: no writable zero page (as on Adreno), stabilized steps on frame-time spikes.",
     "--gta4_clamp_physics_timestep=true",
-    "# World and its collision stream in farther: no falling through the map at speed.",
-    "--gta4_model_lod_distance_scale=0.80",
-    "# Shadows: FP32 depth compare and a 256 shadow map (no blocky shadow acne).",
+    "# FP32 shading if the old renderer is chosen (half precision broke shadow depth compares).",
     "--gta4_native_fs_relaxed_precision=false",
+]
+# Mali-G57 MC2 class (Helio G99 / G100): CPU-bound, two fast cores. Keep the
+# 4NMP author's GPU cuts (fps_guard, 128 shadows), fewer cars and pedestrians,
+# thermal guard and dynamic culling on; world streams in a bit farther than
+# 0.55 so collision is there at speed.
+G99_DROP = MALI_COMMON_DROP + ("--gta4_model_lod_distance_scale=", "--android_thermal_guard=",
+    "--gta4_traffic_density_scale=", "--gta4_parked_car_density_scale=", "--gta4_ped_density_scale=",
+    "--gta4_scenario_ped_density_scale=")
+G99_PATCH = ["# --- 4NMP Helio G99 / G100 profile ---"] + MALI_COMMON + [
+    "--gta4_model_lod_distance_scale=0.65",
+    "--gta4_traffic_density_scale=0.25",
+    "--gta4_parked_car_density_scale=0.25",
+    "--gta4_ped_density_scale=0.25",
+    "--gta4_scenario_ped_density_scale=0.25",
+    "--android_thermal_guard=true",
+    "--gta4_mobile_dynamic_cull=true",
+]
+# Stronger Mali (G715 / Immortalis / G925...): FP32-safe 256 shadow map.
+MALI_DROP = MALI_COMMON_DROP + ("--gta4_shadow_map_base_size=",)
+MALI_PATCH = ["# --- 4NMP Mali profile ---"] + MALI_COMMON + [
     "--gta4_shadow_map_base_size=256",
+    "--gta4_mobile_dynamic_cull=true",
 ]
 
 def patch_args(text, name):
@@ -97,7 +111,10 @@ def patch_args(text, name):
         keys = {l.split("=")[0] for l in MINI_PATCH if l.startswith("--")}
         lines = [l for l in lines if l.split("=")[0] not in keys]
         extra += [""] + MINI_PATCH
-    elif name in ("assets/default_args_g99.txt", "assets/default_args_mali.txt"):
+    elif name == "assets/default_args_g99.txt":
+        lines = [l for l in lines if not l.startswith(G99_DROP)]
+        extra += [""] + G99_PATCH
+    elif name == "assets/default_args_mali.txt":
         lines = [l for l in lines if not l.startswith(MALI_DROP)]
         extra += [""] + MALI_PATCH
     return "\n".join(lines + extra + [""]).encode()
