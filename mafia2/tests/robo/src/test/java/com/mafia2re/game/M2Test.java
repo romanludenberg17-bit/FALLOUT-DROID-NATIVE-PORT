@@ -605,9 +605,99 @@ public class M2Test {
         assertEquals("up 111", SDLActivity.events.get(1));
         SDLActivity.events.clear();
         touch(o, MotionEvent.ACTION_DOWN, 0, 500, 300);
+        // Touch down only hovers: the item lights up, nothing is clicked yet.
+        assertFalse(SDLActivity.events.toString(), SDLActivity.events.contains("mouse b1 a0 abs 500,300"));
         touch(o, MotionEvent.ACTION_UP, 0, 500, 300);
+        ShadowLooper.idleMainLooper(100, java.util.concurrent.TimeUnit.MILLISECONDS);
         assertTrue(SDLActivity.events.toString(), SDLActivity.events.contains("mouse b1 a0 abs 500,300"));
         assertTrue(SDLActivity.events.toString(), SDLActivity.events.contains("mouse b0 a1 abs 500,300"));
+    }
+
+    @Test
+    public void menuSwipeScrollsAndLongPressDrags() {
+        TouchControls.state = 8;   // no player: menus
+        ActivityController<M2GameActivity> c = game();
+        ControlsOverlay o = find(c.get().getWindow().getDecorView(), ControlsOverlay.class);
+        ShadowLooper.idleMainLooper(300, java.util.concurrent.TimeUnit.MILLISECONDS);
+        float d = o.getResources().getDisplayMetrics().density;
+        // Vertical swipe: mouse wheel under the cursor, no click.
+        SDLActivity.events.clear();
+        touch(o, MotionEvent.ACTION_DOWN, 0, 500, 200);
+        touch(o, MotionEvent.ACTION_MOVE, 0, 500, 200 + 80 * d);
+        touch(o, MotionEvent.ACTION_UP, 0, 500, 200 + 80 * d);
+        ShadowLooper.idleMainLooper(100, java.util.concurrent.TimeUnit.MILLISECONDS);
+        assertTrue(SDLActivity.events.toString(), SDLActivity.events.contains("mouse b0 a8 abs 0,1"));
+        for (String e : SDLActivity.events) assertFalse(e, e.startsWith("mouse b1 a0"));
+        // Long press: the button goes down and stays down while the finger drags (sliders).
+        SDLActivity.events.clear();
+        touch(o, MotionEvent.ACTION_DOWN, 0, 400, 300);
+        ShadowLooper.idleMainLooper(ControlsOverlay.MENU_DRAG_MS + 50, java.util.concurrent.TimeUnit.MILLISECONDS);
+        assertTrue(SDLActivity.events.toString(), SDLActivity.events.contains("mouse b1 a0 abs 400,300"));
+        touch(o, MotionEvent.ACTION_MOVE, 0, 600, 300);
+        assertTrue(SDLActivity.events.toString(), SDLActivity.events.contains("mouse b1 a2 abs 600,300"));
+        touch(o, MotionEvent.ACTION_UP, 0, 600, 300);
+        assertEquals("mouse b0 a1 abs 600,300", SDLActivity.events.get(SDLActivity.events.size() - 1));
+    }
+
+    @Test
+    public void cutsceneVideoShowsOnlySkip() throws Exception {
+        TouchControls.state = 8 | 1 | 4;
+        ActivityController<M2GameActivity> c = game();
+        View root = c.get().getWindow().getDecorView();
+        ControlsOverlay o = find(root, ControlsOverlay.class);
+        ShadowLooper.idleMainLooper(300, java.util.concurrent.TimeUnit.MILLISECONDS);
+        for (ControlLayout.Element e : o.layout.all) assertFalse(e.id, o.isVisible(e));
+        SDLActivity.events.clear();
+        ControlLayout.Element fire = o.layout.byId("fire");
+        touch(o, MotionEvent.ACTION_DOWN, 0, fire.cx, fire.cy);   // first tap: shows "Skip", fires nothing
+        touch(o, MotionEvent.ACTION_UP, 0, fire.cx, fire.cy);
+        assertTrue(SDLActivity.events.toString(), SDLActivity.events.isEmpty());
+        shot(root, "17_cutscene_skip");
+        android.graphics.RectF sk = o.skipRect();
+        assertFalse(sk.isEmpty());
+        touch(o, MotionEvent.ACTION_DOWN, 0, sk.centerX(), sk.centerY());
+        touch(o, MotionEvent.ACTION_UP, 0, sk.centerX(), sk.centerY());
+        ShadowLooper.idleMainLooper(400, java.util.concurrent.TimeUnit.MILLISECONDS);
+        assertTrue(SDLActivity.events.toString(), SDLActivity.events.contains("down 62"));
+        assertTrue(SDLActivity.events.toString(), SDLActivity.events.contains("down 66"));
+        TouchControls.state = 8 | 1;
+    }
+
+    @Test
+    public void fpsCounterNeverCoversAButton() {
+        for (int st : new int[]{8 | 1, 8 | 1 | 2, 8}) {
+            TouchControls.state = st;
+            ActivityController<M2GameActivity> c = game();
+            ControlsOverlay o = find(c.get().getWindow().getDecorView(), ControlsOverlay.class);
+            ShadowLooper.idleMainLooper(300, java.util.concurrent.TimeUnit.MILLISECONDS);
+            float d = o.getResources().getDisplayMetrics().density;
+            o.placeFps(o.getWidth(), 92 * d, 10 * d);
+            android.graphics.RectF r = o.fpsRect();
+            for (ControlLayout.Element e : o.layout.all) {
+                if (!o.isVisible(e) || e.kind == ControlLayout.Kind.STICK) continue;
+                float nx = Math.max(r.left, Math.min(e.cx, r.right)), ny = Math.max(r.top, Math.min(e.cy, r.bottom));
+                assertTrue(e.id + " state " + st, Math.hypot(e.cx - nx, e.cy - ny) >= e.r);
+            }
+        }
+        TouchControls.state = 8 | 1;
+    }
+
+    @Test
+    public void refreshRateAndVsync() throws Exception {
+        float[] rates = {60, 90, 120};
+        assertEquals(120, GameConfig.pickRefresh(rates, 60, false, false), 0.1);   // V-Sync off: fastest screen
+        assertEquals(120, GameConfig.pickRefresh(rates, 0, true, false), 0.1);     // no cap
+        assertEquals(90, GameConfig.pickRefresh(rates, 45, true, false), 0.1);     // even pacing for 45
+        assertEquals(60, GameConfig.pickRefresh(rates, 30, false, true), 0.1);     // battery: lowest multiple
+        assertEquals(60, GameConfig.pickRefresh(new float[]{60}, 120, false, false), 0.1);
+        GameConfig cfg = new GameConfig(ctx);
+        cfg.writeIni();
+        assertTrue(readIni(), readIni().contains("dxvk_config = d3d9.presentInterval = 0\n"));
+        cfg.set(GameConfig.VSYNC, 1);
+        cfg.writeIni();
+        String ini = readIni();
+        assertTrue(ini, ini.contains("dxvk_config = d3d9.presentInterval = 1\n"));
+        assertEquals(ini.indexOf("dxvk_config"), ini.lastIndexOf("dxvk_config"));
     }
 
     @Test

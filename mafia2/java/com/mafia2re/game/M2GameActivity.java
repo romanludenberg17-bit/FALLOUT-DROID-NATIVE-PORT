@@ -62,6 +62,37 @@ public class M2GameActivity extends GameActivity implements ControlsOverlay.List
             TouchControls.nativeSetFpsLimit(cfg.get(GameConfig.FPS));
         } catch (Throwable ignored) {
         }
+        applyRefreshRate();
+    }
+
+    /** Replaces the port's own choice (60 Hz, 90 Hz for 45 FPS) with {@link GameConfig#pickRefresh}. */
+    private void applyRefreshRate() {
+        try {
+            android.view.Display d = getWindowManager().getDefaultDisplay();
+            if (d == null) return;
+            android.view.Display.Mode cur = d.getMode();
+            java.util.List<android.view.Display.Mode> same = new java.util.ArrayList<>();
+            for (android.view.Display.Mode m : d.getSupportedModes()) {
+                if (m.getPhysicalWidth() == cur.getPhysicalWidth() && m.getPhysicalHeight() == cur.getPhysicalHeight()) same.add(m);
+            }
+            if (same.isEmpty()) return;
+            float[] rates = new float[same.size()];
+            for (int i = 0; i < rates.length; i++) rates[i] = same.get(i).getRefreshRate();
+            DeviceProfile dp = DeviceProfile.detectCached(this);
+            boolean frugal = cfg.get(GameConfig.BATTERY) != 0 || dp.tier == DeviceProfile.TIER_LOW;
+            float want = GameConfig.pickRefresh(rates, cfg.get(GameConfig.FPS), cfg.get(GameConfig.VSYNC) != 0, frugal);
+            for (android.view.Display.Mode m : same) {
+                if (Math.abs(m.getRefreshRate() - want) < 0.5f) {
+                    android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
+                    if (lp.preferredDisplayModeId != m.getModeId()) {
+                        lp.preferredDisplayModeId = m.getModeId();
+                        getWindow().setAttributes(lp);
+                    }
+                    return;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
     }
 
     @Override
@@ -139,6 +170,13 @@ public class M2GameActivity extends GameActivity implements ControlsOverlay.List
             applyFpsLimit();
             cfg.writeIni();
         }));
+        TextView vs = Ui.text(this, "V-Sync применится после перезапуска игры.", 12, Ui.DIM, Ui.body(this));
+        rows.addView(OptionRow.create(this, cfg, GameConfig.VSYNC, 16, v -> {
+            cfg.writeIni();
+            applyRefreshRate();
+        }));
+        vs.setPadding(0, 0, 0, dp(6));
+        rows.addView(vs);
         GameConfig.Option[] live = {GameConfig.SHOW_FPS, GameConfig.OPACITY, GameConfig.SCALE, GameConfig.CAM, GameConfig.INVERT,
                 GameConfig.GYRO, GameConfig.AIM, GameConfig.STICK, GameConfig.FIRE_LOOK, GameConfig.LABELS, GameConfig.SMART_HIDE, GameConfig.VIBRATE};
         for (GameConfig.Option o : live) rows.addView(OptionRow.create(this, cfg, o, 16, v -> overlay.reloadSettings()));

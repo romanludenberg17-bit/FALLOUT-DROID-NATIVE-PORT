@@ -87,8 +87,17 @@ final class GameConfig {
             s("Авто", "Выкл", "Вкл"), s("Auto", "Off", "On"), v(-1, 0, 1), true,
             "Мягкие тени в углах. Нагружает видеочип.", "");
     static final Option FPS = new Option("fps_limit", "Лимит FPS", "FPS limit",
-            s("Нет", "30", "45", "60"), s("None", "30", "45", "60"), v(0, 30, 45, 60), true,
-            "30 FPS — ровно и без перегрева на слабых чипах.", "30 FPS is smooth and cool on entry chips.");
+            s("Нет", "30", "45", "60", "90", "120"), s("None", "30", "45", "60", "90", "120"), v(0, 30, 45, 60, 90, 120), true,
+            "30 FPS — ровно и без перегрева на слабых чипах. 90 и 120 — для экранов 90/120 Гц и мощных телефонов.", "");
+    /**
+     * Vertical sync. The game asks D3D9 for interval 0 already; the port then caps the display at
+     * 60 Hz. Off: d3d9.presentInterval = 0 (Vulkan MAILBOX: a late frame shows at the next refresh,
+     * no wait for the next whole vsync) and the screen's highest refresh rate. On: FIFO, interval 1.
+     */
+    static final Option VSYNC = new Option("vsync", "Вертикальная синхронизация", "V-Sync",
+            s("Выкл", "Вкл"), s("Off", "On"), v(0, 1), true,
+            "Выкл — кадр не ждёт обновления экрана, и экран работает на максимальной частоте (90/120 Гц): выше FPS и меньше задержка. "
+                    + "Вкл — ровнее на некоторых драйверах, но при просадке FPS падает ступенькой.", "");
     static final Option BATTERY = new Option("battery_saver", "Экономия батареи", "Battery saver",
             s("Выкл", "Вкл"), s("Off", "On"), v(0, 1), true,
             "Снижает нагрузку в меню и на паузе.", "Lowers the load in menus and while paused.");
@@ -161,7 +170,7 @@ final class GameConfig {
             s("Авто", "Вкл", "Выкл"), s("Auto", "On", "Off"), v(0, 1, 2), true,
             "Расчёт ткани нагружает процессор. «Авто» выключает её на слабых телефонах в «Скорости» и при 4 ГБ.", "");
 
-    static final Option[] GRAPHICS = {RES, FULLSCREEN, TEX, DETAIL, SHADOWS, GEOMETRY, AO, FPS, BATTERY, CLOTH, DRIVER, TURNIP_BUILD, TURNIP};
+    static final Option[] GRAPHICS = {RES, FULLSCREEN, TEX, DETAIL, SHADOWS, GEOMETRY, AO, FPS, VSYNC, BATTERY, CLOTH, DRIVER, TURNIP_BUILD, TURNIP};
 
     /** Engine keys the launcher derives from the phone (written to the ini, not shown as rows). */
     static final String[] AUTO_KEYS = {"max_aniso", "texture_skip_min_size", "decode_16bit", "no_apex_clothing"};
@@ -264,6 +273,25 @@ final class GameConfig {
             case "game_lang": return Ui.english() ? 1 : 0;
             default: return o.values[0];
         }
+    }
+
+    /**
+     * Display refresh rate to ask for. V-Sync off or no FPS cap: the screen's highest rate (late
+     * frames wait 8 ms at 120 Hz instead of 17 ms); with a cap, a rate that is a multiple of it so
+     * frames pace evenly. Battery saver and entry phones take the lowest such rate.
+     */
+    static float pickRefresh(float[] rates, int fpsLimit, boolean vsync, boolean frugal) {
+        float max = -1, maxMul = -1, minMul = -1;
+        for (float r : rates) {
+            max = Math.max(max, r);
+            if (fpsLimit > 0 && r + 0.5f >= fpsLimit && Math.abs(r / fpsLimit - Math.round(r / fpsLimit)) < 0.02f) {
+                maxMul = Math.max(maxMul, r);
+                minMul = minMul < 0 ? r : Math.min(minMul, r);
+            }
+        }
+        if (fpsLimit <= 0 || maxMul < 0) return max;
+        if (frugal) return minMul;
+        return vsync ? maxMul : max;
     }
 
     int mode() {
@@ -426,11 +454,17 @@ final class GameConfig {
                     for (Option o : GRAPHICS) ours |= o.key.equals(k);
                     for (Option o : AUDIO_LANG) ours |= o.key.equals(k);
                     for (String a : AUTO_KEYS) ours |= a.equals(k);
+                    ours |= k.equals("dxvk_config");
                     if (!ours && !line.trim().isEmpty()) sb.append(line).append('\n');
                 }
             }
             for (Option o : GRAPHICS) {
                 if (o == TURNIP || o == TURNIP_BUILD || o == CLOTH) continue;   // env / auto keys
+                if (o == VSYNC) {
+                    // The port copies dxvk_config into DXVK_CONFIG (commas become ';').
+                    sb.append("dxvk_config = d3d9.presentInterval = ").append(get(VSYNC) != 0 ? 1 : 0).append('\n');
+                    continue;
+                }
                 if (o == DRIVER) {
                     int d = get(DRIVER);
                     if (d == 1) sb.append("vulkan_driver = system\n");

@@ -65,13 +65,35 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
     private boolean invertY, aimToggle, fixedStick, autoRun, fireLook, vibrate, showFps, padHide, labels, smartHide;
 
     // Smart hide: buttons fade after a few idle seconds and come back on touch.
-    private static final long IDLE_MS = 4000, FADE_MS = 500;
+    private static final long IDLE_MS = 4000, DEEP_IDLE_MS = 10000, FADE_MS = 500;
     private static final float IDLE_LEVEL = 0.22f, CORE_MIN = 0.6f;
+    /**
+     * Second stage: the port reports Bink videos but not in-engine cutscenes, so after a long
+     * stretch without touches (a cutscene, a dialogue, a phone on the table) everything goes.
+     * Any touch brings the buttons back at once and still acts.
+     */
+    private static final float DEEP_LEVEL = 0f, DEEP_CORE = 0.1f;
     private long lastInteraction = SystemClock.uptimeMillis();
     private float idleLevel = 1f;
     private long levelAt;
     private String fpsMs = "";
     private final RectF fpsChip = new RectF();
+    /** Cutscene video: one "Skip" button after a tap, nothing else on screen. */
+    private final RectF skipChip = new RectF();
+    private long skipShownUntil;
+
+    // Menu pointer: tap = click, swipe = wheel, long press = drag with the button held.
+    static final long MENU_DRAG_MS = 420, MENU_CLICK_MS = 60;
+    private static final int MENU_PENDING = 0, MENU_SCROLL = 1, MENU_DRAG = 2;
+    private int menuMode;
+    private float menuStartX, menuStartY, menuScrollAcc;
+    private final Runnable menuLongPress = () -> {
+        if (touchOf(ROLE_MENU) != null && menuMode == MENU_PENDING) {
+            menuMode = MENU_DRAG;
+            mouseButton(1, true);
+            buzz();
+        }
+    };
     private int gyroMode;
 
     // Game state.
@@ -217,7 +239,8 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
             if (live) {
                 boolean changed = pollState();
                 if (showFps) updateHud();
-                boolean fadeDue = smartHide && idleLevel > IDLE_LEVEL && SystemClock.uptimeMillis() - lastInteraction > IDLE_MS;
+                long idle = SystemClock.uptimeMillis() - lastInteraction;
+                boolean fadeDue = smartHide && ((idleLevel > IDLE_LEVEL && idle > IDLE_MS) || (idleLevel > DEEP_LEVEL && idle > DEEP_IDLE_MS));
                 if (changed || showFps || fadeDue) invalidate();
                 postDelayed(this, 200);
             }
@@ -317,6 +340,52 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         menuX = x * pointerSx;
         menuY = y * pointerSy;
         if (live) SDLActivity.onNativeMouse(mouseState, 2, menuX, menuY, false);
+    }
+
+    private void menuMove(Touch t, float x, float y) {
+        float slop = 10 * density;
+        if (menuMode == MENU_DRAG) {
+            mouseTo(x, y);
+        } else if (menuMode == MENU_PENDING) {
+            if (Math.abs(x - menuStartX) > slop || Math.abs(y - menuStartY) > slop) {
+                removeCallbacks(menuLongPress);
+                if (Math.abs(y - menuStartY) >= Math.abs(x - menuStartX)) {
+                    menuMode = MENU_SCROLL;   // vertical swipe: scroll the list under the cursor
+                    t.lastY = menuStartY;
+                } else {
+                    menuMode = MENU_DRAG;     // sideways: grab (sliders, the map)
+                    mouseButton(1, true);
+                    mouseTo(x, y);
+                }
+            } else {
+                mouseTo(x, y);
+            }
+        }
+        if (menuMode == MENU_SCROLL) {
+            menuScrollAcc += y - t.lastY;
+            t.lastY = y;
+            float step = 34 * density;
+            while (Math.abs(menuScrollAcc) >= step) {
+                int dir = menuScrollAcc > 0 ? 1 : -1;      // finger down = wheel up (content follows)
+                menuScrollAcc -= dir * step;
+                if (live) SDLActivity.onNativeMouse(0, 8, 0, dir, false);
+            }
+        }
+    }
+
+    private void menuUp(float x, float y) {
+        removeCallbacks(menuLongPress);
+        if (menuMode == MENU_DRAG) {
+            mouseTo(x, y);
+            mouseButton(1, false);
+        } else if (menuMode == MENU_PENDING) {
+            mouseTo(x, y);
+            mouseButton(1, true);
+            postDelayed(() -> {
+                if (mouseState != 0 && touchOf(ROLE_MENU) == null) mouseButton(1, false);
+            }, MENU_CLICK_MS);
+        }
+        menuMode = MENU_PENDING;
     }
 
     private void buzz() {
@@ -455,6 +524,8 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
                 } else if (e.kind == ControlLayout.Kind.KEY || e.kind == ControlLayout.Kind.PAUSE) key(e.key, false);
             }
         }
+        removeCallbacks(menuLongPress);
+        menuMode = MENU_PENDING;
         if (mouseState != 0 && ctx == ControlLayout.MENU) {
             mouseState = 0;
             if (live) SDLActivity.onNativeMouse(0, 1, menuX, menuY, false);
@@ -729,7 +800,17 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
                 int pid = ev.getPointerId(idx);
                 float x = ev.getX(idx), y = ev.getY(idx);
                 if (movieHidden()) {
-                    showInMovieUntil = now + 4000;
+                    if (now < skipShownUntil && skipChip.contains(x, y)) {
+                        // Bink cutscenes stop on Space / Enter / Esc in the PC game; Space and
+                        // Enter never open a menu.
+                        tapKey(ControlLayout.K_SPACE);
+                        postDelayed(() -> tapKey(ControlLayout.K_ENTER), 120);
+                        skipShownUntil = 0;
+                        buzz();
+                    } else {
+                        skipShownUntil = now + 4000;
+                        postInvalidateDelayed(4050);
+                    }
                     invalidate();
                     return true;
                 }
@@ -753,11 +834,22 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
                     touches.put(pid, t);
                     pressButton(e, pid);
                 } else if (ctx == ControlLayout.MENU) {
-                    if (touchOf(ROLE_MENU) == null) {
+                    Touch first = touchOf(ROLE_MENU);
+                    if (first == null) {
                         t.role = ROLE_MENU;
                         touches.put(pid, t);
-                        mouseTo(x, y);
-                        mouseButton(1, true);
+                        menuMode = MENU_PENDING;
+                        menuStartX = x;
+                        menuStartY = y;
+                        menuScrollAcc = 0;
+                        mouseTo(x, y);                 // hover first: the item lights up
+                        postDelayed(menuLongPress, MENU_DRAG_MS);
+                    } else if (menuMode != MENU_DRAG) {
+                        // Second finger: "back" (Esc), the first one no longer clicks.
+                        removeCallbacks(menuLongPress);
+                        menuMode = MENU_SCROLL;
+                        tapKey(ControlLayout.K_ESC);
+                        buzz();
                     }
                 } else if (x < getWidth() * 0.42f && touchOf(ROLE_STICK) == null
                         && !layout.stick.hidden) {
@@ -784,7 +876,7 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
                             look(t, x, y, now);
                             break;
                         case ROLE_MENU:
-                            mouseTo(x, y);
+                            menuMove(t, x, y);
                             break;
                         case ROLE_BUTTON:
                             if (fireLook && t.el.kind == ControlLayout.Kind.MOUSE_LEFT && ctx != ControlLayout.MENU) look(t, x, y, now);
@@ -818,8 +910,7 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
                         stickUp();
                         break;
                     case ROLE_MENU:
-                        mouseTo(ev.getX(idx), ev.getY(idx));
-                        mouseButton(1, false);
+                        menuUp(ev.getX(idx), ev.getY(idx));
                         break;
                     default:
                         break;
@@ -1014,12 +1105,13 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         // Mode chip (only when the game does not report its state) and the FPS line.
         if (!editing && live) {
             if (!stateKnown && !hiddenAll) drawModeChip(c);
-            if (showFps && !hud.isEmpty()) drawFps(c, w);
+            if (showFps && !hud.isEmpty() && hiddenAll) drawFps(c, w);
         }
         if (hiddenAll) {
             if (movie && !editing) drawMovieHint(c, w, h);
             return;
         }
+        if (!editing && live && showFps && !hud.isEmpty()) drawFps(c, w);
 
         float level = updateIdleLevel();
         for (ControlLayout.Element e : layout.all) {
@@ -1028,7 +1120,9 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
             if (!editing && level < 1f) {
                 boolean core = e.kind == ControlLayout.Kind.STICK || e.kind == ControlLayout.Kind.MOUSE_LEFT
                         || e.kind == ControlLayout.Kind.MOUSE_RIGHT || e.kind == ControlLayout.Kind.GEAR;
-                a *= core ? Math.max(level, CORE_MIN) : level;
+                // Stage 1 keeps the core at CORE_MIN; stage 2 takes it down with the rest to DEEP_CORE.
+                float coreA = level >= IDLE_LEVEL ? Math.max(level, CORE_MIN) : Math.max(DEEP_CORE, level / IDLE_LEVEL * CORE_MIN);
+                a *= core ? coreA : level;
             }
             if (editing) a = e.hidden ? 0.28f : Math.max(0.45f, a);
             if (e.kind == ControlLayout.Kind.STICK) {
@@ -1065,11 +1159,13 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
     /** Fade towards IDLE_LEVEL after IDLE_MS without touches (smart hide). */
     private float updateIdleLevel() {
         long now = SystemClock.uptimeMillis();
-        float target = smartHide && live && touches.isEmpty() && now - lastInteraction > IDLE_MS && ctx != ControlLayout.MENU
-                ? IDLE_LEVEL : 1f;
+        long idle = now - lastInteraction;
+        boolean may = smartHide && live && touches.isEmpty() && ctx != ControlLayout.MENU && !runLocked;
+        float target = may && idle > DEEP_IDLE_MS ? DEEP_LEVEL : may && idle > IDLE_MS ? IDLE_LEVEL : 1f;
         if (target < idleLevel) {
             float dt = levelAt == 0 ? 0 : (now - levelAt) / (float) FADE_MS;
             idleLevel = Math.max(target, idleLevel - dt * (1f - IDLE_LEVEL));
+            if (target == DEEP_LEVEL) idleLevel = Math.max(target, idleLevel - dt * IDLE_LEVEL);
             if (idleLevel > target) postInvalidateDelayed(16);
         } else {
             idleLevel = target;
@@ -1078,11 +1174,11 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         return idleLevel;
     }
 
-    /** Small "58 FPS · 17 мс" pill in the top-left corner, right of the map button. */
+    /**
+     * Small "58 FPS · 17 мс" pill. It goes to the first free spot (next to the map, left of the
+     * gear, then under the author line in the top centre): never over a visible button.
+     */
     private void drawFps(Canvas c, int w) {
-        ControlLayout.Element map = layout.byId("map");
-        float left = map != null ? map.cx + map.r + 10 * density : 16 * density;
-        float cy = map != null ? map.cy : 30 * density;
         text.setLetterSpacing(0f);
         text.setTextAlign(Paint.Align.LEFT);
         String big = hud + " FPS";
@@ -1091,7 +1187,9 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         text.setTextSize(9 * density);
         float sw = text.measureText(fpsMs);
         float pad = 8 * density, gap = 5 * density, hh = 10 * density;
-        fpsChip.set(left, cy - hh, left + pad + bw + gap + sw + pad, cy + hh);
+        float pw = pad + bw + gap + sw + pad;
+        placeFps(w, pw, hh);
+        float left = fpsChip.left, cy = fpsChip.centerY();
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(0x8C000000);
         c.drawRoundRect(fpsChip, hh, hh, paint);
@@ -1102,6 +1200,50 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         text.setColor(0xB3FFFFFF);
         c.drawText(fpsMs, left + pad + bw + gap, cy + 3.2f * density, text);
         text.setTextAlign(Paint.Align.CENTER);
+    }
+
+    /** Fills {@link #fpsChip} with a spot that touches no visible control. */
+    void placeFps(int w, float pw, float hh) {
+        ControlLayout.Element map = layout.byId("map"), gear = layout.byId("gear");
+        float top = 6 * density;
+        // The top centre belongs to the port's author line, so it is the last choice and only under it.
+        float underCredit = 34 * density + hh;
+        float[][] spots = {
+                {map != null ? map.cx + map.r + 10 * density : 16 * density, map != null ? map.cy : top + hh},
+                {gear != null ? gear.cx - gear.r - 10 * density - pw : w - pw - 16 * density, gear != null ? gear.cy : top + hh},
+                {(w - pw) / 2f, underCredit},
+                {(w - pw) / 2f, underCredit + 2 * hh + 6 * density},
+        };
+        for (float[] sp : spots) {
+            fpsChip.set(sp[0], sp[1] - hh, sp[0] + pw, sp[1] + hh);
+            if (fpsFree()) return;
+        }
+        fpsChip.set((w - pw) / 2f, underCredit - hh, (w + pw) / 2f, underCredit + hh);
+    }
+
+    RectF fpsRect() {
+        return fpsChip;
+    }
+
+    RectF skipRect() {
+        return skipChip;
+    }
+
+    boolean isVisible(ControlLayout.Element e) {
+        return visible(e);
+    }
+
+    private boolean fpsFree() {
+        if (fpsChip.left < 0 || fpsChip.right > getWidth()) return false;
+        float m = 6 * density;
+        for (ControlLayout.Element e : layout.all) {
+            if (!visible(e)) continue;
+            float r = e.kind == ControlLayout.Kind.STICK ? e.r * (LOCK_DIST + LOCK_R + 0.2f) : e.r;
+            float nx = Math.max(fpsChip.left, Math.min(e.cx, fpsChip.right));
+            float ny = Math.max(fpsChip.top, Math.min(e.cy, fpsChip.bottom));
+            if (Math.hypot(e.cx - nx, e.cy - ny) < r + m) return false;
+        }
+        return stateKnown || !RectF.intersects(fpsChip, modeChip);
     }
 
     private void drawGrid(Canvas c, int w, int h) {
@@ -1135,9 +1277,25 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
     }
 
     private void drawMovieHint(Canvas c, int w, int h) {
-        text.setTextSize(11 * density);
-        text.setColor(0x66FFFFFF);
-        c.drawText(Ui.t("коснитесь, чтобы показать кнопки", "tap to show the buttons"), w / 2f, h - 14 * density, text);
+        if (SystemClock.uptimeMillis() < skipShownUntil) {
+            text.setTextSize(14 * density);
+            String sk = Ui.t("ПРОПУСТИТЬ  ›", "SKIP  ›");
+            float tw = text.measureText(sk);
+            float cx = w - 24 * density - (tw + 36 * density) / 2f, cy = h - 40 * density;
+            skipChip.set(cx - tw / 2f - 18 * density, cy - 20 * density, cx + tw / 2f + 18 * density, cy + 20 * density);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(0xB315110E);
+            c.drawRoundRect(skipChip, 20 * density, 20 * density, paint);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(1.2f * density);
+            paint.setColor(Ui.alpha(Ui.ACCENT, 0.9f));
+            c.drawRoundRect(skipChip, 20 * density, 20 * density, paint);
+            paint.setStyle(Paint.Style.FILL);
+            text.setColor(Ui.IVORY);
+            c.drawText(sk, skipChip.centerX(), skipChip.centerY() + 5 * density, text);
+        } else {
+            skipChip.setEmpty();
+        }
     }
 
     private void drawLabel(Canvas c, ControlLayout.Element e, float a) {

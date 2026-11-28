@@ -41,7 +41,7 @@ import java.util.Locale;
  * folder, the game starts".
  */
 public class LauncherActivity extends Activity {
-    static final String VERSION = "1.3.5";
+    static final String VERSION = "1.3.6";
     static final String EXTRA_AUTOSTART = "remaf2.autostart";
     private static final int REQ_TREE = 41;
     private static final int TAB_PLAY = 0, TAB_SETTINGS = 1, TAB_CONTROLS = 2, TAB_FILES = 3, TAB_ABOUT = 4;
@@ -705,7 +705,11 @@ public class LauncherActivity extends Activity {
         cap.setPadding(0, dp(16), 0, 0);
         c.addView(cap);
         TextView news = Ui.text(this,
-                "• Snapdragon 8xx без потери разрешения: «Баланс» — 1080p, текстуры «Средние», средние тени и геометрия, без AO, анизотропия 8x; «Скорость» — 1080p и низкие тени.\n"
+                "• Меню: касание — выбор (пункт сначала подсвечивается), свайп — прокрутка списка, удержание — перетаскивание ползунков и карты, второй палец — «Назад».\n"
+                        + "• Видеоролики: кнопки скрыты, касание показывает «Пропустить». Катсцены на движке: после 10 с без касаний кнопки исчезают полностью, касание возвращает их.\n"
+                        + "• Счётчик FPS сам находит свободное место и не перекрывает кнопки.\n"
+                        + "• V-Sync (по умолчанию выкл) и максимальная частота экрана 90/120 Гц; лимит FPS 90 и 120.\n"
+                        + "• Snapdragon 8xx без потери разрешения: «Баланс» — 1080p, текстуры «Средние», средние тени и геометрия, без AO, анизотропия 8x; «Скорость» — 1080p и низкие тени.\n"
                         + "• Helio G85/G99/G100 и Mali: без теней в «Балансе» и «Скорости», низкая геометрия, ткань APEX выключена, 16-бит распаковка текстур на всех Mali.\n"
                         + "• Отдельные настройки «Тени», «Геометрия», «Затенение (AO)».\n"
                         + "• Новый облик: логотип ReMaf2, арты Mafia II, шрифты Manrope и Fira Sans.\n"
