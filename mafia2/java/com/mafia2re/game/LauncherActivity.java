@@ -41,7 +41,7 @@ import java.util.Locale;
  * folder, the game starts".
  */
 public class LauncherActivity extends Activity {
-    static final String VERSION = "1.1.1";
+    static final String VERSION = "1.1.2";
     private static final int REQ_TREE = 41;
     private static final int TAB_PLAY = 0, TAB_SETTINGS = 1, TAB_CONTROLS = 2, TAB_FILES = 3, TAB_ABOUT = 4;
     private static final String[] TAB_NAMES = {"ИГРАТЬ", "НАСТРОЙКИ", "УПРАВЛЕНИЕ", "ФАЙЛЫ ИГРЫ", "О ПОРТЕ"};
@@ -679,6 +679,7 @@ public class LauncherActivity extends Activity {
                         + "• Иконки кнопок с game-icons.net.\n"
                         + "• Всё приложение на русском.\n"
                         + "• Если игра закрылась при запуске — лаунчер предложит отправить лог.\n"
+                        + "• Полосы на Adreno 8xx: «Совместимость Turnip» (TU_DEBUG=sysmem) включается сама.\n"
                         + "• Кнопка «Отправить лог» во вкладке «Файлы игры», Telegram в шапке.",
                 13, 0xFFD4D0CA, Ui.body(this));
         news.setLineSpacing(0, 1.25f);
@@ -788,6 +789,9 @@ public class LauncherActivity extends Activity {
         cfg.writeIni();
         try {
             Os.setenv("MAFIA2RE_GAME", game.getAbsolutePath(), true);
+            String tu = cfg.turnipDebug(device);
+            if (tu == null) Os.unsetenv("TU_DEBUG");
+            else Os.setenv("TU_DEBUG", tu, true);
             File drv = installCustomDriver();
             if (drv == null) Os.unsetenv("MAFIA2RE_CUSTOM_DRIVER");
             else Os.setenv("MAFIA2RE_CUSTOM_DRIVER", drv.getAbsolutePath(), true);

@@ -198,6 +198,25 @@ public class M2Test {
     }
 
     @Test
+    public void turnipSysmemOnAdreno8xx() throws Exception {
+        GameConfig cfg = new GameConfig(ctx);
+        DeviceProfile a829 = DeviceProfile.forTest("SM8845", "Adreno (TM) 829", 12000, 4000, true);
+        DeviceProfile a740 = DeviceProfile.forTest("SM8550", "Adreno (TM) 740", 12000, 3200, true);
+        DeviceProfile mali = DeviceProfile.forTest("MT6769Z", "Mali-G52 MC2", 4000, 2000, true);
+        assertEquals("sysmem", cfg.turnipDebug(a829));
+        assertNull(cfg.turnipDebug(a740));
+        assertNull(cfg.turnipDebug(mali));
+        cfg.set(GameConfig.TURNIP, 1);
+        assertEquals("sysmem", cfg.turnipDebug(a740));
+        cfg.set(GameConfig.TURNIP, 2);
+        assertEquals("", cfg.turnipDebug(a829));
+        // Not written to the engine ini.
+        cfg.writeIni();
+        String ini = new String(Files.readAllBytes(new File(ctx.getExternalFilesDir(null), "mafia2re.ini").toPath()), StandardCharsets.UTF_8);
+        assertFalse(ini, ini.contains("tu_sysmem"));
+    }
+
+    @Test
     public void failedStartIsReportedOnce() {
         GameConfig cfg = new GameConfig(ctx);
         cfg.markGameStart();

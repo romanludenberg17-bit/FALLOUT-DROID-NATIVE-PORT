@@ -119,7 +119,17 @@ final class GameConfig {
     static final Option PAD_HIDE = new Option("ui_pad_hide", "Скрывать при геймпаде", "Hide with gamepad",
             s("Выкл", "Вкл"), s("Off", "On"), v(0, 1), false, "", "");
 
-    static final Option[] GRAPHICS = {RES, TEX, DETAIL, FPS, BATTERY, DRIVER};
+    /**
+     * Turnip's TU_DEBUG=sysmem (render straight to memory, no GMEM tiling). The port turns it on
+     * only for GPUs named "Adreno810"/"Adreno825"; other Adreno 8xx (829, 830, 840...) render
+     * striped garbage in GMEM mode. Not an ini key: the launcher sets the variable, and the port
+     * keeps an existing TU_DEBUG (setenv without overwrite).
+     */
+    static final Option TURNIP = new Option("tu_sysmem", "Совместимость Turnip", "Turnip compatibility",
+            s("Авто", "Вкл", "Выкл"), s("Auto", "On", "Off"), v(0, 1, 2), true,
+            "Убирает полосы и мусор на Adreno 8xx. «Авто» включает её на Adreno 8xx.", "");
+
+    static final Option[] GRAPHICS = {RES, TEX, DETAIL, FPS, BATTERY, DRIVER, TURNIP};
     static final Option[] AUDIO_LANG = {VOICE, LANG};
     static final Option[] TOUCH = {OPACITY, SCALE, CAM, INVERT, GYRO, AIM, STICK, AUTORUN, FIRE_LOOK, VIBRATE, LABELS, SHOW_FPS, PAD_HIDE};
 
@@ -196,6 +206,14 @@ final class GameConfig {
         if (prefs.getInt("defaults_v", 1) < 3) prefs.edit().putInt("defaults_v", 3).apply();
     }
 
+    /** Value for TU_DEBUG, "" to block the port's own default, or null to leave it unset. */
+    String turnipDebug(DeviceProfile dp) {
+        int v = get(TURNIP);
+        if (v == 1 || (v == 0 && dp.adrenoModel() >= 800)) return "sysmem";
+        if (v == 2) return "";
+        return null;
+    }
+
     // ------------------------------------------------------------------ start-up watchdog
 
     /** Marks a game start; {@link #markGameAlive()} confirms it survived the first seconds. */
@@ -268,6 +286,7 @@ final class GameConfig {
                 }
             }
             for (Option o : GRAPHICS) {
+                if (o == TURNIP) continue;   // environment variable, see turnipDebug()
                 if (o == DRIVER) {
                     int d = get(DRIVER);
                     if (d == 1) sb.append("vulkan_driver = system\n");
