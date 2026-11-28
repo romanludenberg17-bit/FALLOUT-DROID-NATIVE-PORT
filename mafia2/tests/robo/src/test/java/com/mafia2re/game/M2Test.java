@@ -348,6 +348,25 @@ public class M2Test {
     }
 
     @Test
+    public void snapdragon8xxBalanceIsLighterThanQuality() {
+        DeviceProfile sd8g5 = DeviceProfile.forTest("SM8845", "Adreno (TM) 829", 12 * 1024, 3800, true);
+        int[] q = GameConfig.preset(sd8g5, GameConfig.MODE_QUALITY), b = GameConfig.preset(sd8g5, GameConfig.MODE_BALANCE);
+        assertTrue(b[0] < q[0]);
+        assertTrue(b[5] < q[5]);       // shadows
+        assertEquals(0, b[7]);         // no AO in Balance
+        GameConfig cfg = new GameConfig(ctx);
+        cfg.applyMode(sd8g5, GameConfig.MODE_BALANCE);
+        cfg.writeIni();
+        String ini = readIni();
+        assertTrue(ini, ini.contains("game_shadows = 1\n"));
+        assertTrue(ini, ini.contains("game_ao = 0\n"));
+        assertTrue(ini, ini.contains("render_height = 900\n"));
+        cfg.set(GameConfig.SHADOWS, -1);   // Auto: the port derives it from game_detail
+        cfg.writeIni();
+        assertFalse(readIni().contains("game_shadows"));
+    }
+
+    @Test
     public void profilesForHelioAndRam() {
         DeviceProfile g85 = DeviceProfile.testOverride;                                          // Mali-G52, ~4 GB
         DeviceProfile g99 = DeviceProfile.forTest("MT6789", "Mali-G57 MC2", 8 * 1024 - 300, 2200, true);

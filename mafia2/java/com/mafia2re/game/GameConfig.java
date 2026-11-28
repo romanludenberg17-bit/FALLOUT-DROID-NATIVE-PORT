@@ -75,7 +75,17 @@ final class GameConfig {
             "«Низкие» экономят видеопамять: для телефонов с 4 ГБ.", "Low saves video memory: for 4 GB phones.");
     static final Option DETAIL = new Option("game_detail", "Детализация", "Detail",
             s("Низкая", "Средняя", "Высокая"), s("Low", "Medium", "High"), v(0, 1, 2), true,
-            "Дальность прорисовки, тени, эффекты.", "Draw distance, shadows, effects.");
+            "Общий уровень: из него порт берёт тени, геометрию и AO, если у них стоит «Авто».", "Master level for shadows, geometry and AO set to Auto.");
+    /** The port forces the game's own video options from these keys (absent = from game_detail). */
+    static final Option SHADOWS = new Option("game_shadows", "Тени", "Shadows",
+            s("Авто", "Низкие", "Средние", "Высокие"), s("Auto", "Low", "Medium", "High"), v(-1, 0, 1, 2), true,
+            "Самая тяжёлая часть кадра: «Высокие» в городе — до 9 карт теней и тысячи лишних отрисовок.", "");
+    static final Option GEOMETRY = new Option("game_geometry", "Геометрия", "Geometry",
+            s("Авто", "Низкая", "Средняя", "Высокая"), s("Auto", "Low", "Medium", "High"), v(-1, 0, 1, 2), true,
+            "Дальность и детальность моделей: нагружает процессор в городе и за рулём.", "");
+    static final Option AO = new Option("game_ao", "Затенение (AO)", "Ambient occlusion",
+            s("Авто", "Выкл", "Вкл"), s("Auto", "Off", "On"), v(-1, 0, 1), true,
+            "Мягкие тени в углах. Нагружает видеочип.", "");
     static final Option FPS = new Option("fps_limit", "Лимит FPS", "FPS limit",
             s("Нет", "30", "45", "60"), s("None", "30", "45", "60"), v(0, 30, 45, 60), true,
             "30 FPS — ровно и без перегрева на слабых чипах.", "30 FPS is smooth and cool on entry chips.");
@@ -151,7 +161,7 @@ final class GameConfig {
             s("Авто", "Вкл", "Выкл"), s("Auto", "On", "Off"), v(0, 1, 2), true,
             "Расчёт ткани нагружает процессор. «Авто» выключает её на слабых телефонах в «Скорости» и при 4 ГБ.", "");
 
-    static final Option[] GRAPHICS = {RES, FULLSCREEN, TEX, DETAIL, FPS, BATTERY, CLOTH, DRIVER, TURNIP_BUILD, TURNIP};
+    static final Option[] GRAPHICS = {RES, FULLSCREEN, TEX, DETAIL, SHADOWS, GEOMETRY, AO, FPS, BATTERY, CLOTH, DRIVER, TURNIP_BUILD, TURNIP};
 
     /** Engine keys the launcher derives from the phone (written to the ini, not shown as rows). */
     static final String[] AUTO_KEYS = {"max_aniso", "texture_skip_min_size", "decode_16bit", "no_apex_clothing"};
@@ -160,16 +170,21 @@ final class GameConfig {
 
     static final int MODE_QUALITY = 0, MODE_BALANCE = 1, MODE_SPEED = 2, MODE_CUSTOM = 3;
 
-    /** Preset per phone tier and mode: {render_height, texture_skip_mips, game_detail, fps_limit, battery_saver}. */
+    /**
+     * Preset per phone tier and mode:
+     * {render_height, texture_skip_mips, game_detail, fps_limit, battery_saver, game_shadows, game_geometry, game_ao}.
+     * The last three are what game_detail stood for (shadows {0,1,2}, geometry {0,1,2}, AO {0,0,1});
+     * 1.3.4 splits them: shadows at High cost Adreno 829 half its frame rate in the city.
+     */
     private static final int[][][] PRESETS = {
             // TIER_LOW: Helio G85..G99, Mali-G52/G57, Adreno 610..620, 4 GB
-            {{720, 1, 1, 30, 0}, {540, 1, 1, 30, 0}, {540, 2, 0, 30, 1}},
+            {{720, 1, 1, 30, 0, 1, 1, 0}, {540, 1, 1, 30, 0, 0, 1, 0}, {540, 2, 0, 30, 1, 0, 0, 0}},
             // TIER_MID: Adreno 640..725, Mali-G68/G610/G77, Xclipse 920, 6 GB
-            {{900, 0, 2, 30, 0}, {720, 0, 1, 45, 0}, {540, 1, 0, 60, 0}},
+            {{900, 0, 2, 30, 0, 1, 2, 0}, {720, 0, 1, 45, 0, 1, 1, 0}, {540, 1, 0, 60, 0, 0, 0, 0}},
             // TIER_HIGH: Adreno 730..750, Mali-G715, Immortalis
-            {{1080, 0, 2, 45, 0}, {900, 0, 2, 60, 0}, {720, 0, 1, 60, 0}},
+            {{1080, 0, 2, 45, 0, 1, 2, 1}, {900, 0, 2, 60, 0, 1, 1, 0}, {720, 0, 1, 60, 0, 0, 1, 0}},
             // TIER_ULTRA: Adreno 8xx
-            {{1080, 0, 2, 60, 0}, {1080, 0, 2, 60, 0}, {900, 0, 1, 60, 0}},
+            {{1080, 0, 2, 60, 0, 2, 2, 1}, {900, 0, 2, 60, 0, 1, 2, 0}, {720, 0, 1, 60, 0, 1, 1, 0}},
     };
 
     final SharedPreferences prefs;
@@ -267,6 +282,12 @@ final class GameConfig {
             if (dp.adrenoModel() >= 800) applyAdrenoVariant(0);
             prefs.edit().putInt("defaults_v", 5).apply();
         }
+        // 1.3.4: presets carry shadows / geometry / AO (Balance on Adreno 8xx was all-High 1080p).
+        if (prefs.getInt("defaults_v", 1) < 6) {
+            int m = mode();
+            if (m >= MODE_QUALITY && m <= MODE_SPEED) applyMode(dp, m);
+            prefs.edit().putInt("defaults_v", 6).commit();
+        }
     }
 
     /** Value for TU_DEBUG, "" to block the port's own default, or null to leave it unset. */
@@ -351,6 +372,9 @@ final class GameConfig {
                 .putInt(DETAIL.key, p[2])
                 .putInt(FPS.key, p[3])
                 .putInt(BATTERY.key, p[4])
+                .putInt(SHADOWS.key, p[5])
+                .putInt(GEOMETRY.key, p[6])
+                .putInt(AO.key, p[7])
                 .apply();
     }
 
@@ -403,6 +427,7 @@ final class GameConfig {
                     else if (d == 2) sb.append("vulkan_driver = turnip\n");
                     continue;
                 }
+                if ((o == SHADOWS || o == GEOMETRY || o == AO) && get(o) < 0) continue;  // Auto: from game_detail
                 sb.append(o.key).append(" = ").append(get(o)).append('\n');
             }
             for (Option o : AUDIO_LANG) sb.append(o.key).append(" = ").append(get(o)).append('\n');

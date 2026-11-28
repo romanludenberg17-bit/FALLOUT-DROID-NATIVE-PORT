@@ -41,7 +41,7 @@ import java.util.Locale;
  * folder, the game starts".
  */
 public class LauncherActivity extends Activity {
-    static final String VERSION = "1.3.3";
+    static final String VERSION = "1.3.4";
     static final String EXTRA_AUTOSTART = "remaf2.autostart";
     private static final int REQ_TREE = 41;
     private static final int TAB_PLAY = 0, TAB_SETTINGS = 1, TAB_CONTROLS = 2, TAB_FILES = 3, TAB_ABOUT = 4;
@@ -705,7 +705,8 @@ public class LauncherActivity extends Activity {
         cap.setPadding(0, dp(16), 0, 0);
         c.addView(cap);
         TextView news = Ui.text(this,
-                "• Новый облик: логотип ReMaf2, арты Mafia II, шрифты Manrope и Fira Sans.\n"
+                "• Производительность: отдельные настройки «Тени», «Геометрия», «Затенение (AO)». «Баланс» на Snapdragon 8xx — 900p, средние тени, без AO (раньше был таким же тяжёлым, как «Качество»).\n"
+                        + "• Новый облик: логотип ReMaf2, арты Mafia II, шрифты Manrope и Fira Sans.\n"
                         + "• Стик как в шутерах: меньше, бег при толчке вперёд, фиксация бега замком.\n"
                         + "• Иконки кнопок с game-icons.net.\n"
                         + "• Всё приложение на русском.\n"
