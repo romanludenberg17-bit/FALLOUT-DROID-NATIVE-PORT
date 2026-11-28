@@ -334,7 +334,8 @@ static void repair_args(const char* pkg) {
                                    "# Vehicle badges / decals drew a black box", "--gta4_skip_intro=true",
                                    "--gta4_native_ubo_shared_constants=false", "--gta4_native_gpu_detile=false",
                                    "--gta4_native_drop_inert_blending=false",
-                                   "# Transparent decals / mission markers (render fixes)"};
+                                   "# Transparent decals / mission markers (render fixes)",
+                                   "--protect_zero=false"};
     static const char* network[] = {"--gta4_multiplayer_backend=", "--gta4_player_name=", "--gta4_lan_ipv4=",
                                     "#-gta4_skip_intro=true", "# LAN co-op (serverless)"};
     int drop = 0;

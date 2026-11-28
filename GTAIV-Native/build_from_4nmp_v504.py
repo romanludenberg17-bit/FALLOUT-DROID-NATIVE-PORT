@@ -12,15 +12,27 @@ import glob, hashlib, os, shutil, struct, subprocess, sys, tempfile, zipfile, zl
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_from_4nmp as base
 
-base.VERSION_CODE = 639
-base.VERSION_NAME = "1.3.9"
+base.VERSION_CODE = 640
+base.VERSION_NAME = "1.4.0"
 base.LABEL = "4NMP"  # the project's name
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+def patch_classes_dex(dex):
+    """LibertyRecomp launcher: its GPU-family migration appended --protect_zero=false
+    to args.txt on Mali, overriding the profiles (writable zero page: broken physics)."""
+    d = bytearray(dex)
+    pat = bytes.fromhex("1a0bae00" "7220fa04b200")  # const-string v11, "--protect_zero=false"; List.add
+    assert d.count(pat) == 1, "unexpected protect_zero code"
+    j = d.find(pat) + 4
+    d[j:j + 6] = bytes(6)  # nop nop nop (the removeIf before it still drops old lines)
+    d[12:32] = hashlib.sha1(bytes(d[32:])).digest()
+    struct.pack_into("<I", d, 8, zlib.adler32(bytes(d[12:])) & 0xFFFFFFFF)
+    return bytes(d)
 
 def patch_dex(dex):
     d = bytearray(dex)
     for old, new in ((bytes.fromhex("1306020c"), bytes.fromhex("1306040c")),   # bridge -> 3076
-                     (b"nmp_v504_clean", b"nmp_v638_clean"),                  # args.txt reset once (G99/G100 speed profile)
+                     (b"nmp_v504_clean", b"nmp_v640_clean"),                  # args.txt reset once (Mali physics, G99 reflections)
                      # writeCoopArgs: skipping the intro left the game on a black screen
                      # (and the line stayed in args.txt for every later start)
                      (b"\n--gta4_skip_intro=true\n", b"\n#-gta4_skip_intro=true\n")):
@@ -43,6 +55,12 @@ def patch_libmain(so):
     for addr, (what, expected) in HIDDEN_BUTTONS.items():  # .text: file offset == vaddr
         assert bytes(d[addr:addr + 4]) == expected, f"unexpected code for {what}"
         d[addr:addr + 4] = MOV_W5_WZR
+    # On-foot ENTER (Y: vehicles, doors, ladders) only showed next to a vehicle
+    # or door, so ladders could not be climbed: keep it visible on foot (still
+    # hidden with the phone up or while aiming).
+    ENTER_AT = 0x1654c1c
+    assert bytes(d[ENTER_AT:ENTER_AT + 4]) == bytes.fromhex("41afff54"), "unexpected ENTER visibility branch"
+    d[ENTER_AT:ENTER_AT + 4] = bytes.fromhex("1f2003d5")  # b.ne hide -> nop
     old = b"\0libz.so\0"
     assert d.count(old) == 1, "libz.so NEEDED string not unique"
     j = d.find(old); d[j:j + len(old)] = b"\0libq.so\0"
@@ -87,7 +105,7 @@ MALI_COMMON = [
 # 0.55 so collision is there at speed.
 G99_DROP = MALI_COMMON_DROP + ("--gta4_model_lod_distance_scale=", "--android_thermal_guard=",
     "--gta4_traffic_density_scale=", "--gta4_parked_car_density_scale=", "--gta4_ped_density_scale=",
-    "--gta4_scenario_ped_density_scale=")
+    "--gta4_scenario_ped_density_scale=", "--gta4_native_water_reflection_interval=")
 G99_PATCH = ["# --- 4NMP Helio G99 / G100 profile ---"] + MALI_COMMON + [
     "--gta4_model_lod_distance_scale=0.65",
     "--gta4_traffic_density_scale=0.25",
@@ -96,6 +114,8 @@ G99_PATCH = ["# --- 4NMP Helio G99 / G100 profile ---"] + MALI_COMMON + [
     "--gta4_scenario_ped_density_scale=0.25",
     "--android_thermal_guard=true",
     "--gta4_mobile_dynamic_cull=true",
+    "# Water reflections cost up to 27 ms of GPU time per frame on Mali-G57: every 4th frame.",
+    "--gta4_native_water_reflection_interval=4",
 ]
 # Stronger Mali (G715 / Immortalis / G925...): FP32-safe 256 shadow map.
 MALI_DROP = MALI_COMMON_DROP + ("--gta4_shadow_map_base_size=",)
@@ -160,6 +180,7 @@ def main():
             if n == "AndroidManifest.xml": data = rename_activity(base.patch_manifest(data))
             elif n == "resources.arsc": data = base.patch_arsc(data)
             elif n == "classes2.dex": data = patch_dex(data)
+            elif n == "classes.dex": data = patch_classes_dex(data)
             elif n == "lib/arm64-v8a/libmain.so": data = patch_libmain(data)
             elif n.startswith("assets/Resources/touch-icons/") and os.path.isfile(
                     os.path.join(HERE, "touch-icons-v504", os.path.basename(n))):
