@@ -215,9 +215,9 @@ public class NmpHomeActivity extends NmpLauncherActivity {
   };
   /** Mali-G57 MC2 class (the launcher's Helio G99 profile caps output at 540p). */
   private static final String[][] MODES_WEAK_GPU = {
-      {"quality", "30", "0.75"},
-      {"balance", "30", "0.60"},
-      {"performance", "40", "0.50"},
+      {"quality", "30", "0.65"},
+      {"balance", "30", "0.50"},
+      {"performance", "40", "0.45"},
   };
 
   private String[][] modes() {

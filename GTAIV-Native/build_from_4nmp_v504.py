@@ -12,8 +12,8 @@ import glob, hashlib, os, shutil, struct, subprocess, sys, tempfile, zipfile, zl
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_from_4nmp as base
 
-base.VERSION_CODE = 640
-base.VERSION_NAME = "1.4.0"
+base.VERSION_CODE = 641
+base.VERSION_NAME = "1.4.1"
 base.LABEL = "4NMP"  # the project's name
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -32,7 +32,7 @@ def patch_classes_dex(dex):
 def patch_dex(dex):
     d = bytearray(dex)
     for old, new in ((bytes.fromhex("1306020c"), bytes.fromhex("1306040c")),   # bridge -> 3076
-                     (b"nmp_v504_clean", b"nmp_v640_clean"),                  # args.txt reset once (Mali physics, G99 reflections)
+                     (b"nmp_v504_clean", b"nmp_v641_clean"),                  # args.txt reset once (G99 maximum FPS profile)
                      # writeCoopArgs: skipping the intro left the game on a black screen
                      # (and the line stayed in args.txt for every later start)
                      (b"\n--gta4_skip_intro=true\n", b"\n#-gta4_skip_intro=true\n")):
@@ -99,23 +99,49 @@ MALI_COMMON = [
     "# FP32 shading if the old renderer is chosen (half precision broke shadow depth compares).",
     "--gta4_native_fs_relaxed_precision=false",
 ]
-# Mali-G57 MC2 class (Helio G99 / G100): CPU-bound, two fast cores. Keep the
-# 4NMP author's GPU cuts (fps_guard, 128 shadows), fewer cars and pedestrians,
-# thermal guard and dynamic culling on; world streams in a bit farther than
-# 0.55 so collision is there at speed.
-G99_DROP = MALI_COMMON_DROP + ("--gta4_model_lod_distance_scale=", "--android_thermal_guard=",
-    "--gta4_traffic_density_scale=", "--gta4_parked_car_density_scale=", "--gta4_ped_density_scale=",
-    "--gta4_scenario_ped_density_scale=", "--gta4_native_water_reflection_interval=")
-G99_PATCH = ["# --- 4NMP Helio G99 / G100 profile ---"] + MALI_COMMON + [
-    "--gta4_model_lod_distance_scale=0.65",
-    "--gta4_traffic_density_scale=0.25",
-    "--gta4_parked_car_density_scale=0.25",
-    "--gta4_ped_density_scale=0.25",
-    "--gta4_scenario_ped_density_scale=0.25",
+# Mali-G57 MC2 class (Helio G99 / G100): maximum FPS ("potato") profile. Only
+# switches the engine has: no sun shadows, no water reflections, rare
+# environment reflections, bilinear textures, short draw / model LOD distance
+# (far trees and small objects drop out), few cars and pedestrians, low render
+# resolution. Physics fixes stay.
+G99_KEYS = ("--gta4_model_lod_distance_scale=", "--android_thermal_guard=", "--gta4_traffic_density_scale=",
+    "--gta4_parked_car_density_scale=", "--gta4_ped_density_scale=", "--gta4_scenario_ped_density_scale=",
+    "--gta4_native_water_reflection_interval=", "--gta4_native_environment_reflection_interval=",
+    "--gta4_native_shadow_interval=", "--gta4_shadow_distance_scale=", "--gta4_mobile_soft_shadows=",
+    "--gta4_mobile_bloom=", "--gta4_texture_filtering=", "--gta4_anisotropic_filtering=",
+    "--gta4_3d_resolution_scale=", "--gta4_draw_distance_scale=", "--gta4_dynamic_draw_distance=",
+    "--gta4_dynamic_draw_distance_min=", "--gta4_reflection_resolution=", "--gta4_motion_blur=",
+    "--gta4_fps_guard=", "--gta4_mobile_dynamic_cull=", "--gta4_mobile_cull_opaque=")
+G99_DROP = MALI_COMMON_DROP + G99_KEYS
+G99_PATCH = ["# --- 4NMP Helio G99 / G100: maximum FPS profile ---"] + MALI_COMMON + [
+    "# Render resolution (the output stays 540p; menu modes change it).",
+    "--gta4_3d_resolution_scale=0.50",
+    "# No sun shadows (0 disables them), no water reflections, rare environment reflections.",
+    "--gta4_native_shadow_interval=0",
+    "--gta4_shadow_distance_scale=0.5",
+    "--gta4_mobile_soft_shadows=false",
+    "--gta4_native_water_reflection_interval=0",
+    "--gta4_native_environment_reflection_interval=8",
+    "--gta4_reflection_resolution=quarter",
+    "--gta4_mobile_bloom=false",
+    "--gta4_motion_blur=false",
+    "# Cheap texture sampling.",
+    "--gta4_texture_filtering=bilinear",
+    "--gta4_anisotropic_filtering=1x",
+    "# Short draw and model distance: far trees, props and detail drop out.",
+    "--gta4_draw_distance_scale=0.60",
+    "--gta4_dynamic_draw_distance=true",
+    "--gta4_dynamic_draw_distance_min=0.40",
+    "--gta4_model_lod_distance_scale=0.50",
+    "# Few cars and pedestrians (CPU-bound on two fast cores).",
+    "--gta4_traffic_density_scale=0.15",
+    "--gta4_parked_car_density_scale=0.15",
+    "--gta4_ped_density_scale=0.15",
+    "--gta4_scenario_ped_density_scale=0.15",
+    "--gta4_fps_guard=3",
     "--android_thermal_guard=true",
+    "--gta4_mobile_cull_opaque=true",
     "--gta4_mobile_dynamic_cull=true",
-    "# Water reflections cost up to 27 ms of GPU time per frame on Mali-G57: every 4th frame.",
-    "--gta4_native_water_reflection_interval=4",
 ]
 # Stronger Mali (G715 / Immortalis / G925...): FP32-safe 256 shadow map.
 MALI_DROP = MALI_COMMON_DROP + ("--gta4_shadow_map_base_size=",)

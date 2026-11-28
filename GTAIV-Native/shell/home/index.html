@@ -210,6 +210,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
     <ul>
       <li><b>Helio G99 / G100</b>: облегчённый профиль для 30–40 FPS, режимы меню подстраиваются под слабую графику.</li>
       <li><b>Mali</b>: «Нативный» рендер по умолчанию, исправлены тени и физика.</li>
+      <li><b>Helio G99 / G100: максимум FPS</b> — без теней солнца и отражений воды, простые текстуры, короткая дальность (меньше деревьев и мелочи), мало машин и людей.</li>
       <li><b>Кнопка взаимодействия</b> всегда на экране пешком: лестницы, двери, машины.</li>
       <li><b>Mali</b>: физика как на Adreno (лаунчер больше не отключает защиту нулевой страницы), реже отражения воды на G99.</li>
       <li><b>Читы в игре</b>: кнопка «ЧИТЫ» слева на экране игры — выберите чит, он наберётся на телефоне сам.</li>
@@ -347,7 +348,7 @@ window.nmpInit = function (d) {
     $("saveMeta").textContent = d.ready === false ? "Сначала укажите файлы игры: «Файлы игры» внизу." : "Сохранений пока нет: начните новую игру.";
   }
 };
-if (/[?&]demo/.test(location.search)) nmpInit({ version: "1.4.0", device: "Snapdragon 8 Gen 5", thermal: 0, mode: "balance", playtime: 66120,
+if (/[?&]demo/.test(location.search)) nmpInit({ version: "1.4.1", device: "Snapdragon 8 Gen 5", thermal: 0, mode: "balance", playtime: 66120,
   save: { slot: "№ 12", time: Date.now() - 864e5 - 3600e3, count: 2 } });
 </script>
 </body>
