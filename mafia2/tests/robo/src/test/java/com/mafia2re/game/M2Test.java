@@ -179,21 +179,33 @@ public class M2Test {
     }
 
     @Test
-    public void adreno8xxUsesSystemDriverAndMigrates() {
+    public void driverStaysAutoAndUndoes110Migration() {
         DeviceProfile a829 = DeviceProfile.forTest("SM8845", "Adreno (TM) 829", 12000, 4000, true);
         assertEquals(829, a829.adrenoModel());
         GameConfig cfg = new GameConfig(ctx);
         cfg.ensureDefaults(a829);
-        assertEquals(1, cfg.get(GameConfig.DRIVER));
-        // An install made by 1.0.0: mode set, driver left on Auto, no defaults_v.
-        ctx.getSharedPreferences(GameConfig.PREFS, 0).edit().clear().putInt("graphics_mode", 1).putInt("vulkan_driver", 0).commit();
+        assertEquals(0, cfg.get(GameConfig.DRIVER));
+        // An install migrated by 1.1.0 (defaults_v = 2, forced "system") goes back to Auto.
+        ctx.getSharedPreferences(GameConfig.PREFS, 0).edit().clear().putInt("graphics_mode", 1)
+                .putInt("vulkan_driver", 1).putInt("defaults_v", 2).commit();
         new GameConfig(ctx).ensureDefaults(a829);
-        assertEquals(1, new GameConfig(ctx).get(GameConfig.DRIVER));
-        // Adreno 6xx/7xx keep Auto (Turnip is fine there).
-        ctx.getSharedPreferences(GameConfig.PREFS, 0).edit().clear().commit();
-        GameConfig c2 = new GameConfig(ctx);
-        c2.ensureDefaults(DeviceProfile.forTest("SM7325", "Adreno (TM) 642L", 8000, 2400, true));
-        assertEquals(0, c2.get(GameConfig.DRIVER));
+        assertEquals(0, new GameConfig(ctx).get(GameConfig.DRIVER));
+        // A choice made after that is kept.
+        GameConfig c3 = new GameConfig(ctx);
+        c3.set(GameConfig.DRIVER, 1);
+        c3.ensureDefaults(a829);
+        assertEquals(1, c3.get(GameConfig.DRIVER));
+    }
+
+    @Test
+    public void failedStartIsReportedOnce() {
+        GameConfig cfg = new GameConfig(ctx);
+        cfg.markGameStart();
+        assertTrue(new GameConfig(ctx).takeFailedStart());
+        assertFalse(new GameConfig(ctx).takeFailedStart());
+        cfg.markGameStart();
+        cfg.markGameAlive();
+        assertFalse(new GameConfig(ctx).takeFailedStart());
     }
 
     @Test

@@ -19,8 +19,8 @@ import sys
 import tempfile
 import zipfile
 
-VERSION_NAME = "1.1.0"
-VERSION_CODE = 2
+VERSION_NAME = "1.1.1"
+VERSION_CODE = 3
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SDK = os.environ.get("ANDROID_HOME", "/opt/android-sdk")

@@ -30,6 +30,9 @@ public class M2GameActivity extends GameActivity implements ControlsOverlay.List
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         cfg = new GameConfig(this);
+        cfg.markGameStart();
+        // Still alive after 25 s: the game started fine (rendering, data, driver).
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(cfg::markGameAlive, 25_000);
         ViewGroup content = findViewById(android.R.id.content);
         int at = -1;
         if (content != null) {
@@ -215,6 +218,7 @@ public class M2GameActivity extends GameActivity implements ControlsOverlay.List
 
     /** The native game cannot be restarted in-process: schedule the launcher, then end the process. */
     private void quitToLauncher() {
+        cfg.markGameAlive();   // the player left on purpose: not a failed start
         Intent i = new Intent(this, LauncherActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
         PendingIntent pi = PendingIntent.getActivity(this, 7, i, PendingIntent.FLAG_CANCEL_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);

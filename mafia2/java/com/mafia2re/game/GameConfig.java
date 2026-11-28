@@ -80,7 +80,7 @@ final class GameConfig {
             "Снижает нагрузку в меню и на паузе.", "Lowers the load in menus and while paused.");
     static final Option DRIVER = new Option("vulkan_driver", "Драйвер Vulkan", "Vulkan driver",
             s("Авто", "Системный", "Turnip"), s("Auto", "System", "Turnip"), v(0, 1, 2), true,
-            "Если картинка в полосах или мусоре — выберите «Системный». Turnip работает только на Adreno 6xx/7xx.", "");
+            "«Авто» — порт сам проверяет Turnip и системный драйвер. Меняйте, только если игра не стартует или рисует мусор.", "");
     static final Option VOICE = new Option("game_voice", "Озвучка", "Voice",
             s("Русская", "Английская"), s("Russian", "English"), v(0, 1), true,
             "Английской нужна папка pc/sds_ru_en.", "English needs pc/sds_ru_en.");
@@ -188,13 +188,31 @@ final class GameConfig {
     void ensureDefaults(DeviceProfile dp) {
         if (prefs.getInt("graphics_mode", -1) < 0) {
             applyMode(dp.tier, dp.tier == DeviceProfile.TIER_LOW ? MODE_SPEED : MODE_BALANCE);
-            set(DRIVER, dp.adrenoModel() >= 800 ? 1 : 0);
+            set(DRIVER, 0);
         }
-        if (prefs.getInt("defaults_v", 1) < 2) {
-            // 1.0.0 left "Auto" on Adreno 8xx, where Turnip draws garbage.
-            if (dp.adrenoModel() >= 800 && get(DRIVER) == 0) set(DRIVER, 1);
-            prefs.edit().putInt("defaults_v", 2).apply();
-        }
+        // 1.1.0 forced the system driver on Adreno 8xx; the port's own choice ("Auto": it
+        // probes Turnip and the system driver itself) is what actually starts there. Undo it.
+        if (prefs.getInt("defaults_v", 1) == 2 && dp.adrenoModel() >= 800 && get(DRIVER) == 1) set(DRIVER, 0);
+        if (prefs.getInt("defaults_v", 1) < 3) prefs.edit().putInt("defaults_v", 3).apply();
+    }
+
+    // ------------------------------------------------------------------ start-up watchdog
+
+    /** Marks a game start; {@link #markGameAlive()} confirms it survived the first seconds. */
+    void markGameStart() {
+        prefs.edit().putLong("game_started_at", System.currentTimeMillis()).putBoolean("game_alive", false).commit();
+    }
+
+    void markGameAlive() {
+        prefs.edit().putBoolean("game_alive", true).commit();
+    }
+
+    /** True once if the last start ended before the game confirmed it was running. */
+    boolean takeFailedStart() {
+        long at = prefs.getLong("game_started_at", 0);
+        boolean failed = at > 0 && !prefs.getBoolean("game_alive", true);
+        prefs.edit().remove("game_started_at").putBoolean("game_alive", true).apply();
+        return failed;
     }
 
     void applyMode(int tier, int mode) {

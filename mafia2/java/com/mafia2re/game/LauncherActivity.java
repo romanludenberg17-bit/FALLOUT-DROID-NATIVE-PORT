@@ -41,7 +41,7 @@ import java.util.Locale;
  * folder, the game starts".
  */
 public class LauncherActivity extends Activity {
-    static final String VERSION = "1.1.0";
+    static final String VERSION = "1.1.1";
     private static final int REQ_TREE = 41;
     private static final int TAB_PLAY = 0, TAB_SETTINGS = 1, TAB_CONTROLS = 2, TAB_FILES = 3, TAB_ABOUT = 4;
     private static final String[] TAB_NAMES = {"ИГРАТЬ", "НАСТРОЙКИ", "УПРАВЛЕНИЕ", "ФАЙЛЫ ИГРЫ", "О ПОРТЕ"};
@@ -98,8 +98,15 @@ public class LauncherActivity extends Activity {
             pickAfterAccess = false;
             openPicker();
         }
+        autodetectGame();   // access may have been granted meanwhile
         refreshChips();
         showTab(tab);
+        if (cfg.takeFailedStart()) {
+            dialog("Игра закрылась при запуске",
+                    "Похоже, игра не смогла стартовать. Отправьте лог (Telegram, почта) — по нему видно причину.\n\n"
+                            + "Можно попробовать другой драйвер Vulkan: сейчас — «" + GameConfig.DRIVER.name(GameConfig.DRIVER.indexOf(cfg.get(GameConfig.DRIVER))) + "».",
+                    "ОТПРАВИТЬ ЛОГ", this::shareLog);
+        }
     }
 
     @Override
@@ -671,7 +678,7 @@ public class LauncherActivity extends Activity {
                         + "• Стик как в шутерах: меньше, бег при толчке вперёд, фиксация бега замком.\n"
                         + "• Иконки кнопок с game-icons.net.\n"
                         + "• Всё приложение на русском.\n"
-                        + "• Adreno 8xx: по умолчанию системный драйвер Vulkan (Turnip давал полосы).\n"
+                        + "• Если игра закрылась при запуске — лаунчер предложит отправить лог.\n"
                         + "• Кнопка «Отправить лог» во вкладке «Файлы игры», Telegram в шапке.",
                 13, 0xFFD4D0CA, Ui.body(this));
         news.setLineSpacing(0, 1.25f);

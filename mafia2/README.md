@@ -63,4 +63,6 @@ cd mafia2/tests/robo && gradle testDebugUnitTest    # тесты + скринш�
   (VectorDrawable). `m2_ic_crouch.xml` (иконка автора) и `m2_ic_telegram.xml` нарисованы вручную.
 - `tools/make_logo_assets.py <logo.jpg> assets/img` — прозрачные логотипы ReMaf2.
 - `tools/make_icons.py res assets/img/logo_full.png` — иконка приложения.
-- Adreno 8xx: по умолчанию системный драйвер Vulkan (Turnip на этих GPU давал полосы/мусор).
+- Драйвер Vulkan по умолчанию «Авто» (порт сам пробует Turnip и системный). Нативка проверяет
+  `MAFIA2RE_CREDIT` = «Mafia II Android port by VinTeRuS» и без него не запускается.
+- `tools/make_art.py` — фоны лаунчера (ключевой арт целиком, его логотип растворён в небе).

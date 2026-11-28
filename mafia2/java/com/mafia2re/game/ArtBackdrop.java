@@ -90,7 +90,7 @@ final class ArtBackdrop extends View {
         float k = Math.max(w / (float) b.getWidth(), h / (float) b.getHeight());
         float dw = b.getWidth() * k;
         m.setScale(k, k);
-        m.postTranslate(w - dw, (h - b.getHeight() * k) * 0.35f);   // anchored right, slightly to the top
+        m.postTranslate(w - dw, 0);   // anchored right and to the top: faces stay in frame, feet may crop
         img.setAlpha(alpha);
         c.drawBitmap(b, m, img);
     }
