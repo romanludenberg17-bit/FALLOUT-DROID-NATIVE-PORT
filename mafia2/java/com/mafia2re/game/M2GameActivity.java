@@ -140,7 +140,7 @@ public class M2GameActivity extends GameActivity implements ControlsOverlay.List
             cfg.writeIni();
         }));
         GameConfig.Option[] live = {GameConfig.SHOW_FPS, GameConfig.OPACITY, GameConfig.SCALE, GameConfig.CAM, GameConfig.INVERT,
-                GameConfig.GYRO, GameConfig.AIM, GameConfig.STICK, GameConfig.FIRE_LOOK, GameConfig.LABELS, GameConfig.VIBRATE};
+                GameConfig.GYRO, GameConfig.AIM, GameConfig.STICK, GameConfig.FIRE_LOOK, GameConfig.LABELS, GameConfig.SMART_HIDE, GameConfig.VIBRATE};
         for (GameConfig.Option o : live) rows.addView(OptionRow.create(this, cfg, o, 16, v -> overlay.reloadSettings()));
         ScrollView sv = new ScrollView(this);
         sv.setVerticalScrollBarEnabled(false);

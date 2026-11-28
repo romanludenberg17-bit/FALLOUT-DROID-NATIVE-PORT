@@ -66,6 +66,10 @@ final class GameConfig {
     static final Option RES = new Option("render_height", "Разрешение", "Resolution",
             s("480p", "540p", "720p", "900p", "1080p"), s("480p", "540p", "720p", "900p", "1080p"), v(480, 540, 720, 900, 1080), true,
             "Внутреннее разрешение рендера. Главный рычаг производительности.", "Internal render height. The main performance knob.");
+    /** render_max_aspect: the port caps the picture at 16:9 by default (black bars on 20:9 phones). */
+    static final Option FULLSCREEN = new Option("render_max_aspect", "Полный экран", "Fullscreen",
+            s("Вкл", "Выкл"), s("On", "Off"), v(0, 1), true,
+            "Картинка на всю ширину экрана, без чёрных полос по бокам.", "");
     static final Option TEX = new Option("texture_skip_mips", "Текстуры", "Textures",
             s("Полные", "Средние", "Низкие"), s("Full", "Medium", "Low"), v(0, 1, 2), true,
             "«Низкие» экономят видеопамять: для телефонов с 4 ГБ.", "Low saves video memory: for 4 GB phones.");
@@ -114,6 +118,9 @@ final class GameConfig {
             s("Выкл", "Вкл"), s("Off", "On"), v(0, 1), false, "", "");
     static final Option SHOW_FPS = new Option("ui_fps", "Счётчик FPS", "FPS counter",
             s("Выкл", "Вкл"), s("Off", "On"), v(0, 1), false, "", "");
+    static final Option SMART_HIDE = new Option("ui_smart_hide", "Умное скрытие кнопок", "Smart hide",
+            s("Выкл", "Вкл"), s("Off", "On"), v(0, 1), false,
+            "Без касаний 4 с кнопки гаснут (стик, огонь и прицел — наполовину). При прицеливании лишние кнопки прячутся.", "");
     static final Option LABELS = new Option("ui_labels", "Подписи кнопок", "Button labels",
             s("Выкл", "Вкл"), s("Off", "On"), v(0, 1), false, "", "");
     static final Option PAD_HIDE = new Option("ui_pad_hide", "Скрывать при геймпаде", "Hide with gamepad",
@@ -144,12 +151,12 @@ final class GameConfig {
             s("Авто", "Вкл", "Выкл"), s("Auto", "On", "Off"), v(0, 1, 2), true,
             "Расчёт ткани нагружает процессор. «Авто» выключает её на слабых телефонах в «Скорости» и при 4 ГБ.", "");
 
-    static final Option[] GRAPHICS = {RES, TEX, DETAIL, FPS, BATTERY, CLOTH, DRIVER, TURNIP_BUILD, TURNIP};
+    static final Option[] GRAPHICS = {RES, FULLSCREEN, TEX, DETAIL, FPS, BATTERY, CLOTH, DRIVER, TURNIP_BUILD, TURNIP};
 
     /** Engine keys the launcher derives from the phone (written to the ini, not shown as rows). */
     static final String[] AUTO_KEYS = {"max_aniso", "texture_skip_min_size", "decode_16bit", "no_apex_clothing"};
     static final Option[] AUDIO_LANG = {VOICE, LANG};
-    static final Option[] TOUCH = {OPACITY, SCALE, CAM, INVERT, GYRO, AIM, STICK, AUTORUN, FIRE_LOOK, VIBRATE, LABELS, SHOW_FPS, PAD_HIDE};
+    static final Option[] TOUCH = {OPACITY, SCALE, CAM, INVERT, GYRO, AIM, STICK, AUTORUN, FIRE_LOOK, VIBRATE, LABELS, SMART_HIDE, SHOW_FPS, PAD_HIDE};
 
     static final int MODE_QUALITY = 0, MODE_BALANCE = 1, MODE_SPEED = 2, MODE_CUSTOM = 3;
 
@@ -232,6 +239,8 @@ final class GameConfig {
             case "ui_fire_look": return 1;
             case "ui_pad_hide": return 1;
             case "ui_labels": return 1;
+            case "ui_smart_hide": return 1;
+            case "ui_fps": return 1;
             case "game_voice": return Ui.english() ? 1 : 0;
             case "game_lang": return Ui.english() ? 1 : 0;
             default: return o.values[0];

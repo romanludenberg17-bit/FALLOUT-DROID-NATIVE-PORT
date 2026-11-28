@@ -62,7 +62,16 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
 
     // Settings snapshot.
     private float opacity, uiScale, camGain;
-    private boolean invertY, aimToggle, fixedStick, autoRun, fireLook, vibrate, showFps, padHide, labels;
+    private boolean invertY, aimToggle, fixedStick, autoRun, fireLook, vibrate, showFps, padHide, labels, smartHide;
+
+    // Smart hide: buttons fade after a few idle seconds and come back on touch.
+    private static final long IDLE_MS = 4000, FADE_MS = 500;
+    private static final float IDLE_LEVEL = 0.22f, CORE_MIN = 0.6f;
+    private long lastInteraction = SystemClock.uptimeMillis();
+    private float idleLevel = 1f;
+    private long levelAt;
+    private String fpsMs = "";
+    private final RectF fpsChip = new RectF();
     private int gyroMode;
 
     // Game state.
@@ -149,6 +158,7 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         showFps = cfg.get(GameConfig.SHOW_FPS) != 0;
         padHide = cfg.get(GameConfig.PAD_HIDE) != 0;
         labels = cfg.get(GameConfig.LABELS) != 0;
+        smartHide = cfg.get(GameConfig.SMART_HIDE) != 0;
         gyroMode = cfg.get(GameConfig.GYRO);
         cache.clear();
         relayout();
@@ -185,6 +195,13 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         if (editing) return true;
         if (e.hidden) return false;
         if (padHide && padConnected) return false;
+        // While aiming only the fight matters: no car door, map, sprint or fists on screen.
+        if (smartHide && live && ctx == ControlLayout.FOOT && aiming()) {
+            switch (e.id) {
+                case "car_in": case "map": case "run": case "punch": return false;
+                default: break;
+            }
+        }
         return !movieHidden();
     }
 
@@ -200,7 +217,8 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
             if (live) {
                 boolean changed = pollState();
                 if (showFps) updateHud();
-                if (changed || showFps) invalidate();
+                boolean fadeDue = smartHide && idleLevel > IDLE_LEVEL && SystemClock.uptimeMillis() - lastInteraction > IDLE_MS;
+                if (changed || showFps || fadeDue) invalidate();
                 postDelayed(this, 200);
             }
         }
@@ -252,7 +270,8 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
     private void updateHud() {
         try {
             float fps = TouchControls.nativeFps();
-            hud = String.format(Locale.ROOT, "%.0f FPS  ·  %.1f ms  ·  %d MB", fps, TouchControls.nativeFrameMs(), TouchControls.nativeMemoryMiB());
+            fpsMs = String.format(Locale.ROOT, "%.1f мс", TouchControls.nativeFrameMs());
+            hud = String.format(Locale.ROOT, "%.0f", fps);
             hudColor = fps >= 50 ? Ui.GREEN : fps >= 28 ? 0xFFE0B24A : Ui.RED;
         } catch (Throwable t) {
             hud = "";
@@ -660,6 +679,11 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         int a = ev.getActionMasked();
         int idx = ev.getActionIndex();
         long now = SystemClock.uptimeMillis();
+        lastInteraction = now;
+        if (idleLevel < 1f) {
+            idleLevel = 1f;   // back at once on any touch
+            invalidate();
+        }
         switch (a) {
             case MotionEvent.ACTION_DOWN:
             case MotionEvent.ACTION_POINTER_DOWN: {
@@ -951,22 +975,22 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         // Mode chip (only when the game does not report its state) and the FPS line.
         if (!editing && live) {
             if (!stateKnown && !hiddenAll) drawModeChip(c);
-            if (showFps && !hud.isEmpty()) {
-                text.setTextSize(12 * density);
-                text.setColor(Ui.alpha(0xFF000000, 0.6f));
-                c.drawText(hud, w / 2f + density, 22 * density + density, text);
-                text.setColor(hudColor);
-                c.drawText(hud, w / 2f, 22 * density, text);
-            }
+            if (showFps && !hud.isEmpty()) drawFps(c, w);
         }
         if (hiddenAll) {
             if (movie && !editing) drawMovieHint(c, w, h);
             return;
         }
 
+        float level = updateIdleLevel();
         for (ControlLayout.Element e : layout.all) {
             if (!visible(e)) continue;
             float a = opacity * e.alpha;
+            if (!editing && level < 1f) {
+                boolean core = e.kind == ControlLayout.Kind.STICK || e.kind == ControlLayout.Kind.MOUSE_LEFT
+                        || e.kind == ControlLayout.Kind.MOUSE_RIGHT || e.kind == ControlLayout.Kind.GEAR;
+                a *= core ? Math.max(level, CORE_MIN) : level;
+            }
             if (editing) a = e.hidden ? 0.28f : Math.max(0.45f, a);
             if (e.kind == ControlLayout.Kind.STICK) {
                 drawStick(c, e, a);
@@ -986,6 +1010,53 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
             }
         }
         if (editing && selected != null) drawSelection(c, selected);
+    }
+
+    /** Fade towards IDLE_LEVEL after IDLE_MS without touches (smart hide). */
+    private float updateIdleLevel() {
+        long now = SystemClock.uptimeMillis();
+        float target = smartHide && live && touches.isEmpty() && now - lastInteraction > IDLE_MS && ctx != ControlLayout.MENU
+                ? IDLE_LEVEL : 1f;
+        if (target < idleLevel) {
+            float dt = levelAt == 0 ? 0 : (now - levelAt) / (float) FADE_MS;
+            idleLevel = Math.max(target, idleLevel - dt * (1f - IDLE_LEVEL));
+            if (idleLevel > target) postInvalidateDelayed(16);
+        } else {
+            idleLevel = target;
+        }
+        levelAt = now;
+        return idleLevel;
+    }
+
+    /** "58 FPS · 17.2 мс" pill next to the port-menu gear. */
+    private void drawFps(Canvas c, int w) {
+        ControlLayout.Element gear = layout.byId("gear");
+        float right = gear != null ? gear.cx - gear.r - 12 * density : w - 16 * density;
+        float cy = gear != null ? gear.cy : 30 * density;
+        text.setLetterSpacing(0f);
+        text.setTextSize(15 * density);
+        String big = hud + " FPS";
+        float bw = text.measureText(big);
+        text.setTextSize(11 * density);
+        float sw = text.measureText(fpsMs);
+        float pad = 12 * density, gap = 8 * density, hh = 15 * density;
+        fpsChip.set(right - (pad + bw + gap + sw + pad), cy - hh, right, cy + hh);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(0xA6000000);
+        c.drawRoundRect(fpsChip, hh, hh, paint);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(density);
+        paint.setColor(Ui.alpha(hudColor, 0.6f));
+        c.drawRoundRect(fpsChip, hh, hh, paint);
+        paint.setStyle(Paint.Style.FILL);
+        text.setTextAlign(Paint.Align.LEFT);
+        text.setTextSize(15 * density);
+        text.setColor(hudColor);
+        c.drawText(big, fpsChip.left + pad, cy + 5.5f * density, text);
+        text.setTextSize(11 * density);
+        text.setColor(0xCCFFFFFF);
+        c.drawText(fpsMs, fpsChip.left + pad + bw + gap, cy + 4 * density, text);
+        text.setTextAlign(Paint.Align.CENTER);
     }
 
     private void drawGrid(Canvas c, int w, int h) {

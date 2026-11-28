@@ -261,6 +261,52 @@ public class M2Test {
     }
 
     @Test
+    public void fullscreenLiftsThe169Cap() throws Exception {
+        GameConfig cfg = new GameConfig(ctx);
+        cfg.writeIni();
+        assertTrue(readIni().contains("render_max_aspect = 0\n"));     // default: full width
+        cfg.set(GameConfig.FULLSCREEN, 1);
+        cfg.writeIni();
+        String ini = readIni();
+        assertTrue(ini, ini.contains("render_max_aspect = 1\n"));
+        assertEquals(ini.indexOf("render_max_aspect"), ini.lastIndexOf("render_max_aspect"));
+    }
+
+    @Test
+    public void aimingHidesNonCombatButtonsAndFpsShows() throws Exception {
+        ActivityController<M2GameActivity> c = game();
+        View root = c.get().getWindow().getDecorView();
+        ControlsOverlay o = find(root, ControlsOverlay.class);
+        ShadowLooper.idleMainLooper(400, java.util.concurrent.TimeUnit.MILLISECONDS);
+        shot(root, "18_game_fps");
+        ControlLayout.Element aim = o.layout.byId("aim"), car = o.layout.byId("car_in");
+        touch(o, MotionEvent.ACTION_DOWN, 0, aim.cx, aim.cy);
+        SDLActivity.events.clear();
+        // While the aim finger is down, a tap where "Сесть в машину" is does not press F.
+        MotionEvent d = MotionEvent.obtain(SystemClock.uptimeMillis(), SystemClock.uptimeMillis(), MotionEvent.ACTION_POINTER_DOWN | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT),
+                2, new MotionEvent.PointerProperties[]{pp(0), pp(1)}, new MotionEvent.PointerCoords[]{pc(aim.cx, aim.cy), pc(car.cx, car.cy)}, 0, 0, 1, 1, 0, 0, 0, 0);
+        o.dispatchTouchEvent(d);
+        assertFalse(SDLActivity.events.toString(), SDLActivity.events.contains("down 34"));
+        shot(root, "19_game_aiming");
+    }
+
+    private static MotionEvent.PointerProperties pp(int id) {
+        MotionEvent.PointerProperties p = new MotionEvent.PointerProperties();
+        p.id = id;
+        p.toolType = MotionEvent.TOOL_TYPE_FINGER;
+        return p;
+    }
+
+    private static MotionEvent.PointerCoords pc(float x, float y) {
+        MotionEvent.PointerCoords c = new MotionEvent.PointerCoords();
+        c.x = x;
+        c.y = y;
+        c.pressure = 1;
+        c.size = 1;
+        return c;
+    }
+
+    @Test
     public void failedStartIsReportedOnce() {
         GameConfig cfg = new GameConfig(ctx);
         cfg.markGameStart();
