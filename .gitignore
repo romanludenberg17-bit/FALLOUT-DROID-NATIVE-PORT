@@ -17,3 +17,4 @@ mafia2/.signing_keys/
 mafia2/tests/robo/.gradle/
 mafia2/tests/robo/build/
 mafia2/tests/robo/local.properties
+mafia2/drivers/*.so

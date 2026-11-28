@@ -19,6 +19,7 @@ final class GameEnv {
     }
 
     static void apply(Context c) {
+        GameConfig.ddBundled = new File(c.getApplicationInfo().nativeLibraryDir, "libvulkan_ddturnip.so").exists();
         GameConfig cfg = new GameConfig(c);
         DeviceProfile dp = DeviceProfile.detectCached(c);
         cfg.computeAutoKeys(dp);
@@ -33,9 +34,12 @@ final class GameEnv {
             // A driver the user dropped into files/driver wins; else the newer bundled Turnip
             // when asked for (the port loads MAFIA2RE_CUSTOM_DRIVER through adrenotools).
             drv = installCustomDriver(c);
-            if (drv == null && cfg.useNextTurnip(dp) && dp.isAdreno()) {
-                File next = new File(c.getApplicationInfo().nativeLibraryDir, "libvulkan_freedreno_next.so");
-                if (next.canRead()) drv = next;
+            if (drv == null) {
+                String lib = c.getApplicationInfo().nativeLibraryDir;
+                int build = cfg.turnipBuild(dp);
+                File f = build == GameConfig.BUILD_DD ? new File(lib, "libvulkan_ddturnip.so")
+                        : build == GameConfig.BUILD_NEXT ? new File(lib, "libvulkan_freedreno_next.so") : null;
+                if (f != null && f.canRead()) drv = f;
             }
             if (drv == null) Os.unsetenv("MAFIA2RE_CUSTOM_DRIVER");
             else Os.setenv("MAFIA2RE_CUSTOM_DRIVER", drv.getAbsolutePath(), true);

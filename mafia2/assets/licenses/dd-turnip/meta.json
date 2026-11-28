@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "name": "DD-Turnip-Emu v1.0.0",
+  "description": "DroidDeck Turnip for Android emulators, Mesa 27.0.0-devel (edce88a39e)",
+  "author": "DroidDeck",
+  "packageVersion": "1",
+  "vendor": "Mesa",
+  "driverVersion": "1.0.0",
+  "minApi": 30,
+  "libraryName": "libvulkan_freedreno.so"
+}

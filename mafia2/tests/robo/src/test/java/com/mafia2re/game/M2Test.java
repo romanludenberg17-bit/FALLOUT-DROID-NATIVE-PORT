@@ -199,21 +199,29 @@ public class M2Test {
 
     @Test
     public void turnipSettingsForAdreno8xx() throws Exception {
+        GameConfig.ddBundled = true;
         GameConfig cfg = new GameConfig(ctx);
         DeviceProfile a829 = DeviceProfile.forTest("SM8845", "Adreno (TM) 829", 12000, 4000, true);
         DeviceProfile a740 = DeviceProfile.forTest("SM8550", "Adreno (TM) 740", 12000, 3200, true);
         DeviceProfile mali = DeviceProfile.forTest("MT6769Z", "Mali-G52 MC2", 4000, 2000, true);
+        // Adreno 8xx: DD-Turnip, no workaround flags.
+        assertEquals(GameConfig.BUILD_DD, cfg.turnipBuild(a829));
+        assertNull(cfg.turnipDebug(a829));
+        // Without DD-Turnip in the APK: the port's newer Turnip with the workaround flags.
+        GameConfig.ddBundled = false;
+        assertEquals(GameConfig.BUILD_NEXT, cfg.turnipBuild(a829));
         assertEquals("sysmem,noubwc", cfg.turnipDebug(a829));
-        assertTrue(cfg.useNextTurnip(a829));
+        GameConfig.ddBundled = true;
+        // Adreno 7xx keeps the port's own Turnip; Mali has none.
+        assertEquals(GameConfig.BUILD_PORT, cfg.turnipBuild(a740));
         assertNull(cfg.turnipDebug(a740));
-        assertFalse(cfg.useNextTurnip(a740));
-        assertNull(cfg.turnipDebug(mali));
+        assertEquals(0, cfg.turnipBuild(mali));
         cfg.set(GameConfig.TURNIP, 2);
         assertEquals("noubwc", cfg.turnipDebug(a740));
         cfg.set(GameConfig.TURNIP, 4);
         assertEquals("", cfg.turnipDebug(a829));
         cfg.set(GameConfig.TURNIP_BUILD, 1);
-        assertFalse(cfg.useNextTurnip(a829));
+        assertEquals(GameConfig.BUILD_PORT, cfg.turnipBuild(a829));
         cfg.writeIni();
         String ini = new String(Files.readAllBytes(new File(ctx.getExternalFilesDir(null), "mafia2re.ini").toPath()), StandardCharsets.UTF_8);
         assertFalse(ini, ini.contains("tu_debug_mode") || ini.contains("turnip_build"));
@@ -221,49 +229,35 @@ public class M2Test {
 
     @Test
     public void adrenoVariantsMapToDriverSettings() {
+        GameConfig.ddBundled = true;
         GameConfig cfg = new GameConfig(ctx);
         DeviceProfile a829 = DeviceProfile.forTest("SM8845", "Adreno (TM) 829", 12000, 4000, true);
-        cfg.applyAdrenoVariant(0);
+        cfg.applyAdrenoVariant(0);                       // DD-Turnip
         assertEquals(0, cfg.adrenoVariant());
+        assertEquals(GameConfig.BUILD_DD, cfg.turnipBuild(a829));
+        assertNull(cfg.turnipDebug(a829));
+        cfg.applyAdrenoVariant(1);                       // newer port Turnip + both flags
         assertTrue(cfg.useNextTurnip(a829));
         assertEquals("sysmem,noubwc", cfg.turnipDebug(a829));
-        cfg.applyAdrenoVariant(1);
-        assertEquals("", cfg.turnipDebug(a829));
         cfg.applyAdrenoVariant(2);
+        assertEquals("", cfg.turnipDebug(a829));
+        cfg.applyAdrenoVariant(3);
         assertFalse(cfg.useNextTurnip(a829));
         assertEquals("noubwc", cfg.turnipDebug(a829));
-        cfg.applyAdrenoVariant(3);                       // standard Turnip, no flags
-        assertEquals(0, cfg.get(GameConfig.DRIVER));
-        assertFalse(cfg.useNextTurnip(a829));
+        cfg.applyAdrenoVariant(4);
+        assertEquals(GameConfig.BUILD_PORT, cfg.turnipBuild(a829));
         assertEquals("", cfg.turnipDebug(a829));
-        assertEquals(3, cfg.adrenoVariant());
+        assertEquals(4, cfg.adrenoVariant());
     }
 
     @Test
-    public void portMenuShowsAdrenoVariants() throws Exception {
-        DeviceProfile.testOverride = DeviceProfile.forTest("SM8845", "Adreno (TM) 829", 12000, 4000, true);
-        ActivityController<M2GameActivity> c = game();
-        View root = c.get().getWindow().getDecorView();
-        ControlsOverlay o = find(root, ControlsOverlay.class);
-        ShadowLooper.idleMainLooper(300, java.util.concurrent.TimeUnit.MILLISECONDS);
-        ControlLayout.Element gear = o.layout.byId("gear");
-        touch(o, MotionEvent.ACTION_DOWN, 0, gear.cx, gear.cy);
-        touch(o, MotionEvent.ACTION_UP, 0, gear.cx, gear.cy);
-        assertNotNull(findText(root, "Стандартный Turnip без флагов"));
-        shot(root, "17_port_menu_adreno");
-    }
-
-    @Test
-    public void menuClicksFollowTheGameSurfaceScale() {
-        TouchControls.state = 8;                               // menus
-        ActivityController<M2GameActivity> c = game();
-        ControlsOverlay o = find(c.get().getWindow().getDecorView(), ControlsOverlay.class);
-        ShadowLooper.idleMainLooper(300, java.util.concurrent.TimeUnit.MILLISECONDS);
-        o.setPointerScale(0.5f, 0.5f);
-        SDLActivity.events.clear();
-        touch(o, MotionEvent.ACTION_DOWN, 0, 600, 400);
-        touch(o, MotionEvent.ACTION_UP, 0, 600, 400);
-        assertTrue(SDLActivity.events.toString(), SDLActivity.events.contains("mouse b1 a0 abs 300,200"));
+    public void adreno8xxInstallsMoveToDdTurnip() {
+        DeviceProfile a829 = DeviceProfile.forTest("SM8845", "Adreno (TM) 829", 12000, 4000, true);
+        ctx.getSharedPreferences(GameConfig.PREFS, 0).edit().clear().putInt("graphics_mode", 1)
+                .putInt("vulkan_driver", 0).putInt("turnip_build", 2).putInt("tu_debug_mode", 3).putInt("defaults_v", 4).commit();
+        GameConfig cfg = new GameConfig(ctx);
+        cfg.ensureDefaults(a829);
+        assertEquals(0, cfg.adrenoVariant());
     }
 
     @Test

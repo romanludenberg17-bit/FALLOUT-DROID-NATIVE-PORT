@@ -19,8 +19,8 @@ import sys
 import tempfile
 import zipfile
 
-VERSION_NAME = "1.2.3"
-VERSION_CODE = 9
+VERSION_NAME = "1.3.0"
+VERSION_CODE = 10
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SDK = os.environ.get("ANDROID_HOME", "/opt/android-sdk")
@@ -93,6 +93,13 @@ def assemble(orig, base, dex2, out_unsigned):
             for n in ["classes.dex"] + libs:
                 zi = zipfile.ZipInfo(n, date_time=(2026, 1, 1, 0, 0, 0))
                 zn.writestr(zi, zo.read(n), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+            # Extra Vulkan drivers shipped beside the port's own (mafia2/drivers/*.so, not in git):
+            # DD-Turnip (DroidDeck, Mesa 27) for Adreno 8xx; see assets/licenses/dd-turnip.
+            for so in sorted(glob.glob(os.path.join(HERE, "drivers", "*.so"))):
+                n = "lib/arm64-v8a/" + os.path.basename(so)
+                zi = zipfile.ZipInfo(n, date_time=(2026, 1, 1, 0, 0, 0))
+                zn.writestr(zi, open(so, "rb").read(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+                print("  + driver", n)
             zn.write(dex2, "classes2.dex", compress_type=zipfile.ZIP_DEFLATED)
 
 

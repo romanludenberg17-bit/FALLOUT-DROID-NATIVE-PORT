@@ -41,7 +41,7 @@ import java.util.Locale;
  * folder, the game starts".
  */
 public class LauncherActivity extends Activity {
-    static final String VERSION = "1.2.3";
+    static final String VERSION = "1.3.0";
     static final String EXTRA_AUTOSTART = "remaf2.autostart";
     private static final int REQ_TREE = 41;
     private static final int TAB_PLAY = 0, TAB_SETTINGS = 1, TAB_CONTROLS = 2, TAB_FILES = 3, TAB_ABOUT = 4;
@@ -80,6 +80,7 @@ public class LauncherActivity extends Activity {
             getWindow().getAttributes().layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         }
         immersive();
+        GameConfig.ddBundled = new File(getApplicationInfo().nativeLibraryDir, "libvulkan_ddturnip.so").exists();
         device = DeviceProfile.detectCached(this);
         cfg.ensureDefaults(device);
         autodetectGame();
@@ -675,6 +676,7 @@ public class LauncherActivity extends Activity {
         TextView l = Ui.text(this, "ReMaf2 " + VERSION + " — лаунчер, сенсорное управление, профили графики.\n"
                         + "Иконки кнопок: game-icons.net (Lorc, Delapouite, Skoll, Guard13007), CC BY 3.0.\n"
                         + "Шрифты: Manrope, Fira Sans Extra Condensed (SIL OFL).\n"
+                        + "Драйвер DD-Turnip (DroidDeck, Mesa 27, MIT/GPL-3): github.com/Droid-Deck/Drivers — исходники там же; лицензии в assets/licenses.\n"
                         + "Mafia II и её изображения © 2K Games / Hangar 13. Фанатский проект, не связан с правообладателями.",
                 12, Ui.DIM, Ui.body(this));
         l.setPadding(0, dp(14), 0, dp(14));
@@ -707,6 +709,7 @@ public class LauncherActivity extends Activity {
                         + "• Стик как в шутерах: меньше, бег при толчке вперёд, фиксация бега замком.\n"
                         + "• Иконки кнопок с game-icons.net.\n"
                         + "• Всё приложение на русском.\n"
+                        + "• Adreno 8xx (Snapdragon 8 Elite, 8 Gen 5): встроен DD-Turnip (Mesa 27) — правильный вывод кадра на Android 16/17.\n"
                         + "• Если игра закрылась при запуске — лаунчер предложит отправить лог.\n"
                         + "• Adreno 8xx: новая сборка Turnip и режим совместимости (sysmem + noubwc) — сами.\n"
                         + "• Перезапуск игры из меню порта больше не теряет папку игры; логи DXVK в «Отправить лог».\n"

@@ -131,8 +131,13 @@ final class GameConfig {
 
     /** Which bundled Turnip build: the port's default or the newer "freedreno_next". */
     static final Option TURNIP_BUILD = new Option("turnip_build", "Версия Turnip", "Turnip build",
-            s("Авто", "Стандартная", "Новая"), s("Auto", "Standard", "Newer"), v(0, 1, 2), true,
-            "«Новая» — более свежий Mesa из APK, лучше знает Adreno 8xx. «Авто» берёт её на Adreno 8xx.", "");
+            s("Авто", "Стандартная", "Новая", "DD-Turnip"), s("Auto", "Standard", "Newer", "DD-Turnip"), v(0, 1, 2, 3), true,
+            "DD-Turnip (Mesa 27) читает раскладку экрана через IMapper 5 и знает Adreno 8xx. «Авто» берёт его на Adreno 8xx.", "");
+
+    static final int BUILD_PORT = 1, BUILD_NEXT = 2, BUILD_DD = 3;
+
+    /** Set by GameEnv: whether lib/…/libvulkan_ddturnip.so is in this APK. */
+    static boolean ddBundled = true;
 
     /** APEX cloth simulation (coats, clothes): heavy on the CPU of entry chips. */
     static final Option CLOTH = new Option("apex_cloth", "Ткань одежды (APEX)", "APEX cloth",
@@ -249,6 +254,10 @@ final class GameConfig {
         // 1.2.x logs: DXVK cannot allocate memory on Qualcomm's own Vulkan driver (abort at start).
         if (prefs.getInt("defaults_v", 1) < 4 && dp.isAdreno() && get(DRIVER) == 1) applyAdrenoVariant(0);
         if (prefs.getInt("defaults_v", 1) < 4) prefs.edit().putInt("defaults_v", 4).apply();
+        if (prefs.getInt("defaults_v", 1) < 5) {
+            if (dp.adrenoModel() >= 800) applyAdrenoVariant(0);
+            prefs.edit().putInt("defaults_v", 5).apply();
+        }
     }
 
     /** Value for TU_DEBUG, "" to block the port's own default, or null to leave it unset. */
@@ -259,12 +268,25 @@ final class GameConfig {
             case 2: return "noubwc";
             case 3: return "sysmem,noubwc";
             case 4: return "";
-            default: return dp.adrenoModel() >= 800 ? "sysmem,noubwc" : null;
+            default:
+                // DD-Turnip knows the real buffer layout: no workaround flags needed.
+                if (turnipBuild(dp) == BUILD_DD) return null;
+                return dp.adrenoModel() >= 800 ? "sysmem,noubwc" : null;
         }
     }
 
+    /** Which Turnip: 0 = none (system driver), BUILD_PORT, BUILD_NEXT or BUILD_DD. */
+    int turnipBuild(DeviceProfile dp) {
+        if (get(DRIVER) == 1 || !dp.isAdreno()) return 0;
+        int v = get(TURNIP_BUILD);
+        if (v == BUILD_DD && !ddBundled) v = 0;
+        if (v != 0) return v;
+        if (dp.adrenoModel() >= 800) return ddBundled ? BUILD_DD : BUILD_NEXT;
+        return BUILD_PORT;
+    }
     /** Quick graphics variants for Adreno, switchable from the in-game port menu. */
     static final String[] ADRENO_VARIANTS = {
+            "DD-Turnip (Mesa 27) — рекомендуется",
             "Новый Turnip + совместимость",
             "Новый Turnip без флагов",
             "Стандартный Turnip + noubwc",
@@ -272,7 +294,7 @@ final class GameConfig {
     };
 
     /** {vulkan_driver, turnip_build, tu_debug_mode} for each variant. */
-    private static final int[][] ADRENO_VARIANT_VALUES = {{0, 2, 3}, {0, 2, 4}, {0, 1, 2}, {0, 1, 4}};
+    private static final int[][] ADRENO_VARIANT_VALUES = {{0, 3, 0}, {0, 2, 3}, {0, 2, 4}, {0, 1, 2}, {0, 1, 4}};
 
     void applyAdrenoVariant(int i) {
         int[] v = ADRENO_VARIANT_VALUES[i];
@@ -290,11 +312,8 @@ final class GameConfig {
 
     /** True to point the port at lib/…/libvulkan_freedreno_next.so (MAFIA2RE_CUSTOM_DRIVER). */
     boolean useNextTurnip(DeviceProfile dp) {
-        if (get(DRIVER) == 1) return false;   // the system driver: no Turnip at all
-        int v = get(TURNIP_BUILD);
-        return v == 2 || (v == 0 && dp.adrenoModel() >= 800);
+        return turnipBuild(dp) == BUILD_NEXT;
     }
-
     // ------------------------------------------------------------------ start-up watchdog
 
     /** Marks a game start; {@link #markGameAlive()} confirms it survived the first seconds. */
