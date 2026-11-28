@@ -97,18 +97,18 @@ final class ControlLayout {
         add("map", "Карта", "Map", "map", Kind.KEY, K_M, FOOT | CAR, L, 102, T, 42, 22);
         add("gear", "Меню порта", "Port menu", "gear", Kind.GEAR, 0, FOOT | CAR | MENU, R, 42, T, 42, 21);
         // On foot: a fan of actions around a big Fire button.
-        add("fire", "Огонь", "Fire", "fire", Kind.MOUSE_LEFT, 0, FOOT, R, 104, B, 112, 44);
-        add("aim", "Прицел", "Aim", "aim", Kind.MOUSE_RIGHT, 0, FOOT, R, 212, B, 62, 30);
-        add("jump", "Прыжок", "Jump", "jump", Kind.KEY, K_SPACE, FOOT, R, 46, B, 208, 27);
-        add("crouch", "Присесть", "Crouch", "crouch", Kind.KEY, K_C, FOOT, R, 130, B, 230, 24);
-        add("reload", "Перезарядка", "Reload", "reload", Kind.KEY, K_R, FOOT, R, 212, B, 160, 25);
-        add("action", "Действие", "Action", "action", Kind.KEY, K_E, FOOT, R, 302, B, 80, 28);
-        add("cover", "Укрытие", "Cover", "cover", Kind.KEY, K_CTRL, FOOT, R, 298, B, 180, 24);
-        add("punch", "Удар", "Punch", "punch", Kind.KEY, K_Q, FOOT, R, 214, B, 250, 22);
-        add("weapon", "Оружие", "Weapon", "weapon", Kind.KEY, K_WEAPON, FOOT, R, 300, B, 264, 22);
-        add("grenade", "Граната", "Grenade", "grenade", Kind.KEY, K_1, FOOT, R, 384, B, 236, 22);
-        add("car_in", "Сесть в машину", "Enter car", "car_in", Kind.KEY, K_F, FOOT, R, 388, B, 112, 25);
-        add("run", "Бег", "Sprint", "run", Kind.RUN, K_SHIFT, FOOT, L, 250, B, 196, 24);
+        add("fire", "Огонь", "Fire", "fire", Kind.MOUSE_LEFT, 0, FOOT, R, 96, B, 100, 46);
+        add("aim", "Прицел", "Aim", "aim", Kind.MOUSE_RIGHT, 0, FOOT, R, 204, B, 56, 31);
+        add("jump", "Прыжок", "Jump", "jump", Kind.KEY, K_SPACE, FOOT, R, 56, B, 206, 28);
+        add("crouch", "Присесть", "Crouch", "crouch", Kind.KEY, K_C, FOOT, R, 150, B, 198, 25);
+        add("reload", "Перезарядка", "Reload", "reload", Kind.KEY, K_R, FOOT, R, 236, B, 150, 25);
+        add("action", "Действие", "Action", "action", Kind.KEY, K_E, FOOT, R, 300, B, 64, 28);
+        add("cover", "Укрытие", "Cover", "cover", Kind.KEY, K_CTRL, FOOT, R, 316, B, 170, 24);
+        add("punch", "Удар", "Punch", "punch", Kind.KEY, K_Q, FOOT, R, 232, B, 262, 22);
+        add("weapon", "Оружие", "Weapon", "weapon", Kind.KEY, K_WEAPON, FOOT, R, 136, B, 286, 24);
+        add("grenade", "Граната", "Grenade", "grenade", Kind.KEY, K_1, FOOT, R, 330, B, 250, 22);
+        add("car_in", "Сесть в машину", "Enter car", "car_in", Kind.KEY, K_F, FOOT, R, 392, B, 70, 24);
+        add("run", "Бег", "Sprint", "run", Kind.RUN, K_SHIFT, FOOT, L, 236, B, 212, 24);
         // In the car: pedals under the right thumb.
         add("gas", "Газ", "Gas", "gas", Kind.KEY, K_W, CAR, R, 78, B, 124, 46);
         add("brake", "Тормоз", "Brake", "brake", Kind.KEY, K_S, CAR, R, 192, B, 82, 38);

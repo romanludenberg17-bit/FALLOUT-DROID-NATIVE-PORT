@@ -270,7 +270,7 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
     private void updateHud() {
         try {
             float fps = TouchControls.nativeFps();
-            fpsMs = String.format(Locale.ROOT, "%.1f мс", TouchControls.nativeFrameMs());
+            fpsMs = String.format(Locale.ROOT, "%.0f мс", TouchControls.nativeFrameMs());
             hud = String.format(Locale.ROOT, "%.0f", fps);
             hudColor = fps >= 50 ? Ui.GREEN : fps >= 28 ? 0xFFE0B24A : Ui.RED;
         } catch (Throwable t) {
@@ -1028,34 +1028,29 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         return idleLevel;
     }
 
-    /** "58 FPS · 17.2 мс" pill next to the port-menu gear. */
+    /** Small "58 FPS · 17 мс" pill in the top-left corner, right of the map button. */
     private void drawFps(Canvas c, int w) {
-        ControlLayout.Element gear = layout.byId("gear");
-        float right = gear != null ? gear.cx - gear.r - 12 * density : w - 16 * density;
-        float cy = gear != null ? gear.cy : 30 * density;
+        ControlLayout.Element map = layout.byId("map");
+        float left = map != null ? map.cx + map.r + 10 * density : 16 * density;
+        float cy = map != null ? map.cy : 30 * density;
         text.setLetterSpacing(0f);
-        text.setTextSize(15 * density);
-        String big = hud + " FPS";
-        float bw = text.measureText(big);
-        text.setTextSize(11 * density);
-        float sw = text.measureText(fpsMs);
-        float pad = 12 * density, gap = 8 * density, hh = 15 * density;
-        fpsChip.set(right - (pad + bw + gap + sw + pad), cy - hh, right, cy + hh);
-        paint.setStyle(Paint.Style.FILL);
-        paint.setColor(0xA6000000);
-        c.drawRoundRect(fpsChip, hh, hh, paint);
-        paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(density);
-        paint.setColor(Ui.alpha(hudColor, 0.6f));
-        c.drawRoundRect(fpsChip, hh, hh, paint);
-        paint.setStyle(Paint.Style.FILL);
         text.setTextAlign(Paint.Align.LEFT);
-        text.setTextSize(15 * density);
+        String big = hud + " FPS";
+        text.setTextSize(11.5f * density);
+        float bw = text.measureText(big);
+        text.setTextSize(9 * density);
+        float sw = text.measureText(fpsMs);
+        float pad = 8 * density, gap = 5 * density, hh = 10 * density;
+        fpsChip.set(left, cy - hh, left + pad + bw + gap + sw + pad, cy + hh);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(0x8C000000);
+        c.drawRoundRect(fpsChip, hh, hh, paint);
+        text.setTextSize(11.5f * density);
         text.setColor(hudColor);
-        c.drawText(big, fpsChip.left + pad, cy + 5.5f * density, text);
-        text.setTextSize(11 * density);
-        text.setColor(0xCCFFFFFF);
-        c.drawText(fpsMs, fpsChip.left + pad + bw + gap, cy + 4 * density, text);
+        c.drawText(big, left + pad, cy + 4 * density, text);
+        text.setTextSize(9 * density);
+        text.setColor(0xB3FFFFFF);
+        c.drawText(fpsMs, left + pad + bw + gap, cy + 3.2f * density, text);
         text.setTextAlign(Paint.Align.CENTER);
     }
 
