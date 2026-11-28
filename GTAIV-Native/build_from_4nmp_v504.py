@@ -12,8 +12,8 @@ import glob, hashlib, os, shutil, struct, subprocess, sys, tempfile, zipfile, zl
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_from_4nmp as base
 
-base.VERSION_CODE = 635
-base.VERSION_NAME = "1.3.5"
+base.VERSION_CODE = 636
+base.VERSION_NAME = "1.3.6"
 base.LABEL = "4NMP"  # the project's name
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -133,6 +133,10 @@ def main():
         zout.write(libq, "lib/arm64-v8a/libq.so")
         assert "classes3.dex" not in zin.namelist()
         zout.writestr("classes3.dex", build_launcher_dex())
+        drivers = os.path.join(HERE, "drivers")  # bundled Vulkan drivers (NmpHomeActivity installs them)
+        for path in sorted(glob.glob(os.path.join(drivers, "**", "*"), recursive=True)):
+            if os.path.isfile(path):
+                zout.write(path, "assets/drivers/" + os.path.relpath(path, drivers).replace(os.sep, "/"))
         home = os.path.join(HERE, "shell", "home")
         for path in sorted(glob.glob(os.path.join(home, "**", "*"), recursive=True)):
             if os.path.isfile(path):

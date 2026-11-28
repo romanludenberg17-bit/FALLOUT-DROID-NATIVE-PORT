@@ -511,6 +511,18 @@ static void* playtime_thread(void* unused) {
   return NULL;
 }
 
+// ---- Mesa (Turnip) tuning. Android gives Mesa no cache directory (no HOME /
+// XDG_CACHE_HOME), so Turnip recompiled every shader on every start: give it
+// one in the app's private cache, 1 GiB. The vendor driver ignores these.
+static void mesa_tuning(const char* pkg) {
+  char dir[300];
+  snprintf(dir, sizeof(dir), "/data/user/0/%s/cache/mesa", pkg);
+  if (access("/data/user/0", F_OK) != 0) snprintf(dir, sizeof(dir), "/data/data/%s/cache/mesa", pkg);
+  mkdirs(dir);
+  setenv("MESA_SHADER_CACHE_DIR", dir, 0);
+  setenv("MESA_SHADER_CACHE_MAX_SIZE", "1G", 0);
+}
+
 __attribute__((constructor)) static void lanshim_init(void) {
   char pkg[128];
   if (package_name(pkg, sizeof(pkg))) {
@@ -518,6 +530,7 @@ __attribute__((constructor)) static void lanshim_init(void) {
     snprintf(args, sizeof(args), "/storage/emulated/0/Android/data/%s/files/args.txt", pkg);
     struct stat ast;
     g_args_fresh = stat(args, &ast) == 0 && time(NULL) - ast.st_mtime < 90;
+    mesa_tuning(pkg);  // before the engine creates its Vulkan instance
     write_diagnostics(pkg);  // state left by the previous run
     restore_texture_cache(pkg);
     repair_args(pkg);

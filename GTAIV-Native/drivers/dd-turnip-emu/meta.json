@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "name": "DD-Turnip-Emu v1.0.0",
+  "description": "Mesa Turnip 27.0-dev для Adreno (DroidDeck). В 4NMP включён кэш шейдеров: меньше фризов со второго запуска.",
+  "author": "DroidDeck",
+  "packageVersion": "1",
+  "vendor": "Mesa",
+  "driverVersion": "1.0.0",
+  "minApi": 30,
+  "libraryName": "libvulkan_freedreno.so"
+}

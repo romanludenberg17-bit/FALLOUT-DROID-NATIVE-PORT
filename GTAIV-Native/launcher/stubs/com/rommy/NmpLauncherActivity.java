@@ -7,6 +7,7 @@ public class NmpLauncherActivity extends android.app.Activity
   @Override public void onGlobalLayout() {}
   @Override public void onClick(android.view.View v) {}
   @Override public boolean onTouch(android.view.View v, android.view.MotionEvent e) { return false; }
-  @Override protected void onResume() { super.onResume(); }
+  @Override public void onCreate(android.os.Bundle b) { super.onCreate(b); }
+  @Override public void onResume() { super.onResume(); }
   public void handleHubUrl(String url) {}
 }

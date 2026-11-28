@@ -38,6 +38,57 @@ public class NmpHomeActivity extends NmpLauncherActivity {
   private WebView home;
   private boolean failed;
 
+  // ------------------------------------------------------------ bundled drivers
+  /** Vulkan drivers shipped in assets/drivers/<name>/ and offered in the launcher's driver list. */
+  private static final String[] BUNDLED_DRIVERS = {"dd-turnip-emu"};
+  private static final String[] DRIVER_FILES = {"libvulkan_freedreno.so", "meta.json", "NOTICE"};
+
+  @Override
+  public void onCreate(android.os.Bundle state) {
+    installBundledDrivers();  // before the launcher builds its driver list
+    super.onCreate(state);
+  }
+
+  /**
+   * The launcher lists custom drivers from <external files>/drivers/<name>/
+   * (a .so plus meta.json) and copies the chosen one into its private folder
+   * when the game starts. Put the bundled ones there, once per APK version.
+   */
+  private void installBundledDrivers() {
+    try {
+      File ext = getExternalFilesDir(null);
+      if (ext == null) return;
+      long apk = getPackageManager().getPackageInfo(getPackageName(), 0).lastUpdateTime;
+      for (String name : BUNDLED_DRIVERS) {
+        File dir = new File(ext, "drivers/" + name);
+        File stamp = new File(dir, ".bundled");
+        if (stamp.isFile() && stamp.lastModified() == apk) continue;
+        if (!dir.isDirectory() && !dir.mkdirs()) continue;
+        boolean ok = true;
+        for (String f : DRIVER_FILES) {
+          File out = new File(dir, f), tmp = new File(dir, f + ".tmp");
+          InputStream in = getAssets().open("drivers/" + name + "/" + f);
+          FileOutputStream o = new FileOutputStream(tmp);
+          try {
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = in.read(buf)) > 0) o.write(buf, 0, n);
+          } finally {
+            in.close();
+            o.close();
+          }
+          ok &= tmp.renameTo(out);
+        }
+        if (ok) {
+          new FileOutputStream(stamp).close();
+          stamp.setLastModified(apk);
+        }
+      }
+    } catch (Throwable t) {
+      Log.w(TAG, "bundled drivers not installed", t);
+    }
+  }
+
   // ------------------------------------------------------------ layout hook
   @Override
   public void onGlobalLayout() {
@@ -62,7 +113,7 @@ public class NmpHomeActivity extends NmpLauncherActivity {
   }
 
   @Override
-  protected void onResume() {
+  public void onResume() {
     super.onResume();
     if (home != null && home.getVisibility() == View.VISIBLE) refresh();
   }
