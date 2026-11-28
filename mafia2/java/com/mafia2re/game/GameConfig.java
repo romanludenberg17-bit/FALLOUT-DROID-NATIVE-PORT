@@ -177,14 +177,14 @@ final class GameConfig {
      * 1.3.4 splits them: shadows at High cost Adreno 829 half its frame rate in the city.
      */
     private static final int[][][] PRESETS = {
-            // TIER_LOW: Helio G85..G99, Mali-G52/G57, Adreno 610..620, 4 GB
-            {{720, 1, 1, 30, 0, 1, 1, 0}, {540, 1, 1, 30, 0, 0, 1, 0}, {540, 2, 0, 30, 1, 0, 0, 0}},
+            // TIER_LOW: Helio G85..G99, Mali-G52/G57, Adreno 610..620, 4 GB. No shadows outside Quality.
+            {{720, 1, 1, 30, 0, 0, 1, 0}, {540, 1, 0, 30, 0, 0, 0, 0}, {540, 2, 0, 30, 1, 0, 0, 0}},
             // TIER_MID: Adreno 640..725, Mali-G68/G610/G77, Xclipse 920, 6 GB
-            {{900, 0, 2, 30, 0, 1, 2, 0}, {720, 0, 1, 45, 0, 1, 1, 0}, {540, 1, 0, 60, 0, 0, 0, 0}},
+            {{900, 0, 2, 30, 0, 1, 1, 0}, {720, 1, 1, 45, 0, 0, 1, 0}, {540, 1, 0, 60, 0, 0, 0, 0}},
             // TIER_HIGH: Adreno 730..750, Mali-G715, Immortalis
             {{1080, 0, 2, 45, 0, 1, 2, 1}, {900, 0, 2, 60, 0, 1, 1, 0}, {720, 0, 1, 60, 0, 0, 1, 0}},
-            // TIER_ULTRA: Adreno 8xx
-            {{1080, 0, 2, 60, 0, 2, 2, 1}, {900, 0, 2, 60, 0, 1, 2, 0}, {720, 0, 1, 60, 0, 1, 1, 0}},
+            // TIER_ULTRA: Adreno 8xx. Balance / Speed keep 1080p and save on textures, shadows, geometry.
+            {{1080, 0, 2, 60, 0, 2, 2, 1}, {1080, 1, 2, 60, 0, 1, 1, 0}, {1080, 1, 1, 60, 0, 0, 1, 0}},
     };
 
     final SharedPreferences prefs;
@@ -222,15 +222,19 @@ final class GameConfig {
     void computeAutoKeys(DeviceProfile dp) {
         int ram = dp.ramClass();
         int aniso = dp.tier >= DeviceProfile.TIER_ULTRA ? 16 : dp.tier == DeviceProfile.TIER_HIGH ? 8 : dp.tier == DeviceProfile.TIER_MID ? 4 : 2;
+        if (dp.tier >= DeviceProfile.TIER_ULTRA && mode() != MODE_QUALITY) aniso = 8;
         if (ram == 4) aniso = Math.min(aniso, 2);
         else if (ram == 6) aniso = Math.min(aniso, 4);
         int cloth = get(CLOTH);
-        boolean noCloth = cloth == 2 || (cloth == 0 && dp.tier == DeviceProfile.TIER_LOW && (mode() == MODE_SPEED || ram == 4));
+        // Cloth is pure CPU: off on entry chips except in Quality, on mid chips in Speed, and with 4 GB.
+        boolean noCloth = cloth == 2 || (cloth == 0 && (ram == 4
+                || (dp.tier == DeviceProfile.TIER_LOW && mode() != MODE_QUALITY)
+                || (dp.tier == DeviceProfile.TIER_MID && mode() == MODE_SPEED)));
         prefs.edit()
                 .putInt("x.max_aniso", aniso)
                 .putInt("x.texture_skip_min_size", ram == 4 ? 128 : 256)
                 // GPUs without BC (Mali, Xclipse, PowerVR) get DXT decoded on the CPU: 16-bit halves it.
-                .putInt("x.decode_16bit", !dp.isAdreno() && ram <= 6 ? 1 : 0)
+                .putInt("x.decode_16bit", !dp.isAdreno() && (ram <= 6 || dp.tier <= DeviceProfile.TIER_MID) ? 1 : 0)
                 .putInt("x.no_apex_clothing", noCloth ? 1 : 0)
                 .apply();
     }
@@ -287,6 +291,12 @@ final class GameConfig {
             int m = mode();
             if (m >= MODE_QUALITY && m <= MODE_SPEED) applyMode(dp, m);
             prefs.edit().putInt("defaults_v", 6).commit();
+        }
+        // 1.3.5: Balance / Speed on Adreno 8xx went back to 1080p with lighter textures.
+        if (prefs.getInt("defaults_v", 1) < 7) {
+            int m = mode();
+            if (m >= MODE_QUALITY && m <= MODE_SPEED) applyMode(dp, m);
+            prefs.edit().putInt("defaults_v", 7).commit();
         }
     }
 

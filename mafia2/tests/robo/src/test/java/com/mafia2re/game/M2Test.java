@@ -351,7 +351,8 @@ public class M2Test {
     public void snapdragon8xxBalanceIsLighterThanQuality() {
         DeviceProfile sd8g5 = DeviceProfile.forTest("SM8845", "Adreno (TM) 829", 12 * 1024, 3800, true);
         int[] q = GameConfig.preset(sd8g5, GameConfig.MODE_QUALITY), b = GameConfig.preset(sd8g5, GameConfig.MODE_BALANCE);
-        assertTrue(b[0] < q[0]);
+        assertEquals(1080, b[0]);      // no resolution loss
+        assertEquals(1, b[1]);         // medium textures
         assertTrue(b[5] < q[5]);       // shadows
         assertEquals(0, b[7]);         // no AO in Balance
         GameConfig cfg = new GameConfig(ctx);
@@ -360,7 +361,8 @@ public class M2Test {
         String ini = readIni();
         assertTrue(ini, ini.contains("game_shadows = 1\n"));
         assertTrue(ini, ini.contains("game_ao = 0\n"));
-        assertTrue(ini, ini.contains("render_height = 900\n"));
+        assertTrue(ini, ini.contains("render_height = 1080\n"));
+        assertTrue(ini, ini.contains("texture_skip_mips = 1\n"));
         cfg.set(GameConfig.SHADOWS, -1);   // Auto: the port derives it from game_detail
         cfg.writeIni();
         assertFalse(readIni().contains("game_shadows"));
@@ -382,6 +384,11 @@ public class M2Test {
         assertEquals(1, GameConfig.preset(g85, GameConfig.MODE_QUALITY)[1]);      // 4 GB: medium at best
         assertTrue(GameConfig.preset(g100_6, GameConfig.MODE_QUALITY)[1] >= 1);  // 6 GB: medium at best
         assertEquals(0, GameConfig.preset(sd8g2, GameConfig.MODE_QUALITY)[1]);
+        for (int m = GameConfig.MODE_BALANCE; m <= GameConfig.MODE_SPEED; m++) {
+            int[] p = GameConfig.preset(g85, m);
+            assertEquals(0, p[5]);     // Helio: no shadows outside Quality
+            assertEquals(0, p[7]);     // no AO
+        }
 
         GameConfig cfg = new GameConfig(ctx);
         cfg.applyMode(g85, GameConfig.MODE_SPEED);
