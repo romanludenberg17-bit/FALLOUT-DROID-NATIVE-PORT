@@ -1,10 +1,7 @@
 package com.mafia2re.game;
 
 import android.content.Context;
-import android.graphics.Point;
 import android.system.Os;
-import android.view.Display;
-import android.view.WindowManager;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -47,52 +44,18 @@ final class GameEnv {
         } catch (Throwable ignored) {
             // Some firmwares (and host-side tests) have no setenv: the port then uses its defaults.
         }
-        int[] buf = surfaceSize(c, cfg);
-        writeLaunchNote(c, cfg, game, tu, drv, buf);
-    }
-
-    /**
-     * Size of the game's surface (the swapchain). "Auto": the render height with a width that is a
-     * multiple of 256 px at the screen's aspect. Native widths like 2750 px are not a multiple of
-     * 32/64, and Turnip on Adreno 8xx then disagrees with gralloc about the row pitch: every row
-     * shifts and the frame turns into horizontal streaks. Display hardware scales it back up.
-     * Returns null for "native size".
-     */
-    static int[] surfaceSize(Context c, GameConfig cfg) {
-        if (cfg.get(GameConfig.SURFACE) == 1) return null;
-        Point p = new Point();
-        try {
-            WindowManager wm = (WindowManager) c.getSystemService(Context.WINDOW_SERVICE);
-            Display d = wm.getDefaultDisplay();
-            d.getRealSize(p);
-        } catch (Exception e) {
-            return null;
-        }
-        int sw = Math.max(p.x, p.y), sh = Math.min(p.x, p.y);
-        if (sw <= 0 || sh <= 0) return null;
-        int rh = Math.min(cfg.get(GameConfig.RES), sh);
-        return alignedSize(sw, sh, rh);
-    }
-
-    static int[] alignedSize(int screenW, int screenH, int height) {
-        double aspect = screenW / (double) screenH;
-        int w = (int) Math.round(height * aspect / 256.0) * 256;
-        w = Math.max(256, Math.min(w, (screenW + 255) / 256 * 256));
-        int h = (int) Math.round(w / aspect);
-        h = (h + 1) & ~1;
-        return new int[]{w, h};
+        writeLaunchNote(c, cfg, game, tu, drv);
     }
 
     /** What was handed to the game; first block of "Отправить лог". */
-    private static void writeLaunchNote(Context c, GameConfig cfg, String game, String tu, File drv, int[] buf) {
+    private static void writeLaunchNote(Context c, GameConfig cfg, String game, String tu, File drv) {
         File dir = c.getExternalFilesDir(null);
         if (dir == null) return;
         String s = "ReMaf2 " + LauncherActivity.VERSION + " launch " + new java.util.Date() + "\n"
                 + "MAFIA2RE_GAME=" + game + "\n"
                 + "TU_DEBUG=" + (tu == null ? "(unset)" : "\"" + tu + "\"") + "\n"
                 + "MAFIA2RE_CUSTOM_DRIVER=" + (drv == null ? "(unset)" : drv.getAbsolutePath()) + "\n"
-                + "vulkan_driver=" + GameConfig.DRIVER.name(GameConfig.DRIVER.indexOf(cfg.get(GameConfig.DRIVER))) + "\n"
-                + "surface=" + (buf == null ? "native" : buf[0] + "x" + buf[1]) + "\n";
+                + "vulkan_driver=" + GameConfig.DRIVER.name(GameConfig.DRIVER.indexOf(cfg.get(GameConfig.DRIVER))) + "\n";
         try (FileOutputStream out = new FileOutputStream(new File(dir, "remaf2-launch.txt"))) {
             out.write(s.getBytes(StandardCharsets.UTF_8));
         } catch (Exception ignored) {

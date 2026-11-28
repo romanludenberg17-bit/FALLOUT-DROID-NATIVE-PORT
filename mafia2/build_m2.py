@@ -19,8 +19,8 @@ import sys
 import tempfile
 import zipfile
 
-VERSION_NAME = "1.2.2"
-VERSION_CODE = 8
+VERSION_NAME = "1.2.3"
+VERSION_CODE = 9
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SDK = os.environ.get("ANDROID_HOME", "/opt/android-sdk")

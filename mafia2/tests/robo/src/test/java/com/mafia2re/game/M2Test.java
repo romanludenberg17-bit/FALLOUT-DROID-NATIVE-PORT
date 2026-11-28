@@ -232,10 +232,10 @@ public class M2Test {
         cfg.applyAdrenoVariant(2);
         assertFalse(cfg.useNextTurnip(a829));
         assertEquals("noubwc", cfg.turnipDebug(a829));
-        cfg.applyAdrenoVariant(3);                       // Qualcomm's own driver: no Turnip, no TU_DEBUG
-        assertEquals(1, cfg.get(GameConfig.DRIVER));
+        cfg.applyAdrenoVariant(3);                       // standard Turnip, no flags
+        assertEquals(0, cfg.get(GameConfig.DRIVER));
         assertFalse(cfg.useNextTurnip(a829));
-        assertNull(cfg.turnipDebug(a829));
+        assertEquals("", cfg.turnipDebug(a829));
         assertEquals(3, cfg.adrenoVariant());
     }
 
@@ -249,20 +249,8 @@ public class M2Test {
         ControlLayout.Element gear = o.layout.byId("gear");
         touch(o, MotionEvent.ACTION_DOWN, 0, gear.cx, gear.cy);
         touch(o, MotionEvent.ACTION_UP, 0, gear.cx, gear.cy);
-        assertNotNull(findText(root, "Системный драйвер Qualcomm"));
+        assertNotNull(findText(root, "Стандартный Turnip без флагов"));
         shot(root, "17_port_menu_adreno");
-    }
-
-    @Test
-    public void surfaceWidthIsAMultipleOf256AtTheScreenAspect() {
-        int[] a = GameEnv.alignedSize(2750, 1260, 1080);      // vivo I2508
-        assertEquals(2304, a[0]);
-        assertEquals(1056, a[1]);
-        int[] b = GameEnv.alignedSize(2400, 1080, 480);       // 20:9 Helio phone, 480p
-        assertEquals(0, b[0] % 256);
-        assertEquals(2400 / 1080.0, b[0] / (double) b[1], 0.02);
-        int[] c = GameEnv.alignedSize(1600, 720, 1080);       // never wider than the screen rounded up
-        assertTrue(c[0] <= 1792);
     }
 
     @Test

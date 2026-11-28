@@ -80,7 +80,7 @@ final class GameConfig {
             "Снижает нагрузку в меню и на паузе.", "Lowers the load in menus and while paused.");
     static final Option DRIVER = new Option("vulkan_driver", "Драйвер Vulkan", "Vulkan driver",
             s("Авто", "Системный", "Turnip"), s("Auto", "System", "Turnip"), v(0, 1, 2), true,
-            "«Авто» — порт сам проверяет Turnip и системный драйвер. Меняйте, только если игра не стартует или рисует мусор.", "");
+            "«Авто» — порт сам выбирает. На Adreno системный драйвер Qualcomm с DXVK не работает (ошибка памяти) — оставьте «Авто».", "");
     static final Option VOICE = new Option("game_voice", "Озвучка", "Voice",
             s("Русская", "Английская"), s("Russian", "English"), v(0, 1), true,
             "Английской нужна папка pc/sds_ru_en.", "English needs pc/sds_ru_en.");
@@ -139,12 +139,7 @@ final class GameConfig {
             s("Авто", "Вкл", "Выкл"), s("Auto", "On", "Off"), v(0, 1, 2), true,
             "Расчёт ткани нагружает процессор. «Авто» выключает её на слабых телефонах в «Скорости» и при 4 ГБ.", "");
 
-    /** Swapchain size: aligned (width multiple of 256 px, scaled by the display) or native. */
-    static final Option SURFACE = new Option("surface_mode", "Буфер экрана", "Screen buffer",
-            s("Авто", "Родной"), s("Auto", "Native"), v(0, 1), true,
-            "«Авто»: размер кадра под разрешение с шириной, кратной 256 px — убирает полосы на Adreno 8xx и разгружает GPU.", "");
-
-    static final Option[] GRAPHICS = {RES, TEX, DETAIL, FPS, BATTERY, CLOTH, SURFACE, DRIVER, TURNIP_BUILD, TURNIP};
+    static final Option[] GRAPHICS = {RES, TEX, DETAIL, FPS, BATTERY, CLOTH, DRIVER, TURNIP_BUILD, TURNIP};
 
     /** Engine keys the launcher derives from the phone (written to the ini, not shown as rows). */
     static final String[] AUTO_KEYS = {"max_aniso", "texture_skip_min_size", "decode_16bit", "no_apex_clothing"};
@@ -251,7 +246,9 @@ final class GameConfig {
         // 1.1.0 forced the system driver on Adreno 8xx; the port's own choice ("Auto": it
         // probes Turnip and the system driver itself) is what actually starts there. Undo it.
         if (prefs.getInt("defaults_v", 1) == 2 && dp.adrenoModel() >= 800 && get(DRIVER) == 1) set(DRIVER, 0);
-        if (prefs.getInt("defaults_v", 1) < 3) prefs.edit().putInt("defaults_v", 3).apply();
+        // 1.2.x logs: DXVK cannot allocate memory on Qualcomm's own Vulkan driver (abort at start).
+        if (prefs.getInt("defaults_v", 1) < 4 && dp.isAdreno() && get(DRIVER) == 1) applyAdrenoVariant(0);
+        if (prefs.getInt("defaults_v", 1) < 4) prefs.edit().putInt("defaults_v", 4).apply();
     }
 
     /** Value for TU_DEBUG, "" to block the port's own default, or null to leave it unset. */
@@ -271,11 +268,11 @@ final class GameConfig {
             "Новый Turnip + совместимость",
             "Новый Turnip без флагов",
             "Стандартный Turnip + noubwc",
-            "Системный драйвер Qualcomm",
+            "Стандартный Turnip без флагов",
     };
 
     /** {vulkan_driver, turnip_build, tu_debug_mode} for each variant. */
-    private static final int[][] ADRENO_VARIANT_VALUES = {{0, 2, 3}, {0, 2, 4}, {0, 1, 2}, {1, 1, 4}};
+    private static final int[][] ADRENO_VARIANT_VALUES = {{0, 2, 3}, {0, 2, 4}, {0, 1, 2}, {0, 1, 4}};
 
     void applyAdrenoVariant(int i) {
         int[] v = ADRENO_VARIANT_VALUES[i];
@@ -371,7 +368,7 @@ final class GameConfig {
                 }
             }
             for (Option o : GRAPHICS) {
-                if (o == TURNIP || o == TURNIP_BUILD || o == CLOTH || o == SURFACE) continue;   // env / auto / Java side
+                if (o == TURNIP || o == TURNIP_BUILD || o == CLOTH) continue;   // env / auto keys
                 if (o == DRIVER) {
                     int d = get(DRIVER);
                     if (d == 1) sb.append("vulkan_driver = system\n");

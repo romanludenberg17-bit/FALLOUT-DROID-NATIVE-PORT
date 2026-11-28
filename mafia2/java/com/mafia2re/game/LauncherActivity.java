@@ -41,7 +41,7 @@ import java.util.Locale;
  * folder, the game starts".
  */
 public class LauncherActivity extends Activity {
-    static final String VERSION = "1.2.2";
+    static final String VERSION = "1.2.3";
     static final String EXTRA_AUTOSTART = "remaf2.autostart";
     private static final int REQ_TREE = 41;
     private static final int TAB_PLAY = 0, TAB_SETTINGS = 1, TAB_CONTROLS = 2, TAB_FILES = 3, TAB_ABOUT = 4;
@@ -709,7 +709,6 @@ public class LauncherActivity extends Activity {
                         + "• Всё приложение на русском.\n"
                         + "• Если игра закрылась при запуске — лаунчер предложит отправить лог.\n"
                         + "• Adreno 8xx: новая сборка Turnip и режим совместимости (sysmem + noubwc) — сами.\n"
-                        + "• Буфер экрана с шириной, кратной 256 px: против полос на Adreno 8xx и быстрее на всех.\n"
                         + "• Перезапуск игры из меню порта больше не теряет папку игры; логи DXVK в «Отправить лог».\n"
                         + "• Профили для Helio G85/G99/G100 и Mali: 480p в «Скорости» на Mali-G52, анизотропия, ткань APEX.\n"
                         + "• Профили памяти 4 и 6 ГБ: ограничение текстур, срез мипов, 16-бит распаковка DXT на Mali.\n"
