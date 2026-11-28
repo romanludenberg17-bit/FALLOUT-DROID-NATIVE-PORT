@@ -388,6 +388,21 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         menuMode = MENU_PENDING;
     }
 
+    static final long SKIP_SHOW_MS = 4000;
+
+    /** Cutscenes (videos and in-engine scenes) are skipped with Esc, as in the PC game. */
+    private void skip() {
+        tapKey(ControlLayout.K_ESC);
+        skipShownUntil = 0;
+        skipChip.setEmpty();
+        buzz();
+    }
+
+    /** Test hook: as after DEEP_IDLE_MS without touches. */
+    void forceDeepIdle() {
+        idleLevel = DEEP_LEVEL;
+    }
+
     private void buzz() {
         if (vibrate) performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
     }
@@ -791,6 +806,12 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         long now = SystemClock.uptimeMillis();
         lastInteraction = now;
         if (idleLevel < 1f) {
+            // Woken from the second stage (likely an in-engine cutscene, which the port does
+            // not report): the buttons come back together with "Skip" for a few seconds.
+            if (a == MotionEvent.ACTION_DOWN && idleLevel <= DEEP_LEVEL + 0.01f && live && !movie && ctx != ControlLayout.MENU) {
+                skipShownUntil = now + SKIP_SHOW_MS;
+                postInvalidateDelayed(SKIP_SHOW_MS + 50);
+            }
             idleLevel = 1f;   // back at once on any touch
             invalidate();
         }
@@ -801,15 +822,10 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
                 float x = ev.getX(idx), y = ev.getY(idx);
                 if (movieHidden()) {
                     if (now < skipShownUntil && skipChip.contains(x, y)) {
-                        // Bink cutscenes stop on Space / Enter / Esc in the PC game; Space and
-                        // Enter never open a menu.
-                        tapKey(ControlLayout.K_SPACE);
-                        postDelayed(() -> tapKey(ControlLayout.K_ENTER), 120);
-                        skipShownUntil = 0;
-                        buzz();
+                        skip();
                     } else {
-                        skipShownUntil = now + 4000;
-                        postInvalidateDelayed(4050);
+                        skipShownUntil = now + SKIP_SHOW_MS;
+                        postInvalidateDelayed(SKIP_SHOW_MS + 50);
                     }
                     invalidate();
                     return true;
@@ -819,6 +835,11 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
                     ctx = manualCtx;
                     onContextChanged();
                     buzz();
+                    invalidate();
+                    return true;
+                }
+                if (now < skipShownUntil && skipChip.contains(x, y)) {
+                    skip();
                     invalidate();
                     return true;
                 }
@@ -1108,7 +1129,7 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
             if (showFps && !hud.isEmpty() && hiddenAll) drawFps(c, w);
         }
         if (hiddenAll) {
-            if (movie && !editing) drawMovieHint(c, w, h);
+            if (movie && !editing) drawSkip(c, w, h, false);
             return;
         }
         if (!editing && live && showFps && !hud.isEmpty()) drawFps(c, w);
@@ -1154,6 +1175,7 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
             }
         }
         if (editing && selected != null) drawSelection(c, selected);
+        if (!editing && live && !movie) drawSkip(c, w, h, true);
     }
 
     /** Fade towards IDLE_LEVEL after IDLE_MS without touches (smart hide). */
@@ -1276,12 +1298,13 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         c.drawText(s, modeChip.centerX(), modeChip.centerY() + 4.5f * density, text);
     }
 
-    private void drawMovieHint(Canvas c, int w, int h) {
+    /** "Skip" chip: bottom right over a video, bottom centre between the buttons otherwise. */
+    private void drawSkip(Canvas c, int w, int h, boolean centred) {
         if (SystemClock.uptimeMillis() < skipShownUntil) {
             text.setTextSize(14 * density);
             String sk = Ui.t("ПРОПУСТИТЬ  ›", "SKIP  ›");
             float tw = text.measureText(sk);
-            float cx = w - 24 * density - (tw + 36 * density) / 2f, cy = h - 40 * density;
+            float cx = centred ? w / 2f : w - 24 * density - (tw + 36 * density) / 2f, cy = h - 40 * density;
             skipChip.set(cx - tw / 2f - 18 * density, cy - 20 * density, cx + tw / 2f + 18 * density, cy + 20 * density);
             paint.setStyle(Paint.Style.FILL);
             paint.setColor(0xB315110E);

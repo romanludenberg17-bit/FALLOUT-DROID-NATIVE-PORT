@@ -658,9 +658,34 @@ public class M2Test {
         touch(o, MotionEvent.ACTION_DOWN, 0, sk.centerX(), sk.centerY());
         touch(o, MotionEvent.ACTION_UP, 0, sk.centerX(), sk.centerY());
         ShadowLooper.idleMainLooper(400, java.util.concurrent.TimeUnit.MILLISECONDS);
-        assertTrue(SDLActivity.events.toString(), SDLActivity.events.contains("down 62"));
-        assertTrue(SDLActivity.events.toString(), SDLActivity.events.contains("down 66"));
+        assertTrue(SDLActivity.events.toString(), SDLActivity.events.contains("down 111"));   // Esc
+        assertTrue(SDLActivity.events.toString(), SDLActivity.events.contains("up 111"));
         TouchControls.state = 8 | 1;
+    }
+
+    @Test
+    public void skipAfterLongIdleForEngineCutscenes() throws Exception {
+        ActivityController<M2GameActivity> c = game();
+        View root = c.get().getWindow().getDecorView();
+        ControlsOverlay o = find(root, ControlsOverlay.class);
+        ShadowLooper.idleMainLooper(300, java.util.concurrent.TimeUnit.MILLISECONDS);
+        o.forceDeepIdle();
+        float lx = o.getWidth() * 0.6f, ly = o.getHeight() * 0.3f;
+        touch(o, MotionEvent.ACTION_DOWN, 0, lx, ly);
+        touch(o, MotionEvent.ACTION_UP, 0, lx, ly);
+        shot(root, "18b_engine_cutscene_skip");
+        android.graphics.RectF sk = o.skipRect();
+        assertFalse(sk.isEmpty());
+        for (ControlLayout.Element e : o.layout.all) {
+            if (!o.isVisible(e)) continue;
+            float nx = Math.max(sk.left, Math.min(e.cx, sk.right)), ny = Math.max(sk.top, Math.min(e.cy, sk.bottom));
+            assertTrue(e.id, Math.hypot(e.cx - nx, e.cy - ny) >= e.r);
+        }
+        SDLActivity.events.clear();
+        touch(o, MotionEvent.ACTION_DOWN, 0, sk.centerX(), sk.centerY());
+        touch(o, MotionEvent.ACTION_UP, 0, sk.centerX(), sk.centerY());
+        ShadowLooper.idleMainLooper(200, java.util.concurrent.TimeUnit.MILLISECONDS);
+        assertEquals("[down 111, up 111]", SDLActivity.events.toString());
     }
 
     @Test
