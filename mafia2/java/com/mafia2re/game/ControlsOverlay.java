@@ -253,7 +253,7 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         try {
             float fps = TouchControls.nativeFps();
             hud = String.format(Locale.ROOT, "%.0f FPS  ·  %.1f ms  ·  %d MB", fps, TouchControls.nativeFrameMs(), TouchControls.nativeMemoryMiB());
-            hudColor = fps >= 50 ? Ui.GREEN : fps >= 28 ? Ui.AMBER : Ui.RED;
+            hudColor = fps >= 50 ? Ui.GREEN : fps >= 28 ? 0xFFE0B24A : Ui.RED;
         } catch (Throwable t) {
             hud = "";
         }
@@ -400,8 +400,22 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
     }
 
     // ------------------------------------------------------------------ stick
+    //
+    // Shooter-style stick: floating base where the thumb lands; pushing it forward to the edge
+    // sprints (W + Shift); sliding further up onto the lock above the stick and letting go
+    // locks the sprint (auto-run) until the stick is touched again.
+
+    /** Lock target above the stick, in stick radii from the base centre. */
+    static final float LOCK_DIST = 1.85f, LOCK_R = 0.32f;
+
+    private boolean runLocked, lockArmed;
+
+    boolean runLocked() {
+        return runLocked;
+    }
 
     private void startStick(float x, float y) {
+        if (runLocked) cancelRunLock();
         ControlLayout.Element s = layout.stick;
         if (fixedStick) {
             stickX = s.cx;
@@ -409,55 +423,85 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         } else {
             float m = s.r * 0.9f;
             stickX = Math.max(m, Math.min(getWidth() * 0.5f, x));
-            stickY = Math.max(m, Math.min(getHeight() - m, y));
+            stickY = Math.max(m + s.r * (LOCK_DIST + LOCK_R) * 0.6f, Math.min(getHeight() - m, y));
         }
         updateStick(x, y);
     }
 
-    private void updateStick(float x, float y) {
-        float r = layout.stick.r;
-        float dx = x - stickX, dy = y - stickY;
-        float d = (float) Math.hypot(dx, dy);
-        if (d > r) {
-            dx *= r / d;
-            dy *= r / d;
-        }
-        knobX = stickX + dx;
-        knobY = stickY + dy;
-        float nx = dx / r, ny = dy / r, mag = Math.min(1f, d / r);
-        boolean[] want = new boolean[4];
-        if (mag > 0.22f) {
-            // 8-way with generous diagonals: a key is held when its axis share is above sin(22.5°).
-            float ax = nx / mag, ay = ny / mag;
-            want[0] = ay < -0.38f;
-            want[2] = ay > 0.38f;
-            want[1] = ax < -0.38f;
-            want[3] = ax > 0.38f;
-        }
+    private void setDirs(boolean w, boolean a, boolean s, boolean d) {
+        boolean[] want = {w, a, s, d};
         for (int i = 0; i < 4; i++) {
             if (want[i] != dirDown[i]) {
                 dirDown[i] = want[i];
                 key(DIR_KEYS[i], want[i]);
             }
         }
-        boolean er = autoRun && ctx == ControlLayout.FOOT && d > r * 0.94f;
-        if (er != edgeRun) {
-            edgeRun = er;
-            if (er) buzz();
+    }
+
+    private void updateStick(float x, float y) {
+        float r = layout.stick.r;
+        float dx = x - stickX, dy = y - stickY;
+        float d = (float) Math.hypot(dx, dy);
+        float kx = dx, ky = dy;
+        if (d > r) {
+            kx *= r / d;
+            ky *= r / d;
+        }
+        knobX = stickX + kx;
+        knobY = stickY + ky;
+        float mag = Math.min(1f, d / r);
+        float ax = d > 0 ? dx / d : 0, ay = d > 0 ? dy / d : 0;
+        if (mag > 0.2f) {
+            // 8-way with generous diagonals: a key is held when its axis share is above sin(22.5°).
+            setDirs(ay < -0.38f, ax < -0.38f, ay > 0.38f, ax > 0.38f);
+        } else {
+            setDirs(false, false, false, false);
+        }
+        // Sprint: pushed to the edge and pointing forward (within ~45° of straight up).
+        boolean sprint = autoRun && ctx == ControlLayout.FOOT && d > r * 0.92f && ay < -0.7f;
+        if (sprint != edgeRun) {
+            edgeRun = sprint;
+            if (sprint) buzz();
             updateRun();
+        }
+        boolean armed = sprint && Math.abs(x - stickX) < r * 0.8f && y < stickY - r * (LOCK_DIST - LOCK_R - 0.1f);
+        if (armed != lockArmed) {
+            lockArmed = armed;
+            if (armed) performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
         }
     }
 
-    private void releaseStick() {
-        for (int i = 0; i < 4; i++) {
-            if (dirDown[i]) {
-                dirDown[i] = false;
-                key(DIR_KEYS[i], false);
-            }
+    /** Thumb lifted off the stick: lock the sprint if it was released on the lock. */
+    private void stickUp() {
+        if (lockArmed && ctx == ControlLayout.FOOT) {
+            lockArmed = false;
+            runLocked = true;
+            setDirs(true, false, false, false);
+            edgeRun = false;
+            updateRun();
+            buzz();
+            ControlLayout.Element s = layout.stick;
+            stickX = knobX = s.cx;
+            stickY = s.cy;
+            knobY = s.cy - s.r;
+            return;
         }
+        releaseStick();
+    }
+
+    private void cancelRunLock() {
+        runLocked = false;
+        setDirs(false, false, false, false);
+        updateRun();
+    }
+
+    private void releaseStick() {
+        runLocked = false;
+        lockArmed = false;
+        setDirs(false, false, false, false);
         edgeRun = false;
         if (sprintLatched) {
-            // Sprint lock ends when the thumb leaves the stick, like a real sprint toggle.
+            // Sprint toggle ends when the thumb leaves the stick, like in shooters.
             sprintLatched = false;
             for (ControlLayout.Element e : layout.all) if (e.kind == ControlLayout.Kind.RUN) e.latched = false;
         }
@@ -470,7 +514,7 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
     private boolean shiftHeld;
 
     private void updateRun() {
-        boolean want = live && (sprintLatched || edgeRun) && ctx == ControlLayout.FOOT;
+        boolean want = live && (sprintLatched || edgeRun || runLocked) && ctx == ControlLayout.FOOT;
         if (want != shiftHeld) {
             shiftHeld = want;
             key(ControlLayout.K_SHIFT, want);
@@ -700,7 +744,7 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
                         }
                         break;
                     case ROLE_STICK:
-                        releaseStick();
+                        stickUp();
                         break;
                     case ROLE_MENU:
                         mouseTo(ev.getX(idx), ev.getY(idx));
@@ -943,7 +987,7 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         paint.setColor(0x14FFFFFF);
         for (float x = g; x < w; x += g) c.drawLine(x, 0, x, h, paint);
         for (float y = g; y < h; y += g) c.drawLine(0, y, w, y, paint);
-        paint.setColor(0x26E0A63E);
+        paint.setColor(0x26D9322F);
         c.drawLine(w / 2f, 0, w / 2f, h, paint);
         c.drawLine(0, h / 2f, w, h / 2f, paint);
         paint.setStyle(Paint.Style.FILL);
@@ -959,7 +1003,7 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         c.drawRoundRect(modeChip, 15 * density, 15 * density, paint);
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(density);
-        paint.setColor(Ui.alpha(Ui.AMBER, 0.7f));
+        paint.setColor(Ui.alpha(Ui.ACCENT, 0.7f));
         c.drawRoundRect(modeChip, 15 * density, 15 * density, paint);
         paint.setStyle(Paint.Style.FILL);
         text.setColor(Ui.IVORY);
@@ -989,7 +1033,7 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         float r = e.r + 7 * density;
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(2 * density);
-        paint.setColor(Ui.AMBER);
+        paint.setColor(Ui.ACCENT);
         paint.setPathEffect(dash);
         c.drawCircle(e.cx, e.cy, r, paint);
         paint.setPathEffect(null);
@@ -1001,29 +1045,89 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         }
     }
 
+    private final RectF arcBox = new RectF();
+    private final RectF pill = new RectF();
+
     private void drawStick(Canvas c, ControlLayout.Element e, float a) {
         boolean active = !editing && touchOf(ROLE_STICK) != null;
-        float bx = editing || !active ? e.cx : stickX;
-        float by = editing || !active ? e.cy : stickY;
-        float kx = editing || !active ? bx : knobX, ky = editing || !active ? by : knobY;
-        float idle = active || editing ? 1f : (fixedStick ? 0.85f : 0.45f);
-        boolean running = edgeRun || sprintLatched;
-        Bitmap base = stickBase(e.r, running);
-        blit.setAlpha(Math.round(Math.min(1f, a * idle) * 255));
+        boolean locked = !editing && runLocked;
+        float r = e.r;
+        float bx = active || locked ? stickX : e.cx;
+        float by = active || locked ? stickY : e.cy;
+        float kx = active || locked ? knobX : bx, ky = active || locked ? knobY : by;
+        float idle = active || locked || editing ? 1f : (fixedStick ? 0.8f : 0.45f);
+        float aa = Math.min(1f, a * idle);
+
+        // Sprint track with the lock, while sprinting or locked.
+        if ((active && edgeRun) || locked) drawLockTrack(c, bx, by, r, aa, lockArmed || locked);
+
+        Bitmap base = stickBase(r);
+        blit.setAlpha(Math.round(aa * 255));
         c.drawBitmap(base, bx - base.getWidth() / 2f, by - base.getHeight() / 2f, blit);
-        Bitmap knob = stickKnob(e.r * 0.4f, active);
-        blit.setAlpha(Math.round(Math.min(1f, a * idle * 0.95f + 0.1f) * 255));
+        // Direction arc on the ring; the whole ring turns red while sprinting.
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeCap(Paint.Cap.ROUND);
+        if ((active && edgeRun) || locked) {
+            paint.setStrokeWidth(2.5f * density);
+            paint.setColor(Ui.alpha(Ui.ACCENT, 0.95f * aa));
+            c.drawCircle(bx, by, r - density, paint);
+        } else if (active) {
+            float dx = kx - bx, dy = ky - by;
+            if (Math.hypot(dx, dy) > r * 0.2f) {
+                float deg = (float) Math.toDegrees(Math.atan2(dy, dx));
+                paint.setStrokeWidth(3.5f * density);
+                paint.setColor(Ui.alpha(Ui.ACCENT, 0.95f * aa));
+                arcBox.set(bx - r + density, by - r + density, bx + r - density, by + r - density);
+                c.drawArc(arcBox, deg - 28, 56, false, paint);
+            }
+        }
+        paint.setStyle(Paint.Style.FILL);
+        Bitmap knob = stickKnob(r * 0.38f);
+        blit.setAlpha(Math.round(Math.min(1f, aa * 0.95f + 0.05f) * 255));
         c.drawBitmap(knob, kx - knob.getWidth() / 2f, ky - knob.getHeight() / 2f, blit);
-        if (running && active) {
-            text.setTextSize(10 * density);
-            text.setColor(Ui.AMBER);
-            c.drawText(Ui.t("БЕГ", "SPRINT"), bx, by - e.r - 8 * density, text);
+    }
+
+    /** Compact sprint lock: a small padlock bubble above the stick on a thin guide line. */
+    private void drawLockTrack(Canvas c, float bx, float by, float r, float a, boolean lit) {
+        float lockY = by - r * LOCK_DIST, lr = r * LOCK_R;
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeCap(Paint.Cap.ROUND);
+        paint.setStrokeWidth(2f * density);
+        paint.setColor(Ui.alpha(lit ? Ui.ACCENT : 0xFFFFFFFF, (lit ? 0.9f : 0.35f) * a));
+        c.drawLine(bx, by - r * 1.02f, bx, lockY + lr, paint);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(lit ? Ui.alpha(Ui.ACCENT, a) : Ui.alpha(0xFF151517, 0.8f * a));
+        c.drawCircle(bx, lockY, lr, paint);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(1.2f * density);
+        paint.setColor(Ui.alpha(0xFFFFFFFF, (lit ? 0.8f : 0.4f) * a));
+        c.drawCircle(bx, lockY, lr, paint);
+        paint.setStyle(Paint.Style.FILL);
+        Bitmap lock = glyph(lit ? "lock" : "unlock", lr * 0.6f);
+        blit.setAlpha(Math.round(a * 255));
+        c.drawBitmap(lock, bx - lock.getWidth() / 2f, lockY - lock.getHeight() / 2f, blit);
+        if (runLocked && !editing) {
+            text.setTextSize(9 * density);
+            text.setColor(Ui.alpha(Ui.IVORY, 0.85f * a));
+            c.drawText("АВТОБЕГ", bx, lockY - lr - 5 * density, text);
         }
     }
 
-    /** Stick base: smoked glass with a compass ring (amber while sprinting). Cached per size. */
-    private Bitmap stickBase(float r, boolean running) {
-        String k = "stick" + (running ? "+" : "-") + Math.round(r);
+    /** A white glyph of half-size {@code half} px as a cached bitmap. */
+    private Bitmap glyph(String name, float half) {
+        String k = "g:" + name + Math.round(half);
+        Bitmap b = cache.get(k);
+        if (b != null) return b;
+        int size = Math.max(2, Math.round(half * 2));
+        b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Glyphs.draw(getContext(), new Canvas(b), name, size / 2f, size / 2f, half, 0xFFFFFFFF);
+        cache.put(k, b);
+        return b;
+    }
+
+    /** Stick base: thin ring over a faint smoked disc with four ticks. Cached per size. */
+    private Bitmap stickBase(float r) {
+        String k = "stick" + Math.round(r);
         Bitmap b = cache.get(k);
         if (b != null) return b;
         int size = (int) Math.ceil(r * 2 + 4 * density);
@@ -1031,46 +1135,44 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         Canvas c = new Canvas(b);
         float cx = size / 2f, cy = size / 2f;
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        p.setShader(new RadialGradient(cx, cy, r, 0x8C1C1712, 0x590C0A08, Shader.TileMode.CLAMP));
+        p.setShader(new RadialGradient(cx, cy, r, 0x66141416, 0x400A0A0B, Shader.TileMode.CLAMP));
         c.drawCircle(cx, cy, r, p);
         p.setShader(null);
         p.setStyle(Paint.Style.STROKE);
-        p.setStrokeWidth(1.6f * density);
-        p.setColor(running ? Ui.AMBER : Ui.alpha(Ui.IVORY, 0.5f));
+        p.setStrokeWidth(1.5f * density);
+        p.setColor(0x66FFFFFF);
         c.drawCircle(cx, cy, r - density, p);
-        p.setStrokeWidth(1.2f * density);
-        p.setColor(Ui.alpha(Ui.IVORY, 0.35f));
-        c.drawCircle(cx, cy, r * 0.62f, p);
         p.setStrokeCap(Paint.Cap.ROUND);
-        for (int i = 0; i < 8; i++) {
-            double ang = i * Math.PI / 4 - Math.PI / 2;
-            boolean main = i % 2 == 0;
-            float r1 = r * (main ? 0.78f : 0.84f), r2 = r * 0.93f;
-            p.setColor(main ? Ui.alpha(Ui.AMBER, 0.8f) : Ui.alpha(Ui.IVORY, 0.4f));
-            p.setStrokeWidth((main ? 2.2f : 1.2f) * density);
-            c.drawLine(cx + (float) Math.cos(ang) * r1, cy + (float) Math.sin(ang) * r1, cx + (float) Math.cos(ang) * r2, cy + (float) Math.sin(ang) * r2, p);
+        p.setStrokeWidth(2f * density);
+        p.setColor(0x80FFFFFF);
+        for (int i = 0; i < 4; i++) {
+            double ang = i * Math.PI / 2 - Math.PI / 2;
+            c.drawLine(cx + (float) Math.cos(ang) * r * 0.8f, cy + (float) Math.sin(ang) * r * 0.8f,
+                    cx + (float) Math.cos(ang) * r * 0.88f, cy + (float) Math.sin(ang) * r * 0.88f, p);
         }
         cache.put(k, b);
         return b;
     }
 
-    private Bitmap stickKnob(float kr, boolean active) {
-        String k = "knob" + (active ? "+" : "-") + Math.round(kr);
+    private Bitmap stickKnob(float kr) {
+        String k = "knob" + Math.round(kr);
         Bitmap b = cache.get(k);
         if (b != null) return b;
-        int size = (int) Math.ceil(kr * 2 + 4 * density);
+        float pad = 5 * density;
+        int size = (int) Math.ceil(kr * 2 + pad * 2);
         b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(b);
         float cx = size / 2f, cy = size / 2f;
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        p.setShader(new RadialGradient(cx - kr * 0.3f, cy - kr * 0.3f, kr * 1.3f,
-                active ? 0xFFF3C46A : 0xFF4A3D2E, active ? 0xFFB97F25 : 0xFF1B1611, Shader.TileMode.CLAMP));
+        p.setShader(new RadialGradient(cx, cy + kr * 0.1f, kr + pad, new int[]{0x66000000, 0x00000000}, new float[]{0.75f, 1f}, Shader.TileMode.CLAMP));
+        c.drawCircle(cx, cy, kr + pad, p);
+        p.setShader(new RadialGradient(cx - kr * 0.25f, cy - kr * 0.3f, kr * 1.4f, 0xF2FFFFFF, 0xD9C9C6C2, Shader.TileMode.CLAMP));
         c.drawCircle(cx, cy, kr, p);
         p.setShader(null);
         p.setStyle(Paint.Style.STROKE);
-        p.setStrokeWidth(1.4f * density);
-        p.setColor(active ? 0xB3FFE2A6 : Ui.alpha(Ui.IVORY, 0.7f));
-        c.drawCircle(cx, cy, kr - 0.7f * density, p);
+        p.setStrokeWidth(1.2f * density);
+        p.setColor(0x33000000);
+        c.drawCircle(cx, cy, kr * 0.62f, p);
         cache.put(k, b);
         return b;
     }
@@ -1087,34 +1189,31 @@ final class ControlsOverlay extends View implements SensorEventListener, InputMa
         float cx = size / 2f, cy = size / 2f, r = e.r;
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         // Soft drop shadow.
-        p.setShader(new RadialGradient(cx, cy + r * 0.06f, r + pad, new int[]{0x66000000, 0x33000000, 0x00000000}, new float[]{0.7f, 0.88f, 1f}, Shader.TileMode.CLAMP));
+        p.setShader(new RadialGradient(cx, cy + r * 0.06f, r + pad, new int[]{0x73000000, 0x33000000, 0x00000000}, new float[]{0.7f, 0.88f, 1f}, Shader.TileMode.CLAMP));
         c.drawCircle(cx, cy, r + pad, p);
         if (pressed) {
-            // Lit: amber lamp glass.
-            p.setShader(new RadialGradient(cx, cy - r * 0.35f, r * 1.4f, new int[]{0xFFFFD98C, 0xFFE0A63E, 0xFF9A6418}, new float[]{0, 0.55f, 1}, Shader.TileMode.CLAMP));
+            p.setShader(new RadialGradient(cx, cy - r * 0.35f, r * 1.4f, new int[]{0xFFF2605A, 0xFFD9322F, 0xFF8A1416}, new float[]{0, 0.55f, 1}, Shader.TileMode.CLAMP));
             c.drawCircle(cx, cy, r, p);
-            p.setShader(null);
         } else {
-            // Smoked glass.
-            p.setShader(new RadialGradient(cx, cy - r * 0.4f, r * 1.5f, new int[]{0xD82E261E, 0xC8181410, 0xB00B0907}, new float[]{0, 0.6f, 1}, Shader.TileMode.CLAMP));
+            p.setShader(new RadialGradient(cx, cy - r * 0.4f, r * 1.5f, new int[]{0xD82A2A2D, 0xC8161618, 0xB0080809}, new float[]{0, 0.6f, 1}, Shader.TileMode.CLAMP));
             c.drawCircle(cx, cy, r, p);
-            // Glass highlight on the upper half.
-            p.setShader(new LinearGradient(0, cy - r, 0, cy, 0x22FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
+            p.setShader(new LinearGradient(0, cy - r, 0, cy, 0x1FFFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
             c.drawOval(new RectF(cx - r * 0.78f, cy - r * 0.92f, cx + r * 0.78f, cy - r * 0.05f), p);
-            p.setShader(null);
         }
-        // Rings: a fine ivory edge and an art-deco amber arc across the top.
+        p.setShader(null);
         p.setStyle(Paint.Style.STROKE);
-        p.setStrokeWidth(1.5f * density);
-        p.setColor(pressed ? 0xFFFFE7B3 : 0x8CF0E6D2);
-        c.drawCircle(cx, cy, r - 0.75f * density, p);
-        p.setStrokeWidth(2.2f * density);
-        p.setStrokeCap(Paint.Cap.ROUND);
-        p.setColor(pressed ? 0xFF6B4510 : 0xCCE0A63E);
-        float ar = r - 4.5f * density;
-        c.drawArc(new RectF(cx - ar, cy - ar, cx + ar, cy + ar), 235, 70, false, p);
-        p.setStyle(Paint.Style.FILL);
-        Glyphs.draw(c, e.glyph, cx, cy + (e.glyph.equals("fire") ? r * 0.04f : 0), r * 0.46f, pressed ? Ui.INK : Ui.IVORY, p);
+        p.setStrokeWidth(1.4f * density);
+        p.setColor(pressed ? 0xCCFFFFFF : 0x73FFFFFF);
+        c.drawCircle(cx, cy, r - 0.7f * density, p);
+        if (!pressed) {
+            // A short red arc on top: the ReMaf2 accent.
+            p.setStrokeWidth(2.2f * density);
+            p.setStrokeCap(Paint.Cap.ROUND);
+            p.setColor(0xE6D9322F);
+            float ar = r - 4 * density;
+            c.drawArc(new RectF(cx - ar, cy - ar, cx + ar, cy + ar), 245, 50, false, p);
+        }
+        Glyphs.draw(getContext(), c, e.glyph, cx, cy, r * 0.5f, 0xFFFFFFFF);
         cache.put(k, b);
         return b;
     }

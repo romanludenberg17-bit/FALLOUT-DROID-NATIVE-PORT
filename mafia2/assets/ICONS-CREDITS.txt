@@ -1,0 +1,28 @@
+Иконки кнопок: game-icons.net, лицензия CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/)
+
+action     lorc/pointing.svg — Lorc
+aim        delapouite/crosshair.svg — Delapouite
+back       delapouite/plain-arrow.svg — Delapouite
+brake      delapouite/stop-sign.svg — Delapouite
+car_in     delapouite/car-door.svg — Delapouite
+car_out    delapouite/exit-door.svg — Delapouite
+cover      delapouite/brick-wall.svg — Delapouite
+fire       lorc/bullets.svg — Lorc
+gas        delapouite/gas-pump.svg — Delapouite
+gear       lorc/cog.svg — Lorc
+grenade    lorc/grenade.svg — Lorc
+handbrake  delapouite/tire-tracks.svg — Delapouite
+horn       delapouite/megaphone.svg — Delapouite
+jump       delapouite/jump-across.svg — Delapouite
+limiter    delapouite/speedometer.svg — Delapouite
+lock       delapouite/plain-padlock.svg — Delapouite
+map        delapouite/position-marker.svg — Delapouite
+ok         delapouite/check-mark.svg — Delapouite
+pause      guard13007/pause-button.svg — Guard13007
+punch      lorc/fist.svg — Lorc
+reload     delapouite/reload-gun-barrel.svg — Delapouite
+run        lorc/run.svg — Lorc
+unlock     delapouite/padlock-open.svg — Delapouite
+weapon     skoll/thompson-m1928.svg — Skoll
+crouch     иконка автора ReMaf2
+telegram   собственный рисунок

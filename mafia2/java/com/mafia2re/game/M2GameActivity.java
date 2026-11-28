@@ -111,7 +111,7 @@ public class M2GameActivity extends GameActivity implements ControlsOverlay.List
 
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(Ui.round(0xF215110E, 0x50E0A63E, 1, 12, this));
+        card.setBackground(Ui.round(0xF215110E, 0x55D9322F, 1, 12, this));
         card.setPadding(dp(22), dp(16), dp(22), dp(16));
         card.setClickable(true);
 
@@ -193,12 +193,12 @@ public class M2GameActivity extends GameActivity implements ControlsOverlay.List
         host.removeAllViews();
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(Ui.round(0xF215110E, 0x50E0A63E, 1, 12, this));
+        card.setBackground(Ui.round(0xF215110E, 0x55D9322F, 1, 12, this));
         card.setPadding(dp(24), dp(20), dp(24), dp(18));
         card.setClickable(true);
         card.addView(Ui.text(this, Ui.t("Выйти в лаунчер?", "Quit to the launcher?"), 22, Ui.IVORY, Ui.head(this)));
         TextView m = Ui.text(this, Ui.t("Несохранённый прогресс будет потерян. Игра сохраняется в начале глав.",
-                "Unsaved progress is lost. The game saves at the start of chapters."), 15, 0xFFCFC4B2, Ui.body(this));
+                "Unsaved progress is lost. The game saves at the start of chapters."), 15, 0xFFD4D0CA, Ui.body(this));
         m.setPadding(0, dp(10), 0, dp(16));
         card.addView(m);
         LinearLayout b = new LinearLayout(this);

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Squatting man (icon supplied by the ReMaf2 author), traced as a vector. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp" android:height="64dp" android:viewportWidth="1200" android:viewportHeight="1200">
+  <group android:translateX="-62">
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M600,0 C673,0 732,59 732,132 C732,205 673,264 600,264 C527,264 468,205 468,132 C468,59 527,0 600,0 Z"/>
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M498,312 L1030,312 C1058,312 1080,334 1080,360 C1080,386 1058,408 1030,408 L657,408 L515,720 L680,720 C735,720 768,776 745,825 L588,1160 C570,1196 520,1210 485,1190 C458,1174 448,1138 462,1105 L570,863 L340,863 C268,863 222,792 253,730 L410,370 C426,335 460,312 498,312 Z"/>
+  </group>
+</vector>

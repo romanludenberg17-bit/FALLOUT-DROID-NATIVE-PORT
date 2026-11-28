@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Mafia II Droid: build, verify and sign in one command.
+"""ReMaf2 (Mafia II Droid): build, verify and sign in one command.
 
     python3 mafia2/build_m2.py [--apk path/to/original.apk]
 
 Takes the original port APK (VinTeRuS, com.mafia2re.game) and produces
-mafia2/output/Mafia II Droid <version>.apk:
+mafia2/output/ReMaf2 <version>.apk:
   * classes.dex and lib/arm64-v8a/* are taken from the original unchanged;
   * classes2.dex is our launcher / controls / editor (java/), compiled with javac + d8;
   * manifest, icons, fonts come from this folder (aapt2);
@@ -19,8 +19,8 @@ import sys
 import tempfile
 import zipfile
 
-VERSION_NAME = "1.0.0"
-VERSION_CODE = 1
+VERSION_NAME = "1.1.0"
+VERSION_CODE = 2
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SDK = os.environ.get("ANDROID_HOME", "/opt/android-sdk")
@@ -147,7 +147,7 @@ def main():
     unsigned = os.path.join(build, "unsigned.apk")
     assemble(a.apk, base, dex2, unsigned)
     os.makedirs(os.path.join(HERE, "output"), exist_ok=True)
-    out = os.path.join(HERE, "output", "Mafia II Droid %s.apk" % VERSION_NAME)
+    out = os.path.join(HERE, "output", "ReMaf2 %s.apk" % VERSION_NAME)
     sign(unsigned, out)
     verify(out)
     print("OK -> %s (%.1f MB)" % (out, os.path.getsize(out) / 1e6))

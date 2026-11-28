@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Paper plane (own drawing, ReMaf2) for the Telegram link. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp" android:height="64dp" android:viewportWidth="512" android:viewportHeight="512">
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M470,58 L38,232 C22,239 23,262 40,267 L148,300 L190,430 C195,446 215,450 226,438 L288,372 L396,452 C410,462 430,455 434,438 L494,84 C498,64 488,51 470,58 Z M190,312 L398,152 L222,338 L212,398 Z"/>
+</vector>

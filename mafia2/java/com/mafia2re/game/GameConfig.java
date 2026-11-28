@@ -80,7 +80,7 @@ final class GameConfig {
             "Снижает нагрузку в меню и на паузе.", "Lowers the load in menus and while paused.");
     static final Option DRIVER = new Option("vulkan_driver", "Драйвер Vulkan", "Vulkan driver",
             s("Авто", "Системный", "Turnip"), s("Auto", "System", "Turnip"), v(0, 1, 2), true,
-            "Turnip — только Adreno. Mali, Xclipse, PowerVR — системный.", "Turnip is Adreno-only. Mali, Xclipse, PowerVR use the system driver.");
+            "Если картинка в полосах или мусоре — выберите «Системный». Turnip работает только на Adreno 6xx/7xx.", "");
     static final Option VOICE = new Option("game_voice", "Озвучка", "Voice",
             s("Русская", "Английская"), s("Russian", "English"), v(0, 1), true,
             "Английской нужна папка pc/sds_ru_en.", "English needs pc/sds_ru_en.");
@@ -104,11 +104,12 @@ final class GameConfig {
     static final Option STICK = new Option("ui_stick_mode", "Стик", "Stick",
             s("Плавающий", "Фиксированный"), s("Floating", "Fixed"), v(0, 1), false,
             "Плавающий появляется там, где коснулись левой половины экрана.", "Floating appears wherever you touch the left half.");
-    static final Option AUTORUN = new Option("ui_stick_run", "Бег от края стика", "Run at stick edge",
-            s("Выкл", "Вкл"), s("Off", "On"), v(0, 1), false, "", "");
+    static final Option AUTORUN = new Option("ui_stick_run", "Автобег от стика", "Stick sprint",
+            s("Выкл", "Вкл"), s("Off", "On"), v(0, 1), false,
+            "Стик вперёд до упора — бег. Дотяните до замка и отпустите — бег зафиксируется.", "");
     static final Option FIRE_LOOK = new Option("ui_fire_look", "Обзор с кнопки огня", "Look while firing",
             s("Выкл", "Вкл"), s("Off", "On"), v(0, 1), false,
-            "Палец на «Огонь» одновременно ведёт камеру.", "The finger on Fire also steers the camera.");
+            "Палец на «Огне» одновременно ведёт камеру.", "");
     static final Option VIBRATE = new Option("ui_vibrate", "Вибрация", "Vibration",
             s("Выкл", "Вкл"), s("Off", "On"), v(0, 1), false, "", "");
     static final Option SHOW_FPS = new Option("ui_fps", "Счётчик FPS", "FPS counter",
@@ -187,7 +188,12 @@ final class GameConfig {
     void ensureDefaults(DeviceProfile dp) {
         if (prefs.getInt("graphics_mode", -1) < 0) {
             applyMode(dp.tier, dp.tier == DeviceProfile.TIER_LOW ? MODE_SPEED : MODE_BALANCE);
-            set(DRIVER, 0);
+            set(DRIVER, dp.adrenoModel() >= 800 ? 1 : 0);
+        }
+        if (prefs.getInt("defaults_v", 1) < 2) {
+            // 1.0.0 left "Auto" on Adreno 8xx, where Turnip draws garbage.
+            if (dp.adrenoModel() >= 800 && get(DRIVER) == 0) set(DRIVER, 1);
+            prefs.edit().putInt("defaults_v", 2).apply();
         }
     }
 

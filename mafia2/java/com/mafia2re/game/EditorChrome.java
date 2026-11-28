@@ -65,7 +65,7 @@ final class EditorChrome extends FrameLayout implements ControlsOverlay.Listener
             onDone.run();
         });
         done.setTextColor(Ui.INK);
-        done.setBackground(Ui.ripple(Ui.round(Ui.AMBER, 0, 0, 16, c), 0x55FFFFFF));
+        done.setBackground(Ui.ripple(Ui.round(Ui.ACCENT, 0, 0, 16, c), 0x55FFFFFF));
         top.addView(done);
         LayoutParams tlp = new LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
         tlp.topMargin = Ui.dp(c, 10);
@@ -73,7 +73,7 @@ final class EditorChrome extends FrameLayout implements ControlsOverlay.Listener
 
         // ---- bottom: selection tools or a hint
         selBar = bar(c);
-        selName = Ui.text(c, "", 15, Ui.AMBER, Ui.head(c));
+        selName = Ui.text(c, "", 15, Ui.ACCENT, Ui.head(c));
         selName.setPadding(Ui.dp(c, 8), 0, Ui.dp(c, 12), 0);
         selBar.addView(selName);
         selBar.addView(label(c, Ui.t("Размер", "Size")));
@@ -123,7 +123,7 @@ final class EditorChrome extends FrameLayout implements ControlsOverlay.Listener
         t.setGravity(Gravity.CENTER);
         t.setMinWidth(Ui.dp(c, 36));
         t.setPadding(Ui.dp(c, 12), Ui.dp(c, 8), Ui.dp(c, 12), Ui.dp(c, 8));
-        t.setBackground(Ui.ripple(Ui.round(0, 0, 0, 16, c), 0x33E0A63E));
+        t.setBackground(Ui.ripple(Ui.round(0, 0, 0, 16, c), 0x40D9322F));
         t.setOnClickListener(l);
         return t;
     }
@@ -154,14 +154,14 @@ final class EditorChrome extends FrameLayout implements ControlsOverlay.Listener
         Context c = getContext();
         for (int i = 0; i < 3; i++) {
             boolean on = ctxIds[i] == ctx;
-            ctxTabs[i].setTextColor(on ? Ui.INK : Ui.IVORY);
-            ctxTabs[i].setBackground(Ui.ripple(on ? Ui.round(0xFFF0E6D2, 0, 0, 16, c) : Ui.round(0, 0, 0, 16, c), 0x33E0A63E));
+            ctxTabs[i].setTextColor(on ? 0xFF111111 : Ui.IVORY);
+            ctxTabs[i].setBackground(Ui.ripple(on ? Ui.round(0xFFF0E6D2, 0, 0, 16, c) : Ui.round(0, 0, 0, 16, c), 0x40D9322F));
         }
     }
 
     private void paintTools() {
         gridBtn.setText((overlay.snap() ? "▦ " : "□ ") + Ui.t("Сетка", "Grid"));
-        gridBtn.setTextColor(overlay.snap() ? Ui.AMBER : Ui.IVORY);
+        gridBtn.setTextColor(overlay.snap() ? Ui.ACCENT : Ui.IVORY);
         undoBtn.setAlpha(overlay.canUndo() ? 1f : 0.4f);
     }
 
@@ -179,7 +179,7 @@ final class EditorChrome extends FrameLayout implements ControlsOverlay.Listener
             sizeVal.setText(Math.round(e.scale * 100) + "%");
             alphaVal.setText(Math.round(e.alpha * 100) + "%");
             hideBtn.setText(e.hidden ? "◉ " + Ui.t("Показать", "Show") : "◌ " + Ui.t("Скрыть", "Hide"));
-            hideBtn.setTextColor(e.hidden ? Ui.AMBER : Ui.IVORY);
+            hideBtn.setTextColor(e.hidden ? Ui.ACCENT : Ui.IVORY);
         }
         paintTools();
     }

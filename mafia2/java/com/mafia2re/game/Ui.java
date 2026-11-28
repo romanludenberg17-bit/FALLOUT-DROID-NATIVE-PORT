@@ -17,56 +17,71 @@ import java.util.Locale;
 
 /** Shared look of the launcher and the in-game panels: warm "Empire Bay" noir with amber. */
 final class Ui {
-    static final int BG = 0xFF0D0B09;
-    static final int CARD = 0xEB15110E;
-    static final int CARD_HI = 0xFF221B15;
-    static final int LINE = 0xFF3A2F24;
-    static final int AMBER = 0xFFE0A63E;
-    static final int AMBER_DEEP = 0xFFB97F25;
-    static final int IVORY = 0xFFF0E6D2;
-    static final int MUTED = 0xFFA39580;
-    static final int DIM = 0xFF6E6354;
-    static final int RED = 0xFFB3362B;
-    static final int GREEN = 0xFF79C27B;
-    static final int INK = 0xFF16110B;
+    // Palette of the ReMaf2 logo: near-black, warm white, blood red.
+    static final int BG = 0xFF0A0909;
+    static final int CARD = 0xE0111012;
+    static final int CARD_HI = 0xFF1C1A1A;
+    static final int LINE = 0xFF2E2A29;
+    static final int ACCENT = 0xFFD9322F;
+    static final int ACCENT_DEEP = 0xFF9A1C1D;
+    static final int IVORY = 0xFFF4F1EC;
+    static final int MUTED = 0xFFA9A39C;
+    static final int DIM = 0xFF726C66;
+    static final int RED = 0xFFE5534B;
+    static final int GREEN = 0xFF6CC47A;
+    static final int INK = 0xFFFFFFFF;      // text and glyphs on the accent colour
 
-    private static Typeface oswald, oswaldBold, playfair;
+    private static Typeface headTf, semiTf, bodyTf, bodyBoldTf;
 
     private Ui() {
     }
 
+    /** The app is Russian-only. Kept as a helper so call sites stay readable. */
     static boolean english() {
-        String l = Locale.getDefault().getLanguage();
-        return !(l.equals("ru") || l.equals("uk") || l.equals("be") || l.equals("kk"));
+        return false;
     }
 
-    /** Russian first, English when the phone is not set to a Russian-reading locale. */
     static String t(String ru, String en) {
-        return english() ? en : ru;
+        return ru;
     }
 
-    private static Typeface variable(Context c, String asset, int weight, Typeface fallback) {
+    private static Typeface asset(Context c, String name, Typeface fallback) {
         try {
-            return new Typeface.Builder(c.getAssets(), asset)
-                    .setFontVariationSettings("'wght' " + weight).build();
+            return Typeface.createFromAsset(c.getAssets(), name);
         } catch (Throwable e) {
             return fallback;
         }
     }
 
+    private static Typeface variable(Context c, String name, int weight, Typeface fallback) {
+        try {
+            return new Typeface.Builder(c.getAssets(), name).setFontVariationSettings("'wght' " + weight).build();
+        } catch (Throwable e) {
+            return fallback;
+        }
+    }
+
+    /** Headings, tabs, buttons: Fira Sans Extra Condensed Bold (close to the logo's grotesque). */
     static Typeface head(Context c) {
-        if (oswaldBold == null) oswaldBold = variable(c, "fonts/oswald.ttf", 600, Typeface.create("sans-serif-condensed", Typeface.BOLD));
-        return oswaldBold;
+        if (headTf == null) headTf = asset(c, "fonts/fira_xcond_bold.ttf", Typeface.create("sans-serif-condensed", Typeface.BOLD));
+        return headTf;
     }
 
+    /** Secondary headings: Fira Sans Extra Condensed SemiBold. */
+    static Typeface semi(Context c) {
+        if (semiTf == null) semiTf = asset(c, "fonts/fira_xcond_semibold.ttf", Typeface.create("sans-serif-condensed", Typeface.NORMAL));
+        return semiTf;
+    }
+
+    /** Body text: Manrope, soft and very readable in Cyrillic. */
     static Typeface body(Context c) {
-        if (oswald == null) oswald = variable(c, "fonts/oswald.ttf", 400, Typeface.create("sans-serif-condensed", Typeface.NORMAL));
-        return oswald;
+        if (bodyTf == null) bodyTf = variable(c, "fonts/manrope.ttf", 500, Typeface.create("sans-serif", Typeface.NORMAL));
+        return bodyTf;
     }
 
-    static Typeface serif(Context c) {
-        if (playfair == null) playfair = variable(c, "fonts/playfair.ttf", 800, Typeface.create(Typeface.SERIF, Typeface.BOLD));
-        return playfair;
+    static Typeface bodyBold(Context c) {
+        if (bodyBoldTf == null) bodyBoldTf = variable(c, "fonts/manrope.ttf", 700, Typeface.create("sans-serif", Typeface.BOLD));
+        return bodyBoldTf;
     }
 
     static int dp(Context c, float v) {
@@ -97,19 +112,19 @@ final class Ui {
 
     /** Small spaced-out amber caption ("ПРОДОЛЖИТЬ ИСТОРИЮ"). */
     static TextView caption(Context c, String s) {
-        TextView v = text(c, s.toUpperCase(Locale.ROOT), 12, AMBER, head(c));
+        TextView v = text(c, s.toUpperCase(Locale.ROOT), 12, ACCENT, head(c));
         v.setLetterSpacing(0.22f);
         return v;
     }
 
     /** The big amber call to action. */
     static TextView primaryButton(Context c, String s, View.OnClickListener l) {
-        TextView b = text(c, s, 21, INK, head(c));
-        b.setLetterSpacing(0.12f);
+        TextView b = text(c, s, 22, INK, head(c));
+        b.setLetterSpacing(0.1f);
         b.setGravity(Gravity.CENTER);
-        GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0xFFF0B954, AMBER_DEEP});
+        GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0xFFE23A36, ACCENT_DEEP});
         g.setCornerRadius(dp(c, 6));
-        b.setBackground(ripple(g, 0x55FFFFFF));
+        b.setBackground(ripple(g, 0x44FFFFFF));
         b.setPadding(dp(c, 16), dp(c, 6), dp(c, 16), dp(c, 6));
         b.setOnClickListener(l);
         b.setClickable(true);
@@ -123,7 +138,7 @@ final class Ui {
         TextView b = text(c, s.toUpperCase(Locale.ROOT), 14, IVORY, head(c));
         b.setLetterSpacing(0.08f);
         b.setGravity(Gravity.CENTER);
-        b.setBackground(ripple(round(0x22FFFFFF, LINE, 1, 6, c), 0x33E0A63E));
+        b.setBackground(ripple(round(0x22FFFFFF, LINE, 1, 6, c), 0x40D9322F));
         b.setPadding(dp(c, 16), dp(c, 6), dp(c, 16), dp(c, 6));
         b.setOnClickListener(l);
         b.setClickable(true);

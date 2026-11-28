@@ -179,6 +179,24 @@ public class M2Test {
     }
 
     @Test
+    public void adreno8xxUsesSystemDriverAndMigrates() {
+        DeviceProfile a829 = DeviceProfile.forTest("SM8845", "Adreno (TM) 829", 12000, 4000, true);
+        assertEquals(829, a829.adrenoModel());
+        GameConfig cfg = new GameConfig(ctx);
+        cfg.ensureDefaults(a829);
+        assertEquals(1, cfg.get(GameConfig.DRIVER));
+        // An install made by 1.0.0: mode set, driver left on Auto, no defaults_v.
+        ctx.getSharedPreferences(GameConfig.PREFS, 0).edit().clear().putInt("graphics_mode", 1).putInt("vulkan_driver", 0).commit();
+        new GameConfig(ctx).ensureDefaults(a829);
+        assertEquals(1, new GameConfig(ctx).get(GameConfig.DRIVER));
+        // Adreno 6xx/7xx keep Auto (Turnip is fine there).
+        ctx.getSharedPreferences(GameConfig.PREFS, 0).edit().clear().commit();
+        GameConfig c2 = new GameConfig(ctx);
+        c2.ensureDefaults(DeviceProfile.forTest("SM7325", "Adreno (TM) 642L", 8000, 2400, true));
+        assertEquals(0, c2.get(GameConfig.DRIVER));
+    }
+
+    @Test
     public void tiersForCommonChips() {
         assertEquals(DeviceProfile.TIER_LOW, DeviceProfile.forTest("SM6225", "Adreno (TM) 610", 6000, 2400, true).tier);
         assertEquals(DeviceProfile.TIER_MID, DeviceProfile.forTest("SM7325", "Adreno (TM) 642L", 8000, 2400, true).tier);
@@ -238,6 +256,15 @@ public class M2Test {
                         assertTrue(where + " vs " + b.id + " d=" + Math.round(d), d >= a.r + b.r + 10);
                     }
                 }
+            }
+            ControlLayout.Element st = l.stick;
+            float top = st.cy - st.r * (ControlsOverlay.LOCK_DIST + ControlsOverlay.LOCK_R);
+            assertTrue("lock off screen on " + s[1], top > 0);
+            for (ControlLayout.Element b : l.all) {
+                if (b == st || (b.ctx & ControlLayout.FOOT) == 0) continue;
+                boolean inX = Math.abs(b.cx - st.cx) < st.r * 0.5f + b.r;
+                boolean inY = b.cy + b.r > top && b.cy - b.r < st.cy - st.r * 0.85f;
+                assertFalse("lock track covers " + b.id + " on " + s[1], inX && inY);
             }
         }
     }
@@ -311,9 +338,9 @@ public class M2Test {
         touch(o, MotionEvent.ACTION_MOVE, 0, sx, sy - r * 0.6f);
         assertTrue(SDLActivity.events.toString(), SDLActivity.events.contains("down 51"));
         assertFalse(SDLActivity.events.contains("down 59"));
-        touch(o, MotionEvent.ACTION_MOVE, 0, sx, sy - r * 1.5f);
+        touch(o, MotionEvent.ACTION_MOVE, 0, sx, sy - r * 1.2f);
         assertTrue(SDLActivity.events.toString(), SDLActivity.events.contains("down 59"));
-        touch(o, MotionEvent.ACTION_UP, 0, sx, sy - r * 1.5f);
+        touch(o, MotionEvent.ACTION_UP, 0, sx, sy - r * 1.2f);
         assertTrue(SDLActivity.events.contains("up 51"));
         assertTrue(SDLActivity.events.contains("up 59"));
 
@@ -356,6 +383,39 @@ public class M2Test {
         touch(o, MotionEvent.ACTION_UP, 0, 500, 300);
         assertTrue(SDLActivity.events.toString(), SDLActivity.events.contains("mouse b1 a0 abs 500,300"));
         assertTrue(SDLActivity.events.toString(), SDLActivity.events.contains("mouse b0 a1 abs 500,300"));
+    }
+
+    @Test
+    public void sprintLockKeepsRunningUntilStickTouched() throws Exception {
+        ActivityController<M2GameActivity> c = game();
+        View root = c.get().getWindow().getDecorView();
+        ControlsOverlay o = find(root, ControlsOverlay.class);
+        ShadowLooper.idleMainLooper(300, java.util.concurrent.TimeUnit.MILLISECONDS);
+        float sx = o.getWidth() * 0.15f, sy = o.getHeight() * 0.75f, r = o.layout.stick.r;
+        touch(o, MotionEvent.ACTION_DOWN, 0, sx, sy);
+        touch(o, MotionEvent.ACTION_MOVE, 0, sx, sy - r * 1.1f);
+        shot(root, "14_stick_sprint");
+        touch(o, MotionEvent.ACTION_MOVE, 0, sx + r * 0.1f, sy - r * ControlsOverlay.LOCK_DIST);
+        shot(root, "15_stick_lock_armed");
+        touch(o, MotionEvent.ACTION_UP, 0, sx + r * 0.1f, sy - r * ControlsOverlay.LOCK_DIST);
+        assertTrue(o.runLocked());
+        assertTrue(SDLActivity.events.toString(), SDLActivity.events.contains("down 51"));
+        assertTrue(SDLActivity.events.contains("down 59"));
+        assertFalse(SDLActivity.events.toString(), SDLActivity.events.contains("up 51"));
+        assertFalse(SDLActivity.events.contains("up 59"));
+        shot(root, "16_stick_locked");
+        // Touching the stick again ends the auto-run.
+        touch(o, MotionEvent.ACTION_DOWN, 0, sx, sy);
+        assertFalse(o.runLocked());
+        assertTrue(SDLActivity.events.contains("up 51"));
+        assertTrue(SDLActivity.events.contains("up 59"));
+        touch(o, MotionEvent.ACTION_UP, 0, sx, sy);
+        // Sideways at the edge does not sprint.
+        SDLActivity.events.clear();
+        touch(o, MotionEvent.ACTION_DOWN, 0, sx, sy);
+        touch(o, MotionEvent.ACTION_MOVE, 0, sx + r * 1.3f, sy);
+        assertFalse(SDLActivity.events.toString(), SDLActivity.events.contains("down 59"));
+        touch(o, MotionEvent.ACTION_UP, 0, sx + r * 1.3f, sy);
     }
 
     @Test

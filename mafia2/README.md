@@ -1,4 +1,4 @@
-# Mafia II Droid
+# ReMaf2 (Mafia II Droid)
 
 Лаунчер, сенсорное управление, редактор раскладки и профили графики для Android-порта
 **Mafia II** от **VinTeRuS** (`com.mafia2re.game`, patreon.com/cw/VinTeRuS).
@@ -11,14 +11,16 @@ D3D9 → Vulkan через DXVK, Turnip для Adreno. Это нативный �
 ![launcher](docs/launcher.jpg)
 
 ## Что внутри
-- **Лаунчер** (`LauncherActivity`): выбрал папку → игра стартует. Вкладки «Играть / Настройки /
-  Управление / Файлы игры / О порте», режимы «Качество / Баланс / Скорость», фон и иконка
-  нарисованы кодом (без арта игры), шрифты Oswald + Playfair Display (OFL).
+- **Лаунчер** (`LauncherActivity`, только русский): выбрал папку → игра стартует. Вкладки
+  «Играть / Настройки / Управление / Файлы игры / О порте», режимы «Качество / Баланс /
+  Скорость», арты Mafia II на фоне (`assets/img`, смена по вкладкам), логотип и иконка ReMaf2,
+  Telegram @rommy_apps, «Отправить лог». Шрифты Manrope + Fira Sans Extra Condensed (OFL).
 - **Профиль устройства** (`DeviceProfile`): чип, GPU (GL_RENDERER), RAM, частота, ARMv8.2
   (LSE + RCpc), Vulkan → класс телефона → пресет. Helio G85/Mali-G52 по умолчанию: 540p,
   низкие текстуры, 30 FPS.
-- **Управление** (`ControlsOverlay`, `ControlLayout`, `Glyphs`): плавающий стик с бегом от
-  края, обзор свайпом и с кнопки огня, педали в машине, гироскоп, режим меню (абсолютные
+- **Управление** (`ControlsOverlay`, `ControlLayout`, `Glyphs`): стик как в шутерах (52dp;
+  вперёд до упора — бег, дотянуть до замка — автобег до следующего касания), иконки
+  game-icons.net (CC BY 3.0, `assets/ICONS-CREDITS.txt`), обзор свайпом и с кнопки огня, педали в машине, гироскоп, режим меню (абсолютные
   клики), прятание при геймпаде, счётчик FPS. Заменяет `TouchControls` порта внутри
   `M2GameActivity` (наследник `GameActivity`: библиотеки, окружение и титр автора остаются).
 - **Редактор раскладки** (`EditorChrome`): три набора (пешком / за рулём / меню),
@@ -27,11 +29,12 @@ D3D9 → Vulkan через DXVK, Turnip для Adreno. Это нативный �
 
 ![controls](docs/controls_foot.jpg)
 ![editor](docs/editor.jpg)
+![stick lock](docs/stick_lock.jpg)
 
 ## Сборка
 ```bash
 cp "MAFIA 2 BY ROMMY.apk" mafia2/orig/m2.apk      # оригинальный APK порта (git-ignored)
-python3 mafia2/build_m2.py                          # -> mafia2/output/Mafia II Droid <ver>.apk
+python3 mafia2/build_m2.py                          # -> mafia2/output/ReMaf2 <ver>.apk
 cd mafia2/tests/robo && gradle testDebugUnitTest    # тесты + скриншоты в mafia2/build/shots
 ```
 Нужны Android SDK (build-tools 36, platform 36), JDK 17+, openssl. Ключи подписи —
@@ -54,3 +57,10 @@ cd mafia2/tests/robo && gradle testDebugUnitTest    # тесты + скринш�
   для Cortex-A53 (ARMv8.0) нужен отдельный `libmain_v80.so` (LDAPR→LDAR + трамплины LSE) —
   пока не сделан, лаунчер честно предупреждает.
 - GPU: Vulkan 1.1. Adreno — Turnip/системный (авто), Mali/Xclipse/PowerVR — системный.
+
+## Ресурсы
+- `tools/make_glyph_drawables.py <game-icons repo> res assets/ICONS-CREDITS.txt` — иконки кнопок
+  (VectorDrawable). `m2_ic_crouch.xml` (иконка автора) и `m2_ic_telegram.xml` нарисованы вручную.
+- `tools/make_logo_assets.py <logo.jpg> assets/img` — прозрачные логотипы ReMaf2.
+- `tools/make_icons.py res assets/img/logo_full.png` — иконка приложения.
+- Adreno 8xx: по умолчанию системный драйвер Vulkan (Turnip на этих GPU давал полосы/мусор).

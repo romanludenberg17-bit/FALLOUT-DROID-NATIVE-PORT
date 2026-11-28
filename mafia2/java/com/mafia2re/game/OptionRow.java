@@ -36,13 +36,13 @@ final class OptionRow {
             int cur = cfg.get(o);
             for (int i = 0; i < views.length; i++) {
                 boolean on = o.values[i] == cur;
-                views[i].setTextColor(on ? Ui.INK : 0xFFCFC4B2);
-                views[i].setBackground(Ui.ripple(on ? Ui.round(Ui.AMBER, 0, 0, 5, c) : Ui.round(0, 0, 0, 5, c), 0x33E0A63E));
+                views[i].setTextColor(on ? Ui.INK : 0xFFD4D0CA);
+                views[i].setBackground(Ui.ripple(on ? Ui.round(Ui.ACCENT, 0, 0, 5, c) : Ui.round(0, 0, 0, 5, c), 0x40D9322F));
             }
         };
         for (int i = 0; i < o.values.length; i++) {
             final int val = o.values[i];
-            TextView p = Ui.text(c, o.name(i), 15, 0xFFCFC4B2, Ui.body(c));
+            TextView p = Ui.text(c, o.name(i), 15, 0xFFD4D0CA, Ui.body(c));
             p.setGravity(Gravity.CENTER);
             p.setMinWidth(Ui.dp(c, 50));
             p.setPadding(Ui.dp(c, 9), Ui.dp(c, 7), Ui.dp(c, 9), Ui.dp(c, 7));

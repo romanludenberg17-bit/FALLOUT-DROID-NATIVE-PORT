@@ -92,7 +92,7 @@ final class ControlLayout {
     ControlLayout() {
         final boolean R = true, L = false, B = true, T = false;
         // Shared.
-        stick = add("stick", "Стик", "Stick", "", Kind.STICK, 0, FOOT | CAR, L, 150, B, 140, 68);
+        stick = add("stick", "Стик", "Stick", "", Kind.STICK, 0, FOOT | CAR, L, 128, B, 116, 52);
         add("pause", "Пауза", "Pause", "pause", Kind.PAUSE, K_ESC, FOOT | CAR, L, 44, T, 42, 22);
         add("map", "Карта", "Map", "map", Kind.KEY, K_M, FOOT | CAR, L, 102, T, 42, 22);
         add("gear", "Меню порта", "Port menu", "gear", Kind.GEAR, 0, FOOT | CAR | MENU, R, 42, T, 42, 21);
@@ -108,7 +108,7 @@ final class ControlLayout {
         add("weapon", "Оружие", "Weapon", "weapon", Kind.KEY, K_WEAPON, FOOT, R, 300, B, 264, 22);
         add("grenade", "Граната", "Grenade", "grenade", Kind.KEY, K_1, FOOT, R, 384, B, 236, 22);
         add("car_in", "Сесть в машину", "Enter car", "car_in", Kind.KEY, K_F, FOOT, R, 388, B, 112, 25);
-        add("run", "Бег", "Sprint", "run", Kind.RUN, K_SHIFT, FOOT, L, 290, B, 222, 25);
+        add("run", "Бег", "Sprint", "run", Kind.RUN, K_SHIFT, FOOT, L, 250, B, 196, 24);
         // In the car: pedals under the right thumb.
         add("gas", "Газ", "Gas", "gas", Kind.KEY, K_W, CAR, R, 78, B, 124, 46);
         add("brake", "Тормоз", "Brake", "brake", Kind.KEY, K_S, CAR, R, 192, B, 82, 38);

@@ -70,6 +70,19 @@ final class DeviceProfile {
         return "adreno".equals(gpuFamily);
     }
 
+    /** 650, 740, 829...; 0 when not an Adreno or unknown. */
+    int adrenoModel() {
+        return isAdreno() ? Math.max(0, num(gpu.toLowerCase(Locale.ROOT), "adreno[^0-9]*([0-9]{3})")) : 0;
+    }
+
+    /**
+     * Turnip (Mesa) support for Adreno 8xx is young: on these GPUs the frames come out as
+     * striped garbage, so the system Vulkan driver is the safe default there.
+     */
+    boolean preferSystemDriver() {
+        return !isAdreno() || adrenoModel() >= 800;
+    }
+
     private static int num(String s, String regex) {
         Matcher m = Pattern.compile(regex, Pattern.CASE_INSENSITIVE).matcher(s);
         if (!m.find()) return -1;

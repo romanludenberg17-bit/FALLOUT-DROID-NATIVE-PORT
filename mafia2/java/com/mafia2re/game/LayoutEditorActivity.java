@@ -21,7 +21,7 @@ public class LayoutEditorActivity extends Activity {
         }
         hideBars();
         FrameLayout root = new FrameLayout(this);
-        CityBackdrop bg = new CityBackdrop(this);
+        ArtBackdrop bg = new ArtBackdrop(this, "img/keyart.jpg");
         bg.setAnimated(false);
         root.addView(bg, new FrameLayout.LayoutParams(-1, -1));
         View dim = new View(this);
