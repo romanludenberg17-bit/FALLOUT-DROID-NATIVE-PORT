@@ -12,15 +12,15 @@ import glob, hashlib, os, shutil, struct, subprocess, sys, tempfile, zipfile, zl
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_from_4nmp as base
 
-base.VERSION_CODE = 636
-base.VERSION_NAME = "1.3.6"
+base.VERSION_CODE = 637
+base.VERSION_NAME = "1.3.7"
 base.LABEL = "4NMP"  # the project's name
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 def patch_dex(dex):
     d = bytearray(dex)
     for old, new in ((bytes.fromhex("1306020c"), bytes.fromhex("1306040c")),   # bridge -> 3076
-                     (b"nmp_v504_clean", b"nmp_v633_clean"),                  # args.txt reset once (rollback)
+                     (b"nmp_v504_clean", b"nmp_v637_clean"),                  # args.txt reset once (Mali profile fixes)
                      # writeCoopArgs: skipping the intro left the game on a black screen
                      # (and the line stayed in args.txt for every later start)
                      (b"\n--gta4_skip_intro=true\n", b"\n#-gta4_skip_intro=true\n")):
@@ -69,6 +69,27 @@ MINI_PATCH = [
     "--gta4_native_environment_reflection_interval=2",
 ]
 
+# Mali / Helio G99 profiles. Physics runs on the CPU and is fine on Adreno, so
+# the CPU-side switches these profiles alone changed go back to the Adreno
+# profile's values; the renderer becomes "native" (gta4-mobile) and shaders
+# keep FP32 (half precision broke the shadow-map depth compare).
+MALI_DROP = ("--protect_zero=", "--gta4_fps_guard=", "--gta4_model_lod_distance_scale=",
+             "--gta4_native_fs_relaxed_precision=", "--gta4_shadow_map_base_size=", "--gpu_plugin=")
+MALI_PATCH = [
+    "# --- 4NMP Mali / G99 fixes ---",
+    "# Native renderer (launcher: Rendering -> Renderer -> Native).",
+    "--gpu_plugin=gta4-mobile",
+    "# Physics: same CPU-side setup as the Adreno profile (no writable zero page,",
+    "# no 30 FPS guard cuts), stabilized physics steps on frame-time spikes.",
+    "--gta4_fps_guard=0",
+    "--gta4_clamp_physics_timestep=true",
+    "# World and its collision stream in farther: no falling through the map at speed.",
+    "--gta4_model_lod_distance_scale=0.80",
+    "# Shadows: FP32 depth compare and a 256 shadow map (no blocky shadow acne).",
+    "--gta4_native_fs_relaxed_precision=false",
+    "--gta4_shadow_map_base_size=256",
+]
+
 def patch_args(text, name):
     lines = text.splitlines()
     extra = ["", "--gta4_lan_discovery_port=3076"]
@@ -76,6 +97,9 @@ def patch_args(text, name):
         keys = {l.split("=")[0] for l in MINI_PATCH if l.startswith("--")}
         lines = [l for l in lines if l.split("=")[0] not in keys]
         extra += [""] + MINI_PATCH
+    elif name in ("assets/default_args_g99.txt", "assets/default_args_mali.txt"):
+        lines = [l for l in lines if not l.startswith(MALI_DROP)]
+        extra += [""] + MALI_PATCH
     return "\n".join(lines + extra + [""]).encode()
 
 SDK = os.environ.get("ANDROID_SDK_ROOT", "/opt/android-sdk")

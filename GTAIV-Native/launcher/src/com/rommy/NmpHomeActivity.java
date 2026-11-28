@@ -46,7 +46,34 @@ public class NmpHomeActivity extends NmpLauncherActivity {
   @Override
   public void onCreate(android.os.Bundle state) {
     installBundledDrivers();  // before the launcher builds its driver list
+    nativeRendererOnMali();
     super.onCreate(state);
+  }
+
+  /**
+   * Mali GPUs (MediaTek, Google Tensor, Unisoc...): the launcher's "Native"
+   * renderer (gta4-mobile) once, also for users who kept the old default.
+   */
+  private void nativeRendererOnMali() {
+    try {
+      SharedPreferences p = getSharedPreferences(PREFS, MODE_PRIVATE);
+      if (p.getBoolean("mali_native_v637", false)) return;
+      p.edit().putBoolean("mali_native_v637", true).apply();
+      String vendor = "", model = "";
+      if (Build.VERSION.SDK_INT >= 31) {
+        vendor = Build.SOC_MANUFACTURER == null ? "" : Build.SOC_MANUFACTURER.toLowerCase(Locale.ROOT);
+        model = Build.SOC_MODEL == null ? "" : Build.SOC_MODEL.toLowerCase(Locale.ROOT);
+      }
+      String hw = Build.HARDWARE == null ? "" : Build.HARDWARE.toLowerCase(Locale.ROOT);
+      boolean mali = vendor.contains("mediatek") || vendor.contains("google") || vendor.contains("unisoc")
+          || vendor.contains("spreadtrum") || model.startsWith("mt") || model.startsWith("tensor")
+          || hw.startsWith("mt") || hw.contains("mediatek");
+      if (!mali) return;
+      getSharedPreferences("launch_renderer", MODE_PRIVATE).edit().putString("mode", "native").apply();
+      Log.i(TAG, "Mali GPU: launcher renderer set to native");
+    } catch (Throwable t) {
+      Log.w(TAG, "renderer migration skipped", t);
+    }
   }
 
   /**

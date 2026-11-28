@@ -107,9 +107,9 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .tip b { font-family: "Oswald"; font-weight: 600; letter-spacing: .14em; color: var(--accent); font-size: calc(var(--u)*2.2); }
 .tip span { transition: opacity .5s; }
 .bar { position: fixed; left: 0; right: 0; bottom: 0; height: calc(var(--u)*11); z-index: 4; background: var(--bar);
-  border-top: 1px solid var(--line); display: flex; align-items: center; padding: 0 4.2vw; gap: 3.4vw; }
+  border-top: 1px solid var(--line); display: flex; align-items: center; padding: 0 4.2vw; gap: 2.8vw; }
 .bar button { position: relative; height: 100%; font-family: "Oswald"; font-weight: 600; letter-spacing: .08em;
-  font-size: calc(var(--u)*3.6); color: #D0D0D0; text-transform: uppercase; }
+  font-size: calc(var(--u)*3.4); color: #D0D0D0; text-transform: uppercase; white-space: nowrap; }
 .bar button.main { color: var(--accent); }
 .bar button::after { content: ""; position: absolute; left: 0; right: 0; bottom: calc(var(--u)*2.2); height: 3px;
   background: var(--accent); transform: scaleX(0); transition: transform .2s; }
@@ -118,6 +118,14 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .bar .ver { font-family: "Oswald"; font-weight: 600; letter-spacing: .1em; color: var(--mute); font-size: calc(var(--u)*2.6); }
 .bar .new { position: absolute; top: calc(var(--u)*2.6); right: calc(var(--u)*-1.6); width: calc(var(--u)*1.3);
   height: calc(var(--u)*1.3); border-radius: 50%; background: var(--accent); }
+
+/* ---------- cheats ---------- */
+.cheats { display: grid; grid-template-columns: repeat(2, 1fr); gap: calc(var(--u)*.8) calc(var(--u)*3);
+  margin: calc(var(--u)*2) 0; max-height: calc(var(--u)*52); overflow-y: auto; }
+.cheat { display: flex; justify-content: space-between; align-items: baseline; gap: calc(var(--u)*2);
+  padding: calc(var(--u)*1) 0; border-bottom: 1px solid var(--line); font-size: calc(var(--u)*2.6); color: var(--dim); }
+.cheat b { font-family: "Oswald"; font-weight: 600; letter-spacing: .06em; color: var(--accent); font-size: calc(var(--u)*3); white-space: nowrap; }
+.sheet .hint { color: var(--mute); font-size: calc(var(--u)*2.3); line-height: 1.4; }
 
 /* ---------- what's new ---------- */
 .sheet { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.6); display: none; align-items: center; justify-content: center; }
@@ -181,15 +189,27 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   <button data-a="mp">Мультиплеер</button>
   <button data-a="settings">Настройки</button>
   <button data-a="files">Файлы игры</button>
+  <button id="cheatBtn">Читы</button>
   <button id="newBtn">Что нового<span class="new" id="newDot"></span></button>
   <span class="sp"></span>
   <span class="verbox"><span class="ver" id="ver">4NMP</span><span class="legal">Фанатский проект · нужна своя копия GTA IV</span></span>
+</div>
+
+<div class="sheet" id="cheatSheet">
+  <div class="box">
+    <h3>Читы</h3>
+    <p class="hint">В игре откройте телефон Нико, наберите номер и нажмите вызов. Читы работают в любой момент, но игра запоминает их в статистике.</p>
+    <div class="cheats" id="cheatList"></div>
+    <div class="row"><button class="btn2 acc" id="cheatOk">Закрыть</button></div>
+  </div>
 </div>
 
 <div class="sheet" id="sheet">
   <div class="box">
     <h3 id="newTitle">Что нового</h3>
     <ul>
+      <li><b>Mali и Helio G99</b>: «Нативный» рендер по умолчанию, исправлены тени и физика (машины больше не улетают, нет провалов под карту).</li>
+      <li><b>Читы</b>: все номера для телефона — кнопка «Читы» внизу.</li>
       <li><b>Драйвер Turnip из коробки</b>: Настройки → Драйвер Vulkan → DD-Turnip-Emu. Кэш шейдеров — меньше фризов со второго запуска.</li>
       <li><b>Счётчик времени в игре</b> на главном экране.</li>
       <li><b>Новое главное меню</b>: продолжение с последнего сохранения и выбор режима графики.</li>
@@ -263,6 +283,24 @@ $("sheetOk").onclick = function () {
 };
 try { if (localStorage.getItem(seenKey())) $("newDot").style.display = "none"; } catch (e) {}
 
+// cheats (GTA IV phone numbers)
+var CHEATS = [
+  ["482-555-0100", "Здоровье, броня, патроны"], ["362-555-0100", "Броня"],
+  ["486-555-0150", "Оружие (набор 1)"], ["486-555-0100", "Оружие (набор 2)"],
+  ["267-555-0100", "Снять розыск"], ["267-555-0150", "Повысить розыск"],
+  ["468-555-0100", "Сменить погоду"], ["948-555-0100", "Название песни"],
+  ["359-555-0100", "Вертолёт Annihilator"], ["938-555-0100", "Катер Jetmax"],
+  ["227-555-0100", "FIB Buffalo"], ["227-555-0175", "Comet"],
+  ["227-555-0147", "Turismo"], ["227-555-0168", "Super GT"],
+  ["227-555-0142", "Cognoscenti"], ["625-555-0100", "Мотоцикл NRG-900"],
+  ["625-555-0150", "Мотоцикл Sanchez"]
+];
+$("cheatList").innerHTML = CHEATS.map(function (c) {
+  return '<div class="cheat"><span>' + c[1] + '</span><b>' + c[0] + '</b></div>';
+}).join("");
+$("cheatBtn").onclick = function () { $("cheatSheet").classList.add("open"); };
+$("cheatOk").onclick = function () { $("cheatSheet").classList.remove("open"); };
+
 function ago(ms) {
   var d = new Date(ms), now = new Date(), day = 864e5;
   var t = ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
@@ -301,7 +339,7 @@ window.nmpInit = function (d) {
     $("saveMeta").textContent = d.ready === false ? "Сначала укажите файлы игры: «Файлы игры» внизу." : "Сохранений пока нет: начните новую игру.";
   }
 };
-if (/[?&]demo/.test(location.search)) nmpInit({ version: "1.3.5", device: "Snapdragon 8 Gen 5", thermal: 0, mode: "balance", playtime: 66120,
+if (/[?&]demo/.test(location.search)) nmpInit({ version: "1.3.7", device: "Snapdragon 8 Gen 5", thermal: 0, mode: "balance", playtime: 66120,
   save: { slot: "№ 12", time: Date.now() - 864e5 - 3600e3, count: 2 } });
 </script>
 </body>
